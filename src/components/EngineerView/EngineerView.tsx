@@ -4,9 +4,10 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useConnection } from '../../store/ConnectionContext';
 import { useChat } from '../../store/ChatContext';
+import { usePreview } from '../../store/PreviewContext';
 import { sendMessage, getApiLogs, clearApiLogs, subscribeToApiLogs } from '../../services/claude';
 import { trackMessage } from '../../services/analytics';
-import type { Message, ApiLogEntry, ImageAttachment, ToolDefinition, ToolUseBlock } from '../../types';
+import type { Message, ApiLogEntry, ImageAttachment, ToolDefinition, ToolUseBlock, Artifact } from '../../types';
 import { CLAUDE_MODELS } from '../../types';
 import styles from './EngineerView.module.css';
 
@@ -1126,33 +1127,585 @@ function ValidationPanel() {
 
 // ─── Main EngineerView ────────────────────────────────────────────────────────
 
+// ─── Right Panel Workspace (Multi-tab like Manus) ────────────────────────────
+
+type RightTab = 'code' | 'files' | 'data' | 'debug' | 'output';
+
+interface BridgeHealth {
+  status: string;
+  version: string;
+  claude_code: boolean;
+  claude_path: string;
+  meta_internal: boolean;
+  uptime?: number;
+  requests_served?: number;
+  validation?: boolean;
+}
+
+// ─── Code Tab: Live code/HTML preview from artifacts ─────────────────────────
+
+function CodeTab() {
+  const { artifacts, activeArtifactId, setActiveArtifact } = usePreview();
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const activeArtifact = artifacts.find(a => a.id === activeArtifactId);
+
+  const handleCopy = async (content: string, id: string) => {
+    await navigator.clipboard.writeText(content);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  useEffect(() => {
+    if (activeArtifact?.type === 'html' && iframeRef.current) {
+      const doc = iframeRef.current.contentDocument;
+      if (doc) { doc.open(); doc.write(activeArtifact.content); doc.close(); }
+    }
+  }, [activeArtifact]);
+
+  if (artifacts.length === 0) {
+    return (
+      <div className={styles.rpEmpty}>
+        <div className={styles.rpEmptyIcon}>{'</>'}</div>
+        <div className={styles.rpEmptyTitle}>Code Preview</div>
+        <div className={styles.rpEmptyDesc}>
+          Code blocks and HTML from Claude responses will appear here in real-time.
+          Ask Claude to write code to get started.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={styles.rpCodeTab}>
+      {artifacts.length > 1 && (
+        <div className={styles.rpCodeTabs}>
+          {artifacts.map((a, i) => (
+            <button
+              key={a.id}
+              className={`${styles.rpCodeTabBtn} ${a.id === activeArtifactId ? styles.rpCodeTabActive : ''}`}
+              onClick={() => setActiveArtifact(a.id)}
+            >
+              {a.title || a.language || `Artifact ${i + 1}`}
+            </button>
+          ))}
+        </div>
+      )}
+      {activeArtifact && (
+        <div className={styles.rpCodeContent}>
+          <div className={styles.rpCodeHeader}>
+            <span className={styles.rpCodeLang}>
+              {activeArtifact.language || activeArtifact.type}
+            </span>
+            <div className={styles.rpCodeActions}>
+              <button className={styles.rpSmallBtn} onClick={() => handleCopy(activeArtifact.content, activeArtifact.id)}>
+                {copiedId === activeArtifact.id ? 'Copied!' : 'Copy'}
+              </button>
+              {activeArtifact.type === 'html' && (
+                <button className={styles.rpSmallBtn} onClick={() => {
+                  const blob = new Blob([activeArtifact.content], { type: 'text/html' });
+                  window.open(URL.createObjectURL(blob), '_blank');
+                }}>Open ↗</button>
+              )}
+            </div>
+          </div>
+          {activeArtifact.type === 'html' ? (
+            <iframe ref={iframeRef} className={styles.rpIframe} sandbox="allow-scripts allow-same-origin" title="Preview" />
+          ) : (
+            <pre className={styles.rpCodeBlock}>
+              <div className={styles.rpCodeLines}>
+                {activeArtifact.content.split('\n').map((line, i) => (
+                  <div key={i} className={styles.rpCodeLine}>
+                    <span className={styles.rpLineNum}>{i + 1}</span>
+                    <code>{line}</code>
+                  </div>
+                ))}
+              </div>
+            </pre>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Files Tab: Artifact file browser ────────────────────────────────────────
+
+function FilesTab() {
+  const { artifacts } = usePreview();
+  const { conversations, activeConversationId } = useChat();
+  const activeConvo = conversations.find(c => c.id === activeConversationId);
+  const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  // Collect all code artifacts from conversation messages
+  const allArtifacts = [...artifacts];
+  const msgArtifacts = activeConvo?.messages
+    ?.filter(m => m.artifacts && m.artifacts.length > 0)
+    .flatMap(m => m.artifacts ?? []) ?? [];
+  // Deduplicate by id
+  const seen = new Set(allArtifacts.map(a => a.id));
+  for (const a of msgArtifacts) {
+    if (!seen.has(a.id)) { allArtifacts.push(a); seen.add(a.id); }
+  }
+
+  const selected = allArtifacts.find(a => a.id === selectedFile);
+
+  const handleCopy = async (content: string, id: string) => {
+    await navigator.clipboard.writeText(content);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const handleDownload = (artifact: Artifact) => {
+    const ext = artifact.language === 'python' ? '.py'
+      : artifact.language === 'javascript' ? '.js'
+      : artifact.language === 'typescript' ? '.ts'
+      : artifact.language === 'html' ? '.html'
+      : artifact.language === 'css' ? '.css'
+      : artifact.language === 'json' ? '.json'
+      : artifact.type === 'markdown' ? '.md'
+      : '.txt';
+    const filename = artifact.filename || `${artifact.title || 'file'}${ext}`;
+    const blob = new Blob([artifact.content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  if (allArtifacts.length === 0) {
+    return (
+      <div className={styles.rpEmpty}>
+        <div className={styles.rpEmptyIcon}>📁</div>
+        <div className={styles.rpEmptyTitle}>Files</div>
+        <div className={styles.rpEmptyDesc}>
+          Generated files, code snippets, and documents will be listed here.
+          They are extracted from Claude's responses automatically.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={styles.rpFilesTab}>
+      <div className={styles.rpFileList}>
+        <div className={styles.rpFileListHeader}>
+          <span>{allArtifacts.length} file{allArtifacts.length !== 1 ? 's' : ''}</span>
+        </div>
+        {allArtifacts.map((a, i) => {
+          const icon = a.type === 'code' ? '📄' : a.type === 'html' ? '🌐' : a.type === 'markdown' ? '📝' : '📎';
+          return (
+            <button
+              key={a.id}
+              className={`${styles.rpFileItem} ${selectedFile === a.id ? styles.rpFileItemActive : ''}`}
+              onClick={() => setSelectedFile(a.id)}
+            >
+              <span className={styles.rpFileIcon}>{icon}</span>
+              <div className={styles.rpFileInfo}>
+                <span className={styles.rpFileName}>{a.title || a.filename || `File ${i + 1}`}</span>
+                <span className={styles.rpFileMeta}>
+                  {a.language || a.type} · {a.content.split('\n').length} lines
+                </span>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+      {selected && (
+        <div className={styles.rpFilePreview}>
+          <div className={styles.rpFilePreviewHeader}>
+            <span>{selected.title || selected.filename || 'File'}</span>
+            <div className={styles.rpCodeActions}>
+              <button className={styles.rpSmallBtn} onClick={() => handleCopy(selected.content, selected.id)}>
+                {copiedId === selected.id ? 'Copied!' : 'Copy'}
+              </button>
+              <button className={styles.rpSmallBtn} onClick={() => handleDownload(selected)}>Download</button>
+            </div>
+          </div>
+          <pre className={styles.rpCodeBlock}>
+            <div className={styles.rpCodeLines}>
+              {selected.content.split('\n').map((line, i) => (
+                <div key={i} className={styles.rpCodeLine}>
+                  <span className={styles.rpLineNum}>{i + 1}</span>
+                  <code>{line}</code>
+                </div>
+              ))}
+            </div>
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Data Tab: Session metrics and token usage ───────────────────────────────
+
+function DataTab() {
+  const { conversations, activeConversationId } = useChat();
+  const activeConvo = conversations.find(c => c.id === activeConversationId);
+  const [sessionStart] = useState(() => new Date());
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    const interval = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const msgs = activeConvo?.messages ?? [];
+  const assistantMsgs = msgs.filter(m => m.role === 'assistant');
+  const totalTokensIn = msgs.reduce((s, m) => s + (m.inputTokens ?? 0), 0);
+  const totalTokensOut = msgs.reduce((s, m) => s + (m.outputTokens ?? 0), 0);
+  const totalTokens = totalTokensIn + totalTokensOut;
+
+  // Performance metrics
+  const ttfts = assistantMsgs.filter(m => m.ttft).map(m => m.ttft!);
+  const avgTTFT = ttfts.length > 0 ? Math.round(ttfts.reduce((a, b) => a + b, 0) / ttfts.length) : null;
+  const minTTFT = ttfts.length > 0 ? Math.min(...ttfts) : null;
+  const maxTTFT = ttfts.length > 0 ? Math.max(...ttfts) : null;
+
+  const totalTimes = assistantMsgs.filter(m => m.totalTime).map(m => m.totalTime!);
+  const avgResponseTime = totalTimes.length > 0 ? Math.round(totalTimes.reduce((a, b) => a + b, 0) / totalTimes.length) : null;
+
+  // Token usage per message (bar chart data)
+  const tokenBars = assistantMsgs.slice(-10).map((m, i) => ({
+    label: `#${i + 1}`,
+    tokensIn: m.inputTokens ?? 0,
+    tokensOut: m.outputTokens ?? 0,
+  }));
+  const maxBar = Math.max(...tokenBars.map(b => b.tokensIn + b.tokensOut), 1);
+
+  const elapsed = Math.floor((now.getTime() - sessionStart.getTime()) / 1000);
+  const hours = Math.floor(elapsed / 3600);
+  const mins = Math.floor((elapsed % 3600) / 60);
+  const secs = elapsed % 60;
+  const sessionTime = hours > 0 ? `${hours}h ${mins}m ${secs}s` : mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+
+  return (
+    <div className={styles.rpDataTab}>
+      {/* Session Overview */}
+      <div className={styles.rpDataSection}>
+        <div className={styles.rpDataSectionTitle}>Session Overview</div>
+        <div className={styles.rpDataGrid}>
+          <div className={styles.rpDataCard}>
+            <div className={styles.rpDataCardValue}>{sessionTime}</div>
+            <div className={styles.rpDataCardLabel}>Duration</div>
+          </div>
+          <div className={styles.rpDataCard}>
+            <div className={styles.rpDataCardValue}>{conversations.length}</div>
+            <div className={styles.rpDataCardLabel}>Conversations</div>
+          </div>
+          <div className={styles.rpDataCard}>
+            <div className={styles.rpDataCardValue}>{msgs.length}</div>
+            <div className={styles.rpDataCardLabel}>Messages</div>
+          </div>
+          <div className={styles.rpDataCard}>
+            <div className={styles.rpDataCardValue}>{totalTokens > 0 ? (totalTokens > 1000 ? `${(totalTokens / 1000).toFixed(1)}k` : totalTokens) : '—'}</div>
+            <div className={styles.rpDataCardLabel}>Total Tokens</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Token Breakdown */}
+      {totalTokens > 0 && (
+        <div className={styles.rpDataSection}>
+          <div className={styles.rpDataSectionTitle}>Token Usage</div>
+          <div className={styles.rpTokenBar}>
+            <div className={styles.rpTokenBarFill} style={{ width: `${totalTokensIn / totalTokens * 100}%` }}>
+              <span>Input: {totalTokensIn.toLocaleString()}</span>
+            </div>
+            <div className={styles.rpTokenBarFillOut} style={{ width: `${totalTokensOut / totalTokens * 100}%` }}>
+              <span>Output: {totalTokensOut.toLocaleString()}</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Performance */}
+      <div className={styles.rpDataSection}>
+        <div className={styles.rpDataSectionTitle}>Performance</div>
+        <div className={styles.rpDataRows}>
+          <div className={styles.rpDataRow}>
+            <span>Avg TTFT</span>
+            <span className={styles.rpDataRowValue}>{avgTTFT !== null ? (avgTTFT > 1000 ? `${(avgTTFT / 1000).toFixed(1)}s` : `${avgTTFT}ms`) : '—'}</span>
+          </div>
+          <div className={styles.rpDataRow}>
+            <span>Min / Max TTFT</span>
+            <span className={styles.rpDataRowValue}>
+              {minTTFT !== null ? `${minTTFT > 1000 ? (minTTFT / 1000).toFixed(1) + 's' : minTTFT + 'ms'}` : '—'}
+              {' / '}
+              {maxTTFT !== null ? `${maxTTFT > 1000 ? (maxTTFT / 1000).toFixed(1) + 's' : maxTTFT + 'ms'}` : '—'}
+            </span>
+          </div>
+          <div className={styles.rpDataRow}>
+            <span>Avg Response</span>
+            <span className={styles.rpDataRowValue}>{avgResponseTime !== null ? (avgResponseTime > 1000 ? `${(avgResponseTime / 1000).toFixed(1)}s` : `${avgResponseTime}ms`) : '—'}</span>
+          </div>
+          <div className={styles.rpDataRow}>
+            <span>Model</span>
+            <span className={styles.rpDataRowValue}>{activeConvo?.model || 'default'}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Token Usage Chart */}
+      {tokenBars.length > 0 && tokenBars.some(b => b.tokensIn + b.tokensOut > 0) && (
+        <div className={styles.rpDataSection}>
+          <div className={styles.rpDataSectionTitle}>Tokens per Response (last 10)</div>
+          <div className={styles.rpChart}>
+            {tokenBars.map((bar, i) => (
+              <div key={i} className={styles.rpChartBar}>
+                <div className={styles.rpChartBarStack} style={{ height: `${((bar.tokensIn + bar.tokensOut) / maxBar) * 100}%` }}>
+                  <div className={styles.rpChartBarIn} style={{ flex: bar.tokensIn }} />
+                  <div className={styles.rpChartBarOut} style={{ flex: bar.tokensOut }} />
+                </div>
+                <span className={styles.rpChartLabel}>{bar.label}</span>
+              </div>
+            ))}
+          </div>
+          <div className={styles.rpChartLegend}>
+            <span><span className={styles.rpLegendDotIn} /> Input</span>
+            <span><span className={styles.rpLegendDotOut} /> Output</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Debug Tab: Bridge status, connection info, quick reference ──────────────
+
+function DebugTab() {
+  const { activeConnection } = useConnection();
+  const connected = activeConnection?.status === 'connected';
+  const endpoint = activeConnection?.baseUrl || 'http://localhost:8087';
+  const [bridge, setBridge] = useState<BridgeHealth | null>(null);
+  const [bridgeError, setBridgeError] = useState(false);
+
+  useEffect(() => {
+    const check = async () => {
+      try {
+        const ctrl = new AbortController();
+        setTimeout(() => ctrl.abort(), 3000);
+        const res = await fetch(`${endpoint}/health`, { signal: ctrl.signal });
+        if (res.ok) { setBridge(await res.json()); setBridgeError(false); }
+        else { setBridgeError(true); }
+      } catch { setBridgeError(true); }
+    };
+    check();
+    const interval = setInterval(check, 15000);
+    return () => clearInterval(interval);
+  }, [endpoint]);
+
+  return (
+    <div className={styles.rpDebugTab}>
+      {/* Bridge Status */}
+      <div className={styles.rpDebugSection}>
+        <div className={styles.rpDebugSectionTitle}>Bridge Connection</div>
+        <div className={styles.rpDebugRow}>
+          <span>Status</span>
+          <span className={bridgeError ? styles.rpDebugError : styles.rpDebugSuccess}>
+            <span className={bridgeError ? styles.devDotRed : styles.devDotGreen} />
+            {bridgeError ? 'Disconnected' : 'Connected'}
+          </span>
+        </div>
+        {bridge && (
+          <>
+            <div className={styles.rpDebugRow}><span>Version</span><span>v{bridge.version}</span></div>
+            <div className={styles.rpDebugRow}><span>Claude Path</span><span style={{ fontSize: '10px' }}>{bridge.claude_path}</span></div>
+            <div className={styles.rpDebugRow}><span>Auth</span><span>{bridge.meta_internal ? 'Meta Internal' : 'Standard'}</span></div>
+            {bridge.validation && <div className={styles.rpDebugRow}><span>Validation</span><span className={styles.rpDebugSuccess}>Available</span></div>}
+            {bridge.requests_served !== undefined && <div className={styles.rpDebugRow}><span>Requests Served</span><span>{bridge.requests_served}</span></div>}
+          </>
+        )}
+      </div>
+
+      {/* Connection */}
+      <div className={styles.rpDebugSection}>
+        <div className={styles.rpDebugSectionTitle}>Connection</div>
+        <div className={styles.rpDebugRow}>
+          <span>App Status</span>
+          <span className={connected ? styles.rpDebugSuccess : styles.rpDebugError}>
+            <span className={connected ? styles.devDotGreen : styles.devDotRed} />
+            {connected ? 'Connected' : 'Disconnected'}
+          </span>
+        </div>
+        <div className={styles.rpDebugRow}><span>Endpoint</span><span style={{ fontSize: '10px' }}>{endpoint}</span></div>
+      </div>
+
+      {/* Quick Reference */}
+      <div className={styles.rpDebugSection}>
+        <div className={styles.rpDebugSectionTitle}>Quick Reference</div>
+        {[
+          { label: 'Health Check', cmd: 'curl localhost:8087/health' },
+          { label: 'Start Bridge', cmd: 'node bridge/arcadia-bridge.js' },
+          { label: 'Kill Bridge', cmd: 'pkill -f arcadia-bridge' },
+          { label: 'View Logs', cmd: 'cat ~/.arcadia-bridge/bridge.log' },
+          { label: 'Update', cmd: 'cd ~/Arcadia && git pull origin main' },
+        ].map(item => (
+          <div key={item.label} className={styles.rpDebugCmd}>
+            <span className={styles.rpDebugCmdLabel}>{item.label}</span>
+            <code className={styles.rpDebugCmdCode}>{item.cmd}</code>
+          </div>
+        ))}
+      </div>
+
+      {/* Recent Errors */}
+      <div className={styles.rpDebugSection}>
+        <div className={styles.rpDebugSectionTitle}>Recent API Errors</div>
+        {(() => {
+          const errors = getApiLogs().filter(l => l.direction === 'error').slice(-5);
+          if (errors.length === 0) return <div className={styles.rpDebugNoErrors}>No errors recorded</div>;
+          return errors.map(err => (
+            <div key={err.id} className={styles.rpDebugErrorItem}>
+              <span className={styles.rpDebugErrorTime}>{new Date(err.timestamp).toLocaleTimeString()}</span>
+              <span className={styles.rpDebugErrorMsg}>{String((err.data as Record<string, unknown>)?.message || err.data).slice(0, 100)}</span>
+            </div>
+          ));
+        })()}
+      </div>
+    </div>
+  );
+}
+
+// ─── Output Tab: Live response output stream ─────────────────────────────────
+
+function OutputTab() {
+  const { conversations, activeConversationId } = useChat();
+  const activeConvo = conversations.find(c => c.id === activeConversationId);
+  const outputRef = useRef<HTMLDivElement>(null);
+
+  // Get last few assistant messages as output
+  const assistantMsgs = activeConvo?.messages?.filter(m => m.role === 'assistant').slice(-5) ?? [];
+
+  useEffect(() => {
+    if (outputRef.current) {
+      outputRef.current.scrollTop = outputRef.current.scrollHeight;
+    }
+  }, [assistantMsgs.length]);
+
+  if (assistantMsgs.length === 0) {
+    return (
+      <div className={styles.rpEmpty}>
+        <div className={styles.rpEmptyIcon}>📤</div>
+        <div className={styles.rpEmptyTitle}>Output</div>
+        <div className={styles.rpEmptyDesc}>
+          Claude's responses will stream here in real-time.
+          Send a message to see the output.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={styles.rpOutputTab} ref={outputRef}>
+      {assistantMsgs.map((msg, i) => (
+        <div key={msg.id} className={styles.rpOutputBlock}>
+          <div className={styles.rpOutputHeader}>
+            <span className={styles.rpOutputNum}>Response #{i + 1}</span>
+            <span className={styles.rpOutputMeta}>
+              {msg.outputTokens ? `${msg.outputTokens} tokens` : ''}
+              {msg.totalTime ? ` · ${msg.totalTime > 1000 ? `${(msg.totalTime / 1000).toFixed(1)}s` : `${msg.totalTime}ms`}` : ''}
+            </span>
+          </div>
+          {msg.thinkingText && (
+            <details className={styles.rpOutputThinking}>
+              <summary>Thinking</summary>
+              <pre>{msg.thinkingText}</pre>
+            </details>
+          )}
+          <pre className={styles.rpOutputContent}>{msg.content}</pre>
+          {msg.toolCalls && msg.toolCalls.length > 0 && (
+            <div className={styles.rpOutputTools}>
+              <span className={styles.rpOutputToolLabel}>Tools used:</span>
+              {msg.toolCalls.map(tc => (
+                <span key={tc.id} className={styles.rpOutputToolBadge}>{tc.name}</span>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── Right Panel Workspace ───────────────────────────────────────────────────
+
+function RightPanelWorkspace() {
+  const [activeTab, setActiveTab] = useState<RightTab>('code');
+  const [collapsed, setCollapsed] = useState(false);
+
+  if (collapsed) {
+    return (
+      <div className={styles.rpCollapsed}>
+        <button className={styles.rpExpandBtn} onClick={() => setCollapsed(false)} title="Show panel">
+          ◁
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className={styles.rpPanel}>
+      <div className={styles.rpHeader}>
+        <div className={styles.rpTabs}>
+          {([['code', '</>', 'Code'], ['files', '📁', 'Files'], ['data', '📊', 'Data'], ['debug', '🔧', 'Debug'], ['output', '📤', 'Output']] as [RightTab, string, string][]).map(([id, icon, label]) => (
+            <button
+              key={id}
+              className={`${styles.rpTab} ${activeTab === id ? styles.rpTabActive : ''}`}
+              onClick={() => setActiveTab(id)}
+              title={label}
+            >
+              <span className={styles.rpTabIcon}>{icon}</span>
+              <span className={styles.rpTabLabel}>{label}</span>
+            </button>
+          ))}
+        </div>
+        <button className={styles.rpCollapseBtn} onClick={() => setCollapsed(true)} title="Collapse">▷</button>
+      </div>
+      <div className={styles.rpContent}>
+        {activeTab === 'code' && <CodeTab />}
+        {activeTab === 'files' && <FilesTab />}
+        {activeTab === 'data' && <DataTab />}
+        {activeTab === 'debug' && <DebugTab />}
+        {activeTab === 'output' && <OutputTab />}
+      </div>
+    </div>
+  );
+}
+
+// ─── Main EngineerView ────────────────────────────────────────────────────────
+
 export function EngineerView() {
   const [tab, setTab] = useState<EngTab>('terminal');
 
   return (
-    <div className={styles.container}>
-      <div className={styles.tabBar}>
-        {(['chat', 'validate', 'logs', 'terminal', 'debug'] as EngTab[]).map(t => (
-          <button
-            key={t}
-            className={`${styles.tab} ${tab === t ? styles.tabActive : ''}`}
-            onClick={() => setTab(t)}
-          >
-            {t === 'chat' && '💬 Chat'}
-            {t === 'validate' && '✅ Validate'}
-            {t === 'logs' && '📡 API Logs'}
-            {t === 'terminal' && '⌨ Terminal'}
-            {t === 'debug' && '🐛 Debug'}
-          </button>
-        ))}
+    <div className={styles.engineerWrapper}>
+      <div className={styles.container}>
+        <div className={styles.tabBar}>
+          {(['chat', 'validate', 'logs', 'terminal', 'debug'] as EngTab[]).map(t => (
+            <button
+              key={t}
+              className={`${styles.tab} ${tab === t ? styles.tabActive : ''}`}
+              onClick={() => setTab(t)}
+            >
+              {t === 'chat' && '💬 Chat'}
+              {t === 'validate' && '✅ Validate'}
+              {t === 'logs' && '📡 API Logs'}
+              {t === 'terminal' && '⌨ Terminal'}
+              {t === 'debug' && '🐛 Debug'}
+            </button>
+          ))}
+        </div>
+        <div className={styles.tabContent}>
+          {tab === 'chat' && <EngineerChat />}
+          {tab === 'validate' && <ValidationPanel />}
+          {tab === 'logs' && <ApiLogsPanel />}
+          {tab === 'terminal' && <Terminal />}
+          {tab === 'debug' && <DebugPanel />}
+        </div>
       </div>
-      <div className={styles.tabContent}>
-        {tab === 'chat' && <EngineerChat />}
-        {tab === 'validate' && <ValidationPanel />}
-        {tab === 'logs' && <ApiLogsPanel />}
-        {tab === 'terminal' && <Terminal />}
-        {tab === 'debug' && <DebugPanel />}
-      </div>
+      <RightPanelWorkspace />
     </div>
   );
 }

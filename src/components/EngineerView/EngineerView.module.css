@@ -1154,3 +1154,676 @@
   line-height: 1.7;
   max-width: 500px;
 }
+
+/* ─── Engineer Wrapper (main + right panel) ──────────────────────────────── */
+
+.engineerWrapper {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* ─── Right Panel Workspace ──────────────────────────────────────────────── */
+
+.rpPanel {
+  width: 380px;
+  min-width: 380px;
+  height: 100%;
+  background: var(--bg-secondary);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 12px;
+}
+
+.rpCollapsed {
+  width: 28px;
+  min-width: 28px;
+  height: 100%;
+  background: var(--bg-secondary);
+  border-left: 1px solid var(--border);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12px;
+}
+
+.rpExpandBtn {
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 4px;
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+
+.rpExpandBtn:hover { color: var(--accent); background: var(--bg-tertiary); }
+
+.rpHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  background: var(--bg-secondary);
+}
+
+.rpTabs {
+  display: flex;
+  gap: 0;
+  flex: 1;
+  overflow-x: auto;
+}
+
+.rpTab {
+  padding: 8px 10px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: inherit;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.rpTab:hover { color: var(--text-primary); background: var(--bg-hover); }
+.rpTabActive { color: var(--accent) !important; border-bottom-color: var(--accent) !important; }
+
+.rpTabIcon { font-size: 12px; }
+.rpTabLabel { font-size: 10px; }
+
+.rpCollapseBtn {
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+
+.rpCollapseBtn:hover { color: var(--accent); background: var(--bg-tertiary); }
+
+.rpContent {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* ─── Empty State ──────────────────────────────────────────────────────── */
+
+.rpEmpty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 32px;
+  text-align: center;
+  color: var(--text-tertiary);
+}
+
+.rpEmptyIcon { font-size: 32px; margin-bottom: 12px; opacity: 0.5; }
+.rpEmptyTitle { font-size: 14px; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; }
+.rpEmptyDesc { font-size: 11px; line-height: 1.5; max-width: 260px; }
+
+/* ─── Code Tab ─────────────────────────────────────────────────────────── */
+
+.rpCodeTab { display: flex; flex-direction: column; height: 100%; }
+
+.rpCodeTabs {
+  display: flex;
+  gap: 2px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+
+.rpCodeTabBtn {
+  padding: 4px 10px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-size: 10px;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: inherit;
+  white-space: nowrap;
+}
+
+.rpCodeTabBtn:hover { background: var(--bg-hover); }
+.rpCodeTabActive { background: var(--accent) !important; color: white !important; border-color: var(--accent) !important; }
+
+.rpCodeContent { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+.rpCodeHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.rpCodeLang {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent);
+  text-transform: uppercase;
+}
+
+.rpCodeActions { display: flex; gap: 4px; }
+
+.rpSmallBtn {
+  padding: 3px 8px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-size: 10px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+
+.rpSmallBtn:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+.rpCodeBlock {
+  flex: 1;
+  overflow: auto;
+  margin: 0;
+  padding: 8px 0;
+  background: var(--bg-primary);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.rpCodeLines { display: flex; flex-direction: column; }
+
+.rpCodeLine {
+  display: flex;
+  padding: 0 10px;
+}
+
+.rpCodeLine:hover { background: var(--bg-hover); }
+
+.rpLineNum {
+  width: 36px;
+  min-width: 36px;
+  text-align: right;
+  padding-right: 12px;
+  color: var(--text-tertiary);
+  user-select: none;
+  opacity: 0.5;
+}
+
+.rpCodeLine code {
+  flex: 1;
+  white-space: pre;
+  color: var(--text-primary);
+}
+
+.rpIframe {
+  flex: 1;
+  border: none;
+  background: white;
+  border-radius: 0 0 4px 4px;
+}
+
+/* ─── Files Tab ────────────────────────────────────────────────────────── */
+
+.rpFilesTab { display: flex; flex-direction: column; height: 100%; }
+
+.rpFileList {
+  flex-shrink: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  border-bottom: 1px solid var(--border);
+}
+
+.rpFileListHeader {
+  padding: 8px 12px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--border);
+}
+
+.rpFileItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  width: 100%;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  transition: background 0.1s;
+  color: var(--text-primary);
+}
+
+.rpFileItem:hover { background: var(--bg-hover); }
+.rpFileItemActive { background: var(--bg-tertiary) !important; border-left: 2px solid var(--accent); }
+
+.rpFileIcon { font-size: 14px; flex-shrink: 0; }
+
+.rpFileInfo { display: flex; flex-direction: column; min-width: 0; }
+
+.rpFileName {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rpFileMeta {
+  font-size: 9px;
+  color: var(--text-tertiary);
+}
+
+.rpFilePreview { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+.rpFilePreviewHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-primary);
+  flex-shrink: 0;
+}
+
+/* ─── Data Tab ─────────────────────────────────────────────────────────── */
+
+.rpDataTab {
+  padding: 12px;
+  overflow-y: auto;
+  height: 100%;
+}
+
+.rpDataSection {
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.rpDataSection:last-child { border-bottom: none; }
+
+.rpDataSectionTitle {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  margin-bottom: 10px;
+}
+
+.rpDataGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.rpDataCard {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  text-align: center;
+}
+
+.rpDataCardValue {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+
+.rpDataCardLabel {
+  font-size: 9px;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.rpTokenBar {
+  display: flex;
+  height: 24px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+}
+
+.rpTokenBarFill {
+  background: #6366f1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+}
+
+.rpTokenBarFillOut {
+  background: #22c55e;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+}
+
+.rpTokenBarFill span, .rpTokenBarFillOut span {
+  font-size: 9px;
+  color: white;
+  font-weight: 600;
+  white-space: nowrap;
+  padding: 0 6px;
+  overflow: hidden;
+}
+
+.rpDataRows { display: flex; flex-direction: column; gap: 4px; }
+
+.rpDataRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.rpDataRowValue {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+/* Token Chart */
+
+.rpChart {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 80px;
+  padding: 4px 0;
+}
+
+.rpChartBar {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100%;
+  justify-content: flex-end;
+}
+
+.rpChartBarStack {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  border-radius: 3px 3px 0 0;
+  overflow: hidden;
+  min-height: 2px;
+}
+
+.rpChartBarIn { background: #6366f1; }
+.rpChartBarOut { background: #22c55e; }
+
+.rpChartLabel {
+  font-size: 8px;
+  color: var(--text-tertiary);
+  margin-top: 4px;
+}
+
+.rpChartLegend {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  margin-top: 6px;
+  font-size: 9px;
+  color: var(--text-tertiary);
+}
+
+.rpLegendDotIn {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: #6366f1;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+
+.rpLegendDotOut {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: #22c55e;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+
+/* ─── Debug Tab ────────────────────────────────────────────────────────── */
+
+.rpDebugTab {
+  padding: 12px;
+  overflow-y: auto;
+  height: 100%;
+}
+
+.rpDebugSection {
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.rpDebugSection:last-child { border-bottom: none; }
+
+.rpDebugSectionTitle {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  margin-bottom: 8px;
+}
+
+.rpDebugRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 3px 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.rpDebugSuccess { color: #22c55e; display: flex; align-items: center; gap: 5px; }
+.rpDebugError { color: #ef4444; display: flex; align-items: center; gap: 5px; }
+
+.devDotGreen {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #22c55e;
+  display: inline-block;
+  box-shadow: 0 0 4px #22c55e80;
+}
+
+.devDotRed {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ef4444;
+  display: inline-block;
+  box-shadow: 0 0 4px #ef444480;
+}
+
+.rpDebugCmd {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 6px;
+}
+
+.rpDebugCmdLabel {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  font-weight: 600;
+}
+
+.rpDebugCmdCode {
+  font-size: 10px;
+  color: var(--text-secondary);
+  background: var(--bg-primary);
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  word-break: break-all;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.rpDebugCmdCode:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+.rpDebugNoErrors {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-style: italic;
+  padding: 4px 0;
+}
+
+.rpDebugErrorItem {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border-light, rgba(255,255,255,0.05));
+}
+
+.rpDebugErrorTime {
+  font-size: 9px;
+  color: var(--text-tertiary);
+}
+
+.rpDebugErrorMsg {
+  font-size: 10px;
+  color: #ef4444;
+  word-break: break-word;
+}
+
+/* ─── Output Tab ───────────────────────────────────────────────────────── */
+
+.rpOutputTab {
+  padding: 8px;
+  overflow-y: auto;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rpOutputBlock {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.rpOutputHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 10px;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border);
+}
+
+.rpOutputNum {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.rpOutputMeta {
+  font-size: 9px;
+  color: var(--text-tertiary);
+}
+
+.rpOutputContent {
+  padding: 10px;
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.rpOutputThinking {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 10px;
+  color: var(--text-tertiary);
+}
+
+.rpOutputThinking summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.rpOutputThinking pre {
+  margin: 6px 0 0;
+  font-size: 10px;
+  white-space: pre-wrap;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.rpOutputTools {
+  padding: 6px 10px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.rpOutputToolLabel {
+  font-size: 9px;
+  color: var(--text-tertiary);
+}
+
+.rpOutputToolBadge {
+  font-size: 9px;
+  padding: 2px 6px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--accent);
+  font-weight: 500;
+}
