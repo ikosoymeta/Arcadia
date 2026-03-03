@@ -22,6 +22,12 @@
   gap: 12px;
 }
 
+.headerRight {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .expandBtn {
   background: none;
   border: none;
@@ -50,6 +56,128 @@
   border-radius: 12px;
 }
 
+/* Chat/Cowork mode toggle */
+.modeToggle {
+  display: flex;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.modeBtn {
+  padding: 5px 14px;
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: all 0.15s;
+}
+
+.modeBtn:hover {
+  color: var(--text-primary);
+}
+
+.modeBtn.modeActive {
+  background: var(--accent);
+  color: white;
+  font-weight: 600;
+}
+
+/* Cowork activity bar */
+.activityBar {
+  padding: 12px 20px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+}
+
+.activityHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.activityLabel {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.activityProgress {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.activityProgressBar {
+  height: 3px;
+  background: var(--bg-hover);
+  border-radius: 2px;
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+
+.activityProgressFill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.4s ease;
+}
+
+.activitySteps {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.activityStep {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  padding: 3px 8px;
+  background: var(--bg-primary);
+  border-radius: 12px;
+  border: 1px solid var(--border);
+}
+
+.activityStep.step_in_progress {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.activityStep.step_completed {
+  color: var(--success);
+  border-color: rgba(34, 197, 94, 0.3);
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.activityStep.step_error {
+  color: var(--error);
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.stepIndicator {
+  font-size: 10px;
+}
+
+.stepLabel {
+  font-size: 11px;
+}
+
+.stepDetail {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  margin-left: 4px;
+}
+
+/* Messages area */
 .messages {
   flex: 1;
   overflow-y: auto;
@@ -83,6 +211,23 @@
   line-height: 1.6;
 }
 
+/* Cowork badges on welcome screen */
+.coworkBadges {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.coworkBadge {
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  font-weight: 500;
+}
+
 .quickActions {
   display: flex;
   gap: 8px;
@@ -108,6 +253,71 @@
   color: var(--text-primary);
 }
 
+/* Cowork thinking/planning indicator */
+.coworkThinking {
+  padding: 8px 0;
+}
+
+.coworkThinkingLabel {
+  font-size: 12px;
+  color: var(--accent);
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+
+.coworkThinkingBar {
+  height: 3px;
+  background: var(--bg-hover);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.coworkThinkingFill {
+  height: 100%;
+  width: 30%;
+  background: var(--accent);
+  border-radius: 2px;
+  animation: coworkSlide 1.5s ease-in-out infinite;
+}
+
+@keyframes coworkSlide {
+  0% { transform: translateX(-100%); }
+  50% { transform: translateX(300%); }
+  100% { transform: translateX(-100%); }
+}
+
+/* Reasoning block */
+.reasoningBlock {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  border-left: 3px solid var(--accent);
+}
+
+.reasoningHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 6px;
+}
+
+.reasoningIcon {
+  font-size: 12px;
+}
+
+.reasoningText {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  font-style: italic;
+}
+
+/* Messages */
 .message {
   display: flex;
   gap: 12px;
@@ -229,10 +439,65 @@
   40% { transform: scale(1); opacity: 1; }
 }
 
+/* Input area */
 .inputArea {
   padding: 16px 20px;
   border-top: 1px solid var(--border);
   background: var(--bg-secondary);
+}
+
+/* Global instructions panel */
+.instructionsPanel {
+  max-width: 800px;
+  margin: 0 auto 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.instructionsHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+
+.instructionsClose {
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.instructionsClose:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.instructionsTextarea {
+  width: 100%;
+  padding: 10px 12px;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  resize: none;
+  outline: none;
+  line-height: 1.5;
+}
+
+.instructionsTextarea::placeholder {
+  color: var(--text-tertiary);
 }
 
 .inputWrapper {
@@ -241,6 +506,38 @@
   display: flex;
   gap: 8px;
   align-items: flex-end;
+}
+
+.inputControls {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.instructionsBtn {
+  width: 36px;
+  height: 36px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+  transition: all 0.15s;
+}
+
+.instructionsBtn:hover {
+  color: var(--text-primary);
+  border-color: var(--accent);
+}
+
+.instructionsBtn.instructionsActive {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-dim);
 }
 
 .textarea {

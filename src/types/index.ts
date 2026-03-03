@@ -62,6 +62,37 @@ export interface Folder {
   color?: string;
   icon?: string;
   isExpanded?: boolean;
+  instructions?: string; // Cowork: folder-specific instructions for Claude
+}
+
+export type ChatMode = 'chat' | 'cowork';
+
+export interface CoworkTask {
+  id: string;
+  title: string;
+  status: 'planning' | 'in_progress' | 'awaiting_permission' | 'paused' | 'completed' | 'error';
+  steps: CoworkStep[];
+  createdAt: number;
+  completedAt?: number;
+  conversationId: string;
+}
+
+export interface CoworkStep {
+  id: string;
+  label: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'skipped' | 'error';
+  detail?: string;
+  startedAt?: number;
+  completedAt?: number;
+}
+
+export interface PermissionRequest {
+  id: string;
+  action: string;
+  description: string;
+  risk: 'low' | 'medium' | 'high';
+  onAllow: () => void;
+  onDeny: () => void;
 }
 
 export interface Skill {

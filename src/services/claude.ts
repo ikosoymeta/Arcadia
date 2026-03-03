@@ -22,7 +22,8 @@ export async function sendMessage(
   model: string,
   maxTokens: number,
   temperature: number,
-  callbacks: StreamCallbacks
+  callbacks: StreamCallbacks,
+  systemPrompt?: string
 ): Promise<void> {
   abortController = new AbortController();
 
@@ -44,6 +45,7 @@ export async function sendMessage(
         messages,
         stream: true,
         apiKey,
+        ...(systemPrompt ? { system: systemPrompt } : {}),
       }),
       signal: abortController.signal,
     });

@@ -16,6 +16,8 @@ export function Sidebar({ viewMode, onViewChange, collapsed, onToggleCollapse }:
     conversations,
     folders,
     activeConversationId,
+    chatMode,
+    coworkTasks,
     createConversation,
     deleteConversation,
     renameConversation,
@@ -26,6 +28,7 @@ export function Sidebar({ viewMode, onViewChange, collapsed, onToggleCollapse }:
     createFolder,
     toggleFolderExpand,
     deleteFolder,
+    setFolderInstructions,
   } = useChat();
   const { connections, activeConnection } = useConnection();
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -33,6 +36,9 @@ export function Sidebar({ viewMode, onViewChange, collapsed, onToggleCollapse }:
   const [contextMenu, setContextMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   const [newFolderName, setNewFolderName] = useState('');
   const [showNewFolder, setShowNewFolder] = useState(false);
+  const [editingFolderInstr, setEditingFolderInstr] = useState<string | null>(null);
+  const [folderInstrValue, setFolderInstrValue] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
   const handleNewChat = () => {
     const model = activeConnection?.model || 'claude-sonnet-4-20250514';
@@ -125,7 +131,7 @@ export function Sidebar({ viewMode, onViewChange, collapsed, onToggleCollapse }:
                 editValue={editValue}
                 onSelect={() => { setActiveConversation(conv.id); onViewChange('chat'); }}
                 onContextMenu={(e) => handleContextMenu(e, conv.id)}
-                onDelete={() => deleteConversation(conv.id)}
+                onDelete={() => setConfirmDelete(conv.id)}
                 onEditChange={setEditValue}
                 onEditFinish={finishRename}
                 getVisibilityIcon={getVisibilityIcon}
@@ -173,14 +179,48 @@ export function Sidebar({ viewMode, onViewChange, collapsed, onToggleCollapse }:
                 style={{ fontWeight: 600, fontSize: '12px' }}
               >
                 <span style={{ width: '16px', textAlign: 'center' }}>
-                  {folder.isExpanded ? '▾' : '▸'}
+                  {folder.isExpanded ? '\u25BE' : '\u25B8'}
                 </span>
                 <span className={styles.convTitle}>{folder.name} ({folderConvs.length})</span>
                 <button
+                  className={styles.folderInstrBtn}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (editingFolderInstr === folder.id) {
+                      setEditingFolderInstr(null);
+                    } else {
+                      setEditingFolderInstr(folder.id);
+                      setFolderInstrValue(folder.instructions || '');
+                    }
+                  }}
+                  title="Folder instructions"
+                  style={{
+                    opacity: folder.instructions ? 1 : undefined,
+                    color: folder.instructions ? 'var(--accent)' : undefined,
+                  }}
+                >&#x2699;</button>
+                <button
                   className={styles.convDelete}
-                  onClick={(e) => { e.stopPropagation(); deleteFolder(folder.id); }}
-                >×</button>
+                  onClick={(e) => { e.stopPropagation(); setConfirmDelete(folder.id); }}
+                >&times;</button>
               </div>
+              {/* Folder instructions editor */}
+              {editingFolderInstr === folder.id && (
+                <div className={styles.folderInstrPanel}>
+                  <textarea
+                    className={styles.folderInstrTextarea}
+                    value={folderInstrValue}
+                    onChange={e => setFolderInstrValue(e.target.value)}
+                    onBlur={() => {
+                      setFolderInstructions(folder.id, folderInstrValue);
+                      setEditingFolderInstr(null);
+                    }}
+                    placeholder="Instructions for this folder (e.g., 'Use Python', 'Output in JSON')..."
+                    autoFocus
+                    rows={2}
+                  />
+                </div>
+              )}
               {folder.isExpanded && folderConvs.map(conv => (
                 <ConvItem
                   key={conv.id}
@@ -190,7 +230,7 @@ export function Sidebar({ viewMode, onViewChange, collapsed, onToggleCollapse }:
                   editValue={editValue}
                   onSelect={() => { setActiveConversation(conv.id); onViewChange('chat'); }}
                   onContextMenu={(e) => handleContextMenu(e, conv.id)}
-                  onDelete={() => deleteConversation(conv.id)}
+                  onDelete={() => setConfirmDelete(conv.id)}
                   onEditChange={setEditValue}
                   onEditFinish={finishRename}
                   getVisibilityIcon={getVisibilityIcon}
@@ -215,7 +255,7 @@ export function Sidebar({ viewMode, onViewChange, collapsed, onToggleCollapse }:
             editValue={editValue}
             onSelect={() => { setActiveConversation(conv.id); onViewChange('chat'); }}
             onContextMenu={(e) => handleContextMenu(e, conv.id)}
-            onDelete={() => deleteConversation(conv.id)}
+            onDelete={() => setConfirmDelete(conv.id)}
             onEditChange={setEditValue}
             onEditFinish={finishRename}
             getVisibilityIcon={getVisibilityIcon}
@@ -262,7 +302,7 @@ export function Sidebar({ viewMode, onViewChange, collapsed, onToggleCollapse }:
               { label: 'Make Private', action: () => { setVisibility(contextMenu.id, 'private'); setContextMenu(null); }},
               { label: 'Share with Team', action: () => { setVisibility(contextMenu.id, 'team'); setContextMenu(null); }},
               { label: 'Make Public', action: () => { setVisibility(contextMenu.id, 'public'); setContextMenu(null); }},
-              { label: 'Delete', action: () => { deleteConversation(contextMenu.id); setContextMenu(null); }, danger: true },
+              { label: 'Delete', action: () => { setConfirmDelete(contextMenu.id); setContextMenu(null); }, danger: true },
             ].map(item => (
               <button
                 key={item.label}
@@ -280,6 +320,66 @@ export function Sidebar({ viewMode, onViewChange, collapsed, onToggleCollapse }:
             ))}
           </div>
         </>
+      )}
+
+      {/* Delete confirmation dialog (Cowork-inspired permission prompt) */}
+      {confirmDelete && (
+        <>
+          <div
+            style={{ position: 'fixed', inset: 0, zIndex: 199, background: 'rgba(0,0,0,0.5)' }}
+            onClick={() => setConfirmDelete(null)}
+          />
+          <div className={styles.confirmDialog}>
+            <div className={styles.confirmIcon}>&#x26A0;</div>
+            <div className={styles.confirmTitle}>Delete this item?</div>
+            <div className={styles.confirmText}>
+              This action cannot be undone. All associated data will be permanently removed.
+            </div>
+            <div className={styles.confirmActions}>
+              <button
+                className={styles.confirmCancel}
+                onClick={() => setConfirmDelete(null)}
+              >
+                Cancel
+              </button>
+              <button
+                className={styles.confirmDelete}
+                onClick={() => {
+                  // Check if it's a folder or conversation
+                  const isFolder = folders.some(f => f.id === confirmDelete);
+                  if (isFolder) {
+                    deleteFolder(confirmDelete);
+                  } else {
+                    deleteConversation(confirmDelete);
+                  }
+                  setConfirmDelete(null);
+                }}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Active Cowork tasks */}
+      {chatMode === 'cowork' && coworkTasks.filter(t => t.status !== 'completed').length > 0 && (
+        <div className={styles.coworkSection}>
+          <div className={styles.sectionTitle}>Active Tasks</div>
+          {coworkTasks
+            .filter(t => t.status !== 'completed')
+            .slice(0, 5)
+            .map(task => (
+              <div key={task.id} className={styles.coworkTaskItem}>
+                <span className={`${styles.coworkDot} ${styles[task.status]}`} />
+                <span className={styles.coworkTaskTitle}>{task.title}</span>
+                <span className={styles.coworkTaskProgress}>
+                  {task.steps.filter(s => s.status === 'completed').length}/{task.steps.length}
+                </span>
+              </div>
+            ))
+          }
+        </div>
       )}
     </div>
   );

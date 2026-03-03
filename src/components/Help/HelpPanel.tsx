@@ -21,6 +21,17 @@ const SECTIONS = [
     ],
   },
   {
+    title: 'Cowork Mode',
+    content: [
+      { q: 'What is Cowork mode?', a: 'Cowork is an enhanced mode for complex, multi-step tasks. Instead of simple Q&A, Claude plans an approach, shows progress through each step, and delivers complete outputs. Toggle between Chat and Cowork using the mode switch in the chat header.' },
+      { q: 'How is Cowork different from Chat?', a: 'Chat mode is for quick questions and conversations. Cowork mode is for tasks like "Build a landing page" or "Create an API with documentation" — Claude breaks the work into steps, tracks progress, and produces production-ready output.' },
+      { q: 'What is the activity bar?', a: 'When a Cowork task is running, an activity bar appears below the chat header showing each step, its status (pending, in progress, completed), and overall progress.' },
+      { q: 'Can I course-correct during a task?', a: 'Yes. You can send follow-up messages while Claude is working to redirect, provide additional context, or ask it to adjust its approach.' },
+      { q: 'What are global instructions?', a: 'Click the gear icon next to the message input to set instructions that apply to all conversations. For example: "Always use TypeScript" or "Respond in bullet points". These instructions persist across sessions.' },
+      { q: 'What are folder instructions?', a: 'Each folder can have its own instructions. Click the gear icon on a folder to set context like "This project uses Python 3.12 and Django". These instructions are automatically included when chatting in that folder.' },
+    ],
+  },
+  {
     title: 'Preview Panel',
     content: [
       { q: 'What is the Preview panel?', a: 'The right panel shows real-time previews of code, HTML, and markdown that Claude generates. Click any code block in the chat to view it in the preview panel.' },

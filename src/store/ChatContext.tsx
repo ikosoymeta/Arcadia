@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
-import type { Conversation, Message, Folder, Checkpoint } from '../types';
+import type { Conversation, Message, Folder, Checkpoint, ChatMode, CoworkTask, CoworkStep } from '../types';
 import { storage } from '../services/storage';
 
 interface ChatState {
@@ -8,6 +8,11 @@ interface ChatState {
   activeConversationId: string | null;
   isStreaming: boolean;
   streamingText: string;
+  chatMode: ChatMode;
+  globalInstructions: string;
+  coworkTasks: CoworkTask[];
+  activeCoworkTaskId: string | null;
+  streamingReasoning: string;
 }
 
 interface ChatContextType extends ChatState {
@@ -30,6 +35,16 @@ interface ChatContextType extends ChatState {
   renameFolder: (id: string, name: string) => void;
   deleteFolder: (id: string) => void;
   toggleFolderExpand: (id: string) => void;
+  setChatMode: (mode: ChatMode) => void;
+  setGlobalInstructions: (instructions: string) => void;
+  setFolderInstructions: (folderId: string, instructions: string) => void;
+  getFolderInstructions: (folderId: string) => string;
+  createCoworkTask: (title: string, conversationId: string, steps: Omit<CoworkStep, 'id'>[]) => string;
+  updateCoworkTaskStatus: (taskId: string, status: CoworkTask['status']) => void;
+  updateCoworkStepStatus: (taskId: string, stepId: string, status: CoworkStep['status'], detail?: string) => void;
+  setActiveCoworkTask: (taskId: string | null) => void;
+  setStreamingReasoning: (text: string) => void;
+  appendStreamingReasoning: (text: string) => void;
 }
 
 const ChatContext = createContext<ChatContextType | null>(null);
@@ -41,6 +56,11 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     activeConversationId: null,
     isStreaming: false,
     streamingText: '',
+    chatMode: (localStorage.getItem('arcadia-chat-mode') as ChatMode) || 'chat',
+    globalInstructions: localStorage.getItem('arcadia-global-instructions') || '',
+    coworkTasks: [],
+    activeCoworkTaskId: null,
+    streamingReasoning: '',
   }));
 
   useEffect(() => {
@@ -228,6 +248,90 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     }));
   }, []);
 
+  const setChatMode = useCallback((chatMode: ChatMode) => {
+    localStorage.setItem('arcadia-chat-mode', chatMode);
+    setState(prev => ({ ...prev, chatMode }));
+  }, []);
+
+  const setGlobalInstructions = useCallback((instructions: string) => {
+    localStorage.setItem('arcadia-global-instructions', instructions);
+    setState(prev => ({ ...prev, globalInstructions: instructions }));
+  }, []);
+
+  const setFolderInstructions = useCallback((folderId: string, instructions: string) => {
+    setState(prev => ({
+      ...prev,
+      folders: prev.folders.map(f =>
+        f.id === folderId ? { ...f, instructions } : f
+      ),
+    }));
+  }, []);
+
+  const getFolderInstructions = useCallback((folderId: string) => {
+    return state.folders.find(f => f.id === folderId)?.instructions || '';
+  }, [state.folders]);
+
+  const createCoworkTask = useCallback((title: string, conversationId: string, steps: Omit<CoworkStep, 'id'>[]) => {
+    const id = crypto.randomUUID();
+    const task: CoworkTask = {
+      id,
+      title,
+      status: 'planning',
+      steps: steps.map(s => ({ ...s, id: crypto.randomUUID() })),
+      createdAt: Date.now(),
+      conversationId,
+    };
+    setState(prev => ({
+      ...prev,
+      coworkTasks: [task, ...prev.coworkTasks],
+      activeCoworkTaskId: id,
+    }));
+    return id;
+  }, []);
+
+  const updateCoworkTaskStatus = useCallback((taskId: string, status: CoworkTask['status']) => {
+    setState(prev => ({
+      ...prev,
+      coworkTasks: prev.coworkTasks.map(t =>
+        t.id === taskId ? { ...t, status, completedAt: status === 'completed' ? Date.now() : t.completedAt } : t
+      ),
+    }));
+  }, []);
+
+  const updateCoworkStepStatus = useCallback((taskId: string, stepId: string, status: CoworkStep['status'], detail?: string) => {
+    setState(prev => ({
+      ...prev,
+      coworkTasks: prev.coworkTasks.map(t => {
+        if (t.id !== taskId) return t;
+        return {
+          ...t,
+          steps: t.steps.map(s => {
+            if (s.id !== stepId) return s;
+            return {
+              ...s,
+              status,
+              detail: detail || s.detail,
+              startedAt: status === 'in_progress' ? Date.now() : s.startedAt,
+              completedAt: status === 'completed' ? Date.now() : s.completedAt,
+            };
+          }),
+        };
+      }),
+    }));
+  }, []);
+
+  const setActiveCoworkTask = useCallback((taskId: string | null) => {
+    setState(prev => ({ ...prev, activeCoworkTaskId: taskId }));
+  }, []);
+
+  const setStreamingReasoning = useCallback((streamingReasoning: string) => {
+    setState(prev => ({ ...prev, streamingReasoning }));
+  }, []);
+
+  const appendStreamingReasoning = useCallback((text: string) => {
+    setState(prev => ({ ...prev, streamingReasoning: prev.streamingReasoning + text }));
+  }, []);
+
   return (
     <ChatContext.Provider value={{
       ...state,
@@ -250,6 +354,16 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       renameFolder,
       deleteFolder,
       toggleFolderExpand,
+      setChatMode,
+      setGlobalInstructions,
+      setFolderInstructions,
+      getFolderInstructions,
+      createCoworkTask,
+      updateCoworkTaskStatus,
+      updateCoworkStepStatus,
+      setActiveCoworkTask,
+      setStreamingReasoning,
+      appendStreamingReasoning,
     }}>
       {children}
     </ChatContext.Provider>
