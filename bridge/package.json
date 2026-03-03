@@ -1,0 +1,14 @@
+{
+  "name": "arcadia-bridge",
+  "version": "1.0.0",
+  "description": "Local bridge proxy that connects ArcadIA web app to Claude Code at Meta",
+  "main": "arcadia-bridge.js",
+  "bin": {
+    "arcadia-bridge": "./arcadia-bridge.js"
+  },
+  "scripts": {
+    "start": "node arcadia-bridge.js"
+  },
+  "keywords": ["claude", "meta", "arcadia", "bridge", "proxy"],
+  "license": "MIT"
+}

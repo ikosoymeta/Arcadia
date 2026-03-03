@@ -324,6 +324,15 @@ function App() {
               </button>
             )}
           </div>
+
+            {/* ─── Persistent Help Link ─────────────────────────────────── */}
+            <a
+              href="mailto:ikosoy@meta.com?subject=ArcadIA%20Editor%20Support"
+              className={styles.persistentHelp}
+              title="Contact ArcadIA Support"
+            >
+              Need help? Contact support
+            </a>
         </PreviewProvider>
       </ChatProvider>
     </ConnectionProvider>

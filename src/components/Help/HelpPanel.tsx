@@ -1,83 +1,96 @@
 import React, { useState } from 'react';
 
+const SUPPORT_EMAIL = 'ikosoy@meta.com';
+const SUPPORT_SUBJECT = 'ArcadIA Editor Support';
+const SUPPORT_HREF = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(SUPPORT_SUBJECT)}`;
+
 const SECTIONS = [
   {
+    icon: '🚀',
     title: 'Getting Started',
     content: [
-      { q: 'How do I start?', a: 'Click "+ New Chat" in the sidebar or use one of the quick action buttons on the welcome screen. Type your message and press Enter to send.' },
-      { q: 'How do I connect to Claude?', a: 'ArcadIA connects automatically when you open it. It detects your Meta corporate infrastructure (LDAR proxy) and configures Claude access silently. A green dot in the sidebar confirms your connection is active. If you see a "Connecting..." message, make sure you are on the Meta network or VPN.' },
-      { q: 'What models are available?', a: 'Claude Opus 4 (most capable), Claude Sonnet 4 (balanced), and Claude 3.5 Haiku (fastest). The default model is selected automatically. You can change it in Settings if needed.' },
+      { q: 'How do I connect to Claude?', a: 'ArcadIA connects automatically when the bridge is running on your laptop. On first use, you\'ll see a one-time setup screen — just copy the command, paste it in Terminal, and press Enter. After that, ArcadIA auto-connects every time you open it.' },
+      { q: 'What is the ArcadIA Bridge?', a: 'The bridge is a small background service that runs on your Mac. It connects ArcadIA (in your browser) to Claude Code (on your laptop). Claude Code handles all Meta authentication — no API keys needed. The bridge auto-starts on login, so you only set it up once.' },
+      { q: 'How do I start using ArcadIA?', a: 'Once connected (green dot in sidebar), click "+ New Chat" or use one of the quick action buttons. Type your message and press Enter. Claude will respond in real-time.' },
+      { q: 'What models are available?', a: 'Claude Opus 4 (most capable, best for complex tasks), Claude Sonnet 4 (balanced speed and quality), and Claude Haiku 3.5 (fastest, best for quick questions). The default is Sonnet 4. Change it in Settings.' },
     ],
   },
   {
+    icon: '✨',
+    title: 'Simple Mode',
+    content: [
+      { q: 'What is Simple mode?', a: 'Simple mode is designed for everyone — no technical knowledge needed. Just describe what you want in plain language, and Claude will help you. Think of it like chatting with a very smart assistant.' },
+      { q: 'What are the quick action buttons?', a: 'The welcome screen shows 6 common tasks: Build a website, Write an email, Explain a concept, Debug code, Analyze data, and Write content. Click any of them to start with a pre-written prompt.' },
+      { q: 'What are follow-up suggestions?', a: 'After Claude responds, you\'ll see suggestion buttons below the message (like "Add dark mode" or "Write tests"). Click them to continue the conversation without typing.' },
+      { q: 'Can I attach images?', a: 'Yes! Drag and drop images into the chat, or click the paperclip icon. Claude can analyze images, screenshots, diagrams, and more.' },
+    ],
+  },
+  {
+    icon: '⌨️',
+    title: 'Engineer Mode',
+    content: [
+      { q: 'What is Engineer mode?', a: 'Engineer mode adds developer tools: a terminal emulator, debug console with raw API logs, token metrics (TTFT, tokens/sec), and a tool call inspector. Switch to it using the toggle at the top of the screen.' },
+      { q: 'What does the API Logs tab show?', a: 'Every request and response to/from Claude, with timestamps, raw JSON, token counts, and timing metrics. Useful for debugging prompts and understanding Claude\'s behavior.' },
+      { q: 'What does the Terminal tab do?', a: 'An interactive terminal emulator with command history. Useful for running commands, checking output, and debugging.' },
+      { q: 'What are token metrics?', a: 'TTFT (Time to First Token): how fast Claude starts responding. Tokens/sec: generation speed. Input/output tokens: how much context you\'re using vs. how much Claude generates.' },
+    ],
+  },
+  {
+    icon: '💬',
     title: 'Conversations',
     content: [
-      { q: 'How are conversations saved?', a: 'Every conversation is auto-saved with an auto-generated title based on your first message. All data is stored in your browser.' },
-      { q: 'How do I rename a conversation?', a: 'Right-click any conversation in the sidebar and select "Rename", or double-click the title.' },
-      { q: 'How do I organize conversations?', a: 'Create folders using the "+" button next to "Folders" in the sidebar. Drag conversations into folders to organize them.' },
-      { q: 'How do I pin a conversation?', a: 'Right-click a conversation and select "Pin / Unpin". Pinned conversations appear at the top of the sidebar.' },
-      { q: 'How do I share a conversation?', a: 'Right-click a conversation, choose "Share (copy URL)" to get a unique link. Set visibility to "Team" or "Public" to control who can access it.' },
-      { q: 'What are checkpoints?', a: 'Checkpoints save a snapshot of your conversation at a specific point. Use the checkpoint button in the chat header to create one. You can restore to any checkpoint to review history or branch from that point.' },
+      { q: 'How are conversations saved?', a: 'Every conversation is auto-saved in your browser. Titles are generated automatically from your first message.' },
+      { q: 'How do I organize conversations?', a: 'Create folders using the "+" button next to "Folders" in the sidebar. Right-click any conversation to move it to a folder, pin it, rename it, or delete it.' },
+      { q: 'How do I pin a conversation?', a: 'Hover over a conversation in the sidebar and click the star icon, or right-click and select "Pin". Pinned conversations stay at the top.' },
+      { q: 'How do I share a conversation?', a: 'Right-click a conversation and choose "Share". You can set visibility (Private, Team, Public), copy a share link, or export as Markdown or JSON.' },
+      { q: 'How do I search conversations?', a: 'Use the search bar at the top of the sidebar. It searches across all conversation titles.' },
     ],
   },
   {
-    title: 'Cowork Mode',
+    icon: '🔌',
+    title: 'Integrations',
     content: [
-      { q: 'What is Cowork mode?', a: 'Cowork is an enhanced mode for complex, multi-step tasks. Instead of simple Q&A, Claude plans an approach, shows progress through each step, and delivers complete outputs. Toggle between Chat and Cowork using the mode switch in the chat header.' },
-      { q: 'How is Cowork different from Chat?', a: 'Chat mode is for quick questions and conversations. Cowork mode is for tasks like "Build a landing page" or "Create an API with documentation" — Claude breaks the work into steps, tracks progress, and produces production-ready output.' },
-      { q: 'What is the activity bar?', a: 'When a Cowork task is running, an activity bar appears below the chat header showing each step, its status (pending, in progress, completed), and overall progress.' },
-      { q: 'Can I course-correct during a task?', a: 'Yes. You can send follow-up messages while Claude is working to redirect, provide additional context, or ask it to adjust its approach.' },
-      { q: 'What are global instructions?', a: 'Click the gear icon next to the message input to set instructions that apply to all conversations. For example: "Always use TypeScript" or "Respond in bullet points". These instructions persist across sessions.' },
-      { q: 'What are folder instructions?', a: 'Each folder can have its own instructions. Click the gear icon on a folder to set context like "This project uses Python 3.12 and Django". These instructions are automatically included when chatting in that folder.' },
+      { q: 'What integrations are available?', a: 'GitHub (repos, issues, PRs, code search), Google Drive (files, docs), Web Search & Fetch, Code Execution, and Long-term Memory. Enable them in the Integrations panel.' },
+      { q: 'How do integrations work?', a: 'When you enable an integration, Claude gains the ability to use those tools during your conversation. For example, with GitHub enabled, Claude can search your repos, read files, and create issues.' },
+      { q: 'Do I need to configure anything?', a: 'Some integrations (like GitHub) may need OAuth authentication the first time. The app will guide you through it. Most integrations work out of the box.' },
     ],
   },
   {
-    title: 'Preview Panel',
+    icon: '🖥️',
+    title: 'Layout & Panels',
     content: [
-      { q: 'What is the Preview panel?', a: 'The right panel shows real-time previews of code, HTML, and markdown that Claude generates. Click any code block in the chat to view it in the preview panel.' },
-      { q: 'Can I preview HTML?', a: 'Yes. When Claude generates HTML with CSS, it renders in a sandboxed iframe. You can also click "Open" to view it in a new tab.' },
-      { q: 'How do I copy code?', a: 'Click the "Copy" button in the top-right corner of any code preview.' },
+      { q: 'How do I resize panels?', a: 'Drag the borders between the sidebar, main content, and preview panels. The borders glow purple when you hover over them. Your preferred widths are saved automatically.' },
+      { q: 'How do I collapse/restore panels?', a: 'Click the arrow button on the sidebar or preview panel to collapse it. When collapsed, a tab appears on the edge of the screen — click it to restore the panel.' },
+      { q: 'What is the Preview panel?', a: 'The right panel shows real-time previews of code and HTML that Claude generates. HTML renders in a live sandbox. Click "Copy" to grab the code.' },
     ],
   },
   {
-    title: 'Code Workspace',
+    icon: '⚡',
+    title: 'Skills & Templates',
     content: [
-      { q: 'What is the Code Workspace?', a: 'A VS Code-inspired environment with a file explorer, code editor with line numbers, integrated terminal, debug panel, and AI assistant dock.' },
-      { q: 'How do I use the terminal?', a: 'Click "Terminal" in the toolbar. Type commands and press Enter. Supports: ls, pwd, cat, help, npm run dev, git status, npm test, and clear.' },
-      { q: 'What is the Debug panel?', a: 'Shows variables, watch expressions, breakpoints, call stack, and performance metrics. Click "Debug" in the toolbar to toggle it.' },
-      { q: 'What is the AI Assistant dock?', a: 'A floating panel for quick AI queries about your code. Click "AI Assist" in the toolbar. Ask about code explanations, refactoring, or test generation.' },
+      { q: 'What are Skills?', a: 'Reusable prompt templates you create from successful conversations. They save time by letting you quickly apply proven prompts to new tasks.' },
+      { q: 'How do I create a skill?', a: 'Go to Skills (lightning icon), click "+ Create Skill", fill in the name, description, and prompt template. Use [PLACEHOLDERS] for variable parts.' },
+      { q: 'How do I use a skill?', a: 'Click a skill card, then "Copy Prompt". Paste it into a new chat and fill in the placeholders.' },
     ],
   },
   {
-    title: 'Skills Library',
+    icon: '🔧',
+    title: 'Connection Troubleshooting',
     content: [
-      { q: 'What are Skills?', a: 'Reusable prompt templates you can create from successful conversation patterns. They save time by letting you quickly apply proven prompts to new tasks.' },
-      { q: 'How do I create a skill?', a: 'Go to Skills (lightning icon), click "+ Create Skill", fill in the name, description, prompt template, and tags. Use [PLACEHOLDERS] for variable parts.' },
-      { q: 'How do I use a skill?', a: 'Click a skill card to view its details, then click "Copy Prompt" to copy the template to your clipboard. Paste it into a new chat and fill in the placeholders.' },
+      { q: 'I see "Unable to connect"', a: 'This means the ArcadIA Bridge is not running. Open Terminal and run:\n\nnode ~/.arcadia-bridge/arcadia-bridge.js\n\nIf you haven\'t set it up yet, run the one-time setup command shown on the welcome screen.' },
+      { q: 'The bridge is running but ArcadIA won\'t connect', a: 'Check that nothing else is using port 8087:\n\nlsof -i :8087\n\nIf another process is using it, kill it and restart the bridge.' },
+      { q: 'Claude Code is not installed', a: 'Install Claude Code on your Meta laptop. See: https://fburl.com/claude.code.users\n\nAfter installing, verify with: claude --version' },
+      { q: 'The bridge stopped working after a restart', a: 'The bridge should auto-start on login. If it didn\'t, run:\n\nlaunchctl load ~/Library/LaunchAgents/com.arcadia.bridge.plist\n\nOr re-run the setup command to reinstall.' },
+      { q: 'How do I check connection diagnostics?', a: 'On the welcome screen, click "Connection diagnostics" to see the bridge status, endpoint, and last check time. You can also run a manual check from there.' },
+      { q: 'Still having issues?', a: `Contact support: ${SUPPORT_EMAIL}\nSubject: ArcadIA Editor Support\n\nInclude:\n• Your Mac model and macOS version\n• Output of: claude --version\n• Output of: lsof -i :8087\n• Any error messages you see` },
     ],
   },
   {
-    title: 'Team Pods',
-    content: [
-      { q: 'What are Team Pods?', a: 'Groups of humans and AI agents that collaborate together. Pod members can share conversations, skills, and work in the same conversation space.' },
-      { q: 'How do I create a pod?', a: 'Go to Team (people icon), click "+ Create Pod", name it, and add members. You can add both human users and AI agents.' },
-      { q: 'How does access control work?', a: 'Content visibility is controlled per-conversation: Private (only you), Team (your pod members), Public (anyone with the link). Pod admins manage membership.' },
-      { q: 'What about authentication?', a: 'ArcadIA supports Meta SSO for enterprise deployments. Members are authenticated through your organization\'s identity provider.' },
-    ],
-  },
-  {
-    title: 'Benchmarks',
-    content: [
-      { q: 'What do benchmarks measure?', a: 'Time to First Token (TTFT), total response time, tokens per second, render time, and Web Vitals (LCP, FID, CLS, TTFB).' },
-      { q: 'How do I run benchmarks?', a: 'Go to Benchmarks (chart icon), ensure you have an active connection, and click "Run Benchmark Suite". Results show performance metrics and flag issues.' },
-      { q: 'What do the statuses mean?', a: 'Pass = good performance. Slow = below threshold (TTFT > 3s or < 15 tokens/sec). Fail = request error.' },
-    ],
-  },
-  {
+    icon: '⌨️',
     title: 'Keyboard Shortcuts',
     content: [
       { q: 'Chat shortcuts', a: 'Enter = Send message\nShift+Enter = New line\nEsc = Stop streaming' },
-      { q: 'Code Workspace shortcuts', a: 'Cmd+P = Quick Open\nCmd+Shift+P = Command Palette\nCmd+B = Toggle Sidebar\nCmd+` = Toggle Terminal\nCmd+I = AI Assistant' },
+      { q: 'Navigation', a: 'Click sidebar items to switch between Chat, Code, Skills, Team, Settings, Integrations, and Help.' },
     ],
   },
 ];
@@ -97,38 +110,78 @@ export function HelpPanel() {
 
   const css = {
     panel: { display: 'flex', height: '100vh', overflow: 'hidden' } as React.CSSProperties,
-    nav: { width: '220px', background: 'var(--bg-secondary)', borderRight: '1px solid var(--border)', padding: '20px 0', overflow: 'auto' } as React.CSSProperties,
-    navTitle: { padding: '0 16px 16px', fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)' } as React.CSSProperties,
-    navItem: (active: boolean) => ({ display: 'block', width: '100%', padding: '10px 16px', background: active ? 'var(--accent-dim)' : 'none', color: active ? 'var(--accent)' : 'var(--text-secondary)', border: 'none', cursor: 'pointer', fontSize: '13px', textAlign: 'left' as const, borderRadius: 0, transition: 'all 0.1s' }) as React.CSSProperties,
+    nav: { width: '240px', background: 'var(--bg-secondary)', borderRight: '1px solid var(--border)', padding: '20px 0', overflow: 'auto', flexShrink: 0 } as React.CSSProperties,
+    navHeader: { padding: '0 16px 8px', display: 'flex', flexDirection: 'column' as const, gap: '12px' } as React.CSSProperties,
+    navTitle: { fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)' } as React.CSSProperties,
+    navSubtitle: { fontSize: '12px', color: 'var(--text-tertiary)', lineHeight: 1.4 } as React.CSSProperties,
+    navItem: (active: boolean) => ({
+      display: 'flex', alignItems: 'center', gap: '8px', width: '100%', padding: '10px 16px',
+      background: active ? 'var(--accent-dim)' : 'none', color: active ? 'var(--accent)' : 'var(--text-secondary)',
+      border: 'none', cursor: 'pointer', fontSize: '13px', textAlign: 'left' as const, borderRadius: 0, transition: 'all 0.1s',
+      fontWeight: active ? 600 : 400,
+    }) as React.CSSProperties,
+    navIcon: { fontSize: '14px', width: '20px', textAlign: 'center' as const } as React.CSSProperties,
     main: { flex: 1, overflow: 'auto', padding: '24px 32px' } as React.CSSProperties,
-    search: { width: '100%', padding: '12px 16px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '10px', color: 'var(--text-primary)', fontSize: '14px', outline: 'none', marginBottom: '24px', boxSizing: 'border-box' as const } as React.CSSProperties,
-    sectionTitle: { fontSize: '20px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '16px' } as React.CSSProperties,
+    search: {
+      width: '100%', padding: '12px 16px', background: 'var(--bg-secondary)', border: '1px solid var(--border)',
+      borderRadius: '10px', color: 'var(--text-primary)', fontSize: '14px', outline: 'none', marginBottom: '24px', boxSizing: 'border-box' as const,
+    } as React.CSSProperties,
+    sectionTitle: { fontSize: '20px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '10px' } as React.CSSProperties,
     item: { marginBottom: '16px', padding: '16px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '10px' } as React.CSSProperties,
     question: { fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '8px' } as React.CSSProperties,
-    answer: { fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.6, whiteSpace: 'pre-line' as const } as React.CSSProperties,
+    answer: { fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.7, whiteSpace: 'pre-line' as const } as React.CSSProperties,
+    code: { background: 'var(--bg-tertiary)', padding: '2px 6px', borderRadius: '4px', fontFamily: 'monospace', fontSize: '12px', color: 'var(--accent)' } as React.CSSProperties,
+    supportBar: {
+      padding: '16px', borderTop: '1px solid var(--border)', background: 'var(--bg-tertiary)',
+      textAlign: 'center' as const, fontSize: '12px', color: 'var(--text-tertiary)',
+    } as React.CSSProperties,
+    supportLink: { color: 'var(--accent)', textDecoration: 'none', fontWeight: 600 } as React.CSSProperties,
   };
 
   return (
     <div style={css.panel}>
       <div style={css.nav}>
-        <div style={css.navTitle}>User Manual</div>
+        <div style={css.navHeader}>
+          <div style={css.navTitle}>📖 User Manual</div>
+          <div style={css.navSubtitle}>Everything you need to know about ArcadIA Editor</div>
+        </div>
+        <div style={{ height: '12px' }} />
         {SECTIONS.map((section, i) => (
           <button key={i} style={css.navItem(i === activeSection)} onClick={() => { setActiveSection(i); setSearchQuery(''); }}>
+            <span style={css.navIcon}>{section.icon}</span>
             {section.title}
           </button>
         ))}
+        <div style={css.supportBar}>
+          Need help?{' '}
+          <a href={SUPPORT_HREF} style={css.supportLink}>Contact Support</a>
+          <div style={{ marginTop: '4px', fontSize: '11px' }}>{SUPPORT_EMAIL}</div>
+        </div>
       </div>
       <div style={css.main}>
-        <input style={css.search} placeholder="Search the manual..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
+        <input
+          style={css.search}
+          placeholder="Search the manual..."
+          value={searchQuery}
+          onChange={e => setSearchQuery(e.target.value)}
+        />
 
         {filteredSections.length === 0 ? (
-          <div style={{ textAlign: 'center', color: 'var(--text-tertiary)', padding: '40px', fontSize: '13px' }}>
-            No results found for "{searchQuery}"
+          <div style={{ textAlign: 'center', color: 'var(--text-tertiary)', padding: '40px' }}>
+            <div style={{ fontSize: '32px', marginBottom: '12px' }}>🔍</div>
+            <div style={{ fontSize: '14px' }}>No results found for "{searchQuery}"</div>
+            <div style={{ fontSize: '12px', marginTop: '8px' }}>
+              Can't find what you need?{' '}
+              <a href={SUPPORT_HREF} style={css.supportLink}>Contact support</a>
+            </div>
           </div>
         ) : (
           (searchQuery ? filteredSections : [filteredSections[activeSection]]).map((section, i) => (
             <div key={i}>
-              <div style={css.sectionTitle}>{section.title}</div>
+              <div style={css.sectionTitle}>
+                <span>{section.icon}</span>
+                {section.title}
+              </div>
               {section.content.map((item, j) => (
                 <div key={j} style={css.item}>
                   <div style={css.question}>{item.q}</div>
@@ -138,6 +191,29 @@ export function HelpPanel() {
             </div>
           ))
         )}
+
+        {/* Bottom support banner */}
+        <div style={{
+          marginTop: '32px', padding: '20px', background: 'var(--bg-secondary)',
+          border: '1px solid var(--border)', borderRadius: '12px', textAlign: 'center',
+        }}>
+          <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '8px' }}>
+            Still need help?
+          </div>
+          <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '12px' }}>
+            Reach out to the ArcadIA team for support, feature requests, or bug reports.
+          </div>
+          <a
+            href={SUPPORT_HREF}
+            style={{
+              display: 'inline-block', background: 'var(--accent)', color: 'white',
+              padding: '10px 24px', borderRadius: '8px', textDecoration: 'none',
+              fontSize: '13px', fontWeight: 600,
+            }}
+          >
+            📧 Email Support
+          </a>
+        </div>
       </div>
     </div>
   );

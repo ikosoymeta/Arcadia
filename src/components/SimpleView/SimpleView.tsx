@@ -37,6 +37,203 @@ function getFollowUpSuggestions(content: string): string[] {
   return ['Tell me more', 'Give me an example', 'How do I use this?', 'What are alternatives?'];
 }
 
+// ─── Bridge Setup Prompt ─────────────────────────────────────────────────────
+
+const SETUP_COMMAND = 'curl -sL https://raw.githubusercontent.com/ikosoymeta/Arcadia/main/bridge/setup.sh | bash';
+
+interface DiagState {
+  bridge: 'checking' | 'ok' | 'fail';
+  bridgeVersion: string;
+  lastCheck: string;
+}
+
+function BridgeSetupPrompt({ onRetry }: { onRetry: () => void }) {
+  const [copied, setCopied] = useState(false);
+  const [step, setStep] = useState<'setup' | 'waiting'>('setup');
+  const [showDiag, setShowDiag] = useState(false);
+  const [diag, setDiag] = useState<DiagState>({ bridge: 'checking', bridgeVersion: '', lastCheck: '' });
+
+  // Run diagnostics
+  const runDiagnostics = useCallback(async () => {
+    setDiag(d => ({ ...d, bridge: 'checking', lastCheck: new Date().toLocaleTimeString() }));
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 3000);
+      const res = await fetch('http://127.0.0.1:8087/health', { signal: ctrl.signal });
+      clearTimeout(timer);
+      if (res.ok) {
+        const data = await res.json();
+        setDiag({ bridge: 'ok', bridgeVersion: data.version || 'unknown', lastCheck: new Date().toLocaleTimeString() });
+      } else {
+        setDiag(d => ({ ...d, bridge: 'fail', lastCheck: new Date().toLocaleTimeString() }));
+      }
+    } catch {
+      setDiag(d => ({ ...d, bridge: 'fail', lastCheck: new Date().toLocaleTimeString() }));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (showDiag) runDiagnostics();
+  }, [showDiag, runDiagnostics]);
+
+  // Auto-poll when in waiting state
+  useEffect(() => {
+    if (step !== 'waiting') return;
+    const interval = setInterval(() => {
+      runDiagnostics();
+      onRetry();
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [step, onRetry, runDiagnostics]);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(SETUP_COMMAND);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 3000);
+    } catch {
+      const el = document.getElementById('bridge-cmd');
+      if (el) {
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        window.getSelection()?.removeAllRanges();
+        window.getSelection()?.addRange(range);
+      }
+    }
+  };
+
+  const handleDone = () => {
+    setStep('waiting');
+    runDiagnostics();
+    onRetry();
+  };
+
+  return (
+    <div className={styles.bridgeSetup}>
+      {step === 'setup' ? (
+        <>
+          <div className={styles.bridgeTitle}>
+            <span className={styles.bridgeIcon}>⚡</span>
+            One-Time Setup
+          </div>
+          <div className={styles.bridgeSubtitle}>
+            Paste this command in your terminal to connect ArcadIA to Claude.
+            It only takes a few seconds and auto-starts on every login.
+          </div>
+
+          <div className={styles.bridgeSteps}>
+            <div className={styles.bridgeStep}>
+              <span className={styles.stepNum}>1</span>
+              <span>Open <strong>Terminal</strong> on your Mac</span>
+              <span className={styles.stepHint}>⌘ + Space → type "Terminal"</span>
+            </div>
+            <div className={styles.bridgeStep}>
+              <span className={styles.stepNum}>2</span>
+              <span>Paste the command below and press Enter</span>
+            </div>
+          </div>
+
+          <div className={styles.cmdBox}>
+            <code id="bridge-cmd" className={styles.cmdText}>{SETUP_COMMAND}</code>
+            <button className={styles.copyBtn} onClick={handleCopy}>
+              {copied ? '✓ Copied!' : '📋 Copy'}
+            </button>
+          </div>
+
+          <button className={styles.doneBtn} onClick={handleDone}>
+            ✅ I've run the command
+          </button>
+
+          <div className={styles.bridgeNote}>
+            This is a one-time setup. After this, ArcadIA will always connect automatically.
+          </div>
+
+          {/* Connection Diagnostics */}
+          <div className={styles.diagnostics}>
+            <button className={styles.diagToggle} onClick={() => setShowDiag(!showDiag)}>
+              {showDiag ? '▼' : '▶'} Connection diagnostics
+            </button>
+            {showDiag && (
+              <div className={styles.diagPanel}>
+                <div className={styles.diagRow}>
+                  <span className={styles.diagLabel}>ArcadIA Bridge</span>
+                  <span className={`${styles.diagValue} ${diag.bridge === 'ok' ? styles.diagOk : diag.bridge === 'fail' ? styles.diagFail : styles.diagWarn}`}>
+                    <span className={`${styles.diagDot} ${diag.bridge === 'ok' ? styles.diagDotGreen : diag.bridge === 'fail' ? styles.diagDotRed : styles.diagDotYellow}`} />
+                    {diag.bridge === 'checking' ? 'Checking...' : diag.bridge === 'ok' ? `Running (v${diag.bridgeVersion})` : 'Not detected'}
+                  </span>
+                </div>
+                <div className={styles.diagRow}>
+                  <span className={styles.diagLabel}>Proxy endpoint</span>
+                  <span className={styles.diagValue}>localhost:8087</span>
+                </div>
+                <div className={styles.diagRow}>
+                  <span className={styles.diagLabel}>Last checked</span>
+                  <span className={styles.diagValue}>{diag.lastCheck || '—'}</span>
+                </div>
+                <button className={styles.retryBtn} onClick={runDiagnostics} style={{ marginTop: '8px', width: '100%' }}>
+                  Re-check now
+                </button>
+
+                <div className={styles.troubleshoot}>
+                  <div className={styles.troubleshootTitle}>Troubleshooting</div>
+                  <ul className={styles.troubleshootList}>
+                    <li>Make sure Claude Code is installed: run <code>claude --version</code></li>
+                    <li>Make sure Node.js is installed: run <code>node --version</code></li>
+                    <li>Try running the setup command again (see above)</li>
+                    <li>Check if the bridge is running: <code>lsof -i :8087</code></li>
+                    <li>Restart the bridge: <code>node ~/.arcadia-bridge/arcadia-bridge.js</code></li>
+                    <li>Need help? <a href="mailto:ikosoy@meta.com?subject=ArcadIA%20Editor%20Support" style={{ color: 'var(--accent)' }}>Contact support</a></li>
+                  </ul>
+                </div>
+              </div>
+            )}
+          </div>
+        </>
+      ) : (
+        <>
+          <div className={styles.bridgeTitle}>
+            <span className={styles.bridgePulse} />
+            Looking for connection...
+          </div>
+          <div className={styles.bridgeSubtitle}>
+            Waiting for the bridge to start. This usually takes 2–3 seconds.
+            The app will auto-connect as soon as it detects the bridge.
+          </div>
+          <div className={styles.progressBar}>
+            <div className={styles.progressIndeterminate} />
+          </div>
+
+          {/* Live diagnostics while waiting */}
+          <div className={styles.diagPanel} style={{ marginTop: '14px' }}>
+            <div className={styles.diagRow}>
+              <span className={styles.diagLabel}>Bridge status</span>
+              <span className={`${styles.diagValue} ${diag.bridge === 'ok' ? styles.diagOk : styles.diagFail}`}>
+                <span className={`${styles.diagDot} ${diag.bridge === 'ok' ? styles.diagDotGreen : styles.diagDotRed}`} />
+                {diag.bridge === 'checking' ? 'Checking...' : diag.bridge === 'ok' ? 'Connected!' : 'Waiting...'}
+              </span>
+            </div>
+            <div className={styles.diagRow}>
+              <span className={styles.diagLabel}>Last checked</span>
+              <span className={styles.diagValue}>{diag.lastCheck || '—'}</span>
+            </div>
+            <div className={styles.diagRow}>
+              <span className={styles.diagLabel}>Auto-retry</span>
+              <span className={`${styles.diagValue} ${styles.diagOk}`}>Every 3 seconds</span>
+            </div>
+          </div>
+
+          <button className={styles.retryBtn} onClick={() => { runDiagnostics(); onRetry(); }} style={{ marginTop: '12px' }}>
+            Check now
+          </button>
+          <button className={styles.backLink} onClick={() => setStep('setup')}>
+            ← Back to setup instructions
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── Activity Step ────────────────────────────────────────────────────────────
 
 interface ActivityStep {
@@ -430,23 +627,11 @@ export function SimpleView() {
                 </span>
               )}
             </p>
-            {/* Auto-config progress — no manual setup needed */}
+            {/* Auto-config progress + bridge setup prompt */}
             {configStatus.phase !== 'ready' && configStatus.phase !== 'idle' && (
               <div className={styles.autoConfigBanner}>
                 {configStatus.phase === 'error' ? (
-                  <>
-                    <div className={styles.configMessage}>
-                      <span className={styles.configIcon}>⚠</span>
-                      {configStatus.message}
-                    </div>
-                    {configStatus.detail && (
-                      <div className={styles.configDetail}>{configStatus.detail}</div>
-                    )}
-                    <div className={styles.configRetry}>
-                      Auto-retrying...
-                      <button className={styles.retryBtn} onClick={retryAutoConnect}>Retry now</button>
-                    </div>
-                  </>
+                  <BridgeSetupPrompt onRetry={retryAutoConnect} />
                 ) : (
                   <>
                     <div className={styles.configMessage}>
