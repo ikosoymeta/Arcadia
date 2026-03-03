@@ -22,3 +22,5 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+bug_analysis.md
+screenshot_observations.md

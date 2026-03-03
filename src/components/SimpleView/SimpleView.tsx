@@ -40,6 +40,8 @@ function getFollowUpSuggestions(content: string): string[] {
 // ─── Bridge Setup Prompt ─────────────────────────────────────────────────────
 
 const SETUP_COMMAND = 'curl -sL https://raw.githubusercontent.com/ikosoymeta/Arcadia/main/bridge/setup.sh | bash';
+const COMMAND_FILE_URL = 'https://raw.githubusercontent.com/ikosoymeta/Arcadia/main/bridge/Start-ArcadIA-Bridge.command';
+const MANUAL_START_CMD = 'node ~/.arcadia-bridge/arcadia-bridge.js';
 
 interface DiagState {
   bridge: 'checking' | 'ok' | 'fail';
@@ -114,22 +116,41 @@ function BridgeSetupPrompt({ onRetry }: { onRetry: () => void }) {
         <>
           <div className={styles.bridgeTitle}>
             <span className={styles.bridgeIcon}>⚡</span>
-            One-Time Setup
+            Connect to Claude
           </div>
           <div className={styles.bridgeSubtitle}>
-            Paste this command in your terminal to connect ArcadIA to Claude.
-            It only takes a few seconds and auto-starts on every login.
+            ArcadIA needs a small local bridge to connect to Claude Code on your Mac.
+            Choose one of the options below to get started.
           </div>
 
           <div className={styles.bridgeSteps}>
             <div className={styles.bridgeStep}>
-              <span className={styles.stepNum}>1</span>
-              <span>Open <strong>Terminal</strong> on your Mac</span>
-              <span className={styles.stepHint}>⌘ + Space → type "Terminal"</span>
+              <span className={styles.stepNum}>A</span>
+              <span><strong>Option A:</strong> One-click setup (recommended)</span>
             </div>
+          </div>
+
+          <div className={styles.cmdBox}>
+            <code className={styles.cmdText} style={{ flex: 1, textAlign: 'center', fontSize: '12px' }}>Download → double-click → done</code>
+            <a
+              href={COMMAND_FILE_URL}
+              download="Start-ArcadIA-Bridge.command"
+              className={styles.copyBtn}
+              style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+            >
+              ⬇ Download Bridge
+            </a>
+          </div>
+
+          <div className={styles.bridgeNote} style={{ marginBottom: '16px' }}>
+            After downloading, double-click the file. If macOS blocks it, right-click → Open.
+            Keep the terminal window open while using ArcadIA.
+          </div>
+
+          <div className={styles.bridgeSteps}>
             <div className={styles.bridgeStep}>
-              <span className={styles.stepNum}>2</span>
-              <span>Paste the command below and press Enter</span>
+              <span className={styles.stepNum}>B</span>
+              <span><strong>Option B:</strong> Terminal command</span>
             </div>
           </div>
 
@@ -141,11 +162,11 @@ function BridgeSetupPrompt({ onRetry }: { onRetry: () => void }) {
           </div>
 
           <button className={styles.doneBtn} onClick={handleDone}>
-            ✅ I've run the command
+            ✅ I've started the bridge
           </button>
 
           <div className={styles.bridgeNote}>
-            This is a one-time setup. After this, ArcadIA will always connect automatically.
+            Already set up? Just run: <code style={{ fontSize: '11px', background: 'var(--bg-tertiary)', padding: '2px 6px', borderRadius: '4px' }}>{MANUAL_START_CMD}</code>
           </div>
 
           {/* Connection Diagnostics */}
@@ -367,11 +388,11 @@ function MessageBubble({ message }: { message: Message }) {
       )}
 
       {/* Message meta */}
-      {!isUser && (message.inputTokens || message.outputTokens) && (
+      {!isUser && ((message.inputTokens != null && message.inputTokens > 0) || (message.outputTokens != null && message.outputTokens > 0)) && (
         <div className={styles.messageMeta}>
-          {message.inputTokens && <span>{message.inputTokens} in</span>}
-          {message.outputTokens && <span>{message.outputTokens} out</span>}
-          {message.totalTime && <span>{(message.totalTime / 1000).toFixed(1)}s</span>}
+          {message.inputTokens != null && message.inputTokens > 0 && <span>{message.inputTokens} in</span>}
+          {message.outputTokens != null && message.outputTokens > 0 && <span>{message.outputTokens} out</span>}
+          {message.totalTime != null && message.totalTime > 0 && <span>{(message.totalTime / 1000).toFixed(1)}s</span>}
         </div>
       )}
     </div>

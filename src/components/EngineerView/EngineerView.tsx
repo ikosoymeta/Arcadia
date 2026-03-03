@@ -226,10 +226,10 @@ function ApiLogsPanel() {
                 </span>
                 <span className={styles.logLabel}>{log.label ?? log.direction}</span>
                 <span className={styles.logTime}>{new Date(log.timestamp).toLocaleTimeString()}</span>
-                {log.inputTokens && <span className={styles.logTokens}>↑{log.inputTokens}</span>}
-                {log.outputTokens && <span className={styles.logTokens}>↓{log.outputTokens}</span>}
-                {log.ttft && <span className={styles.logMetric}>TTFT {log.ttft.toFixed(0)}ms</span>}
-                {log.tokensPerSecond && <span className={styles.logMetric}>{log.tokensPerSecond.toFixed(1)} t/s</span>}
+                {log.inputTokens != null && log.inputTokens > 0 && <span className={styles.logTokens}>↑{log.inputTokens}</span>}
+                {log.outputTokens != null && log.outputTokens > 0 && <span className={styles.logTokens}>↓{log.outputTokens}</span>}
+                {log.ttft != null && log.ttft > 0 && <span className={styles.logMetric}>TTFT {log.ttft.toFixed(0)}ms</span>}
+                {log.tokensPerSecond != null && log.tokensPerSecond > 0 && <span className={styles.logMetric}>{log.tokensPerSecond.toFixed(1)} t/s</span>}
               </div>
             ))
           )}
@@ -241,11 +241,11 @@ function ApiLogsPanel() {
               <span>{new Date(selected.timestamp).toISOString()}</span>
               <button onClick={() => setSelected(null)}>✕</button>
             </div>
-            {selected.ttft && <div className={styles.logMetricRow}><b>TTFT:</b> {selected.ttft.toFixed(1)}ms</div>}
-            {selected.totalTime && <div className={styles.logMetricRow}><b>Total:</b> {(selected.totalTime / 1000).toFixed(2)}s</div>}
-            {selected.tokensPerSecond && <div className={styles.logMetricRow}><b>Speed:</b> {selected.tokensPerSecond.toFixed(1)} tokens/s</div>}
-            {selected.inputTokens && <div className={styles.logMetricRow}><b>Input tokens:</b> {selected.inputTokens}</div>}
-            {selected.outputTokens && <div className={styles.logMetricRow}><b>Output tokens:</b> {selected.outputTokens}</div>}
+            {selected.ttft != null && selected.ttft > 0 && <div className={styles.logMetricRow}><b>TTFT:</b> {selected.ttft.toFixed(1)}ms</div>}
+            {selected.totalTime != null && selected.totalTime > 0 && <div className={styles.logMetricRow}><b>Total:</b> {(selected.totalTime / 1000).toFixed(2)}s</div>}
+            {selected.tokensPerSecond != null && selected.tokensPerSecond > 0 && <div className={styles.logMetricRow}><b>Speed:</b> {selected.tokensPerSecond.toFixed(1)} tokens/s</div>}
+            {selected.inputTokens != null && selected.inputTokens > 0 && <div className={styles.logMetricRow}><b>Input tokens:</b> {selected.inputTokens}</div>}
+            {selected.outputTokens != null && selected.outputTokens > 0 && <div className={styles.logMetricRow}><b>Output tokens:</b> {selected.outputTokens}</div>}
             <pre className={styles.logJson}>{JSON.stringify(selected.data, null, 2)}</pre>
           </div>
         )}
@@ -561,10 +561,10 @@ function EngineerChat() {
                 </div>
               )}
               <div className={styles.engMsgMeta}>
-                {msg.inputTokens && <span>↑{msg.inputTokens}</span>}
-                {msg.outputTokens && <span>↓{msg.outputTokens}</span>}
-                {msg.ttft && <span>TTFT {msg.ttft.toFixed(0)}ms</span>}
-                {msg.totalTime && <span>{(msg.totalTime / 1000).toFixed(2)}s</span>}
+                {msg.inputTokens != null && msg.inputTokens > 0 && <span>↑{msg.inputTokens}</span>}
+                {msg.outputTokens != null && msg.outputTokens > 0 && <span>↓{msg.outputTokens}</span>}
+                {msg.ttft != null && msg.ttft > 0 && <span>TTFT {msg.ttft.toFixed(0)}ms</span>}
+                {msg.totalTime != null && msg.totalTime > 0 && <span>{(msg.totalTime / 1000).toFixed(2)}s</span>}
                 <span>{new Date(msg.timestamp).toLocaleTimeString()}</span>
               </div>
             </div>
