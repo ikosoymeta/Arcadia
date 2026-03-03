@@ -14,17 +14,36 @@ interface SidebarProps {
 // ─── Share / Export Modal ─────────────────────────────────────────────────────
 
 function ShareModal({ conv, onClose }: { conv: Conversation; onClose: () => void }) {
-  const { generateShareUrl, setVisibility } = useChat();
   const [copied, setCopied] = useState(false);
-  const [shareUrl, setShareUrl] = useState(conv.shareUrl || '');
+  const [shareUrl, setShareUrl] = useState('');
+  const [generating, setGenerating] = useState(true);
+  const [urlWarning, setUrlWarning] = useState('');
 
-  // Generate share URL on mount, not during render (avoids setState-during-render)
+  // Generate the share URL on mount (async compression)
   React.useEffect(() => {
-    if (!shareUrl) {
-      const url = generateShareUrl(conv.id);
-      setShareUrl(url);
-    }
-  }, [conv.id, shareUrl, generateShareUrl]);
+    let cancelled = false;
+    (async () => {
+      try {
+        const { encodeShareUrl, estimateShareSize } = await import('../../services/share');
+        const est = estimateShareSize(conv);
+        if (est > 10000) {
+          setUrlWarning('This conversation is large. The share link may not work on all platforms. Consider exporting instead.');
+        }
+        const url = await encodeShareUrl(conv);
+        if (!cancelled) {
+          setShareUrl(url);
+          setGenerating(false);
+        }
+      } catch (err) {
+        console.error('Failed to generate share URL:', err);
+        if (!cancelled) {
+          setUrlWarning('Failed to generate share link. Try exporting instead.');
+          setGenerating(false);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [conv]);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(shareUrl);
@@ -35,7 +54,7 @@ function ShareModal({ conv, onClose }: { conv: Conversation; onClose: () => void
   const handleExportMarkdown = () => {
     const lines: string[] = [`# ${conv.title}`, '', `*Exported from ArcadIA · ${new Date(conv.createdAt).toLocaleDateString()}*`, ''];
     for (const msg of conv.messages) {
-      lines.push(`## ${msg.role === 'user' ? '👤 You' : '✦ Claude'}`);
+      lines.push(`## ${msg.role === 'user' ? 'You' : 'Claude'}`);
       lines.push('');
       lines.push(msg.content);
       lines.push('');
@@ -73,7 +92,7 @@ function ShareModal({ conv, onClose }: { conv: Conversation; onClose: () => void
   };
   const modal: React.CSSProperties = {
     background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '16px',
-    width: '100%', maxWidth: '400px', overflow: 'hidden',
+    width: '100%', maxWidth: '440px', overflow: 'hidden',
     boxShadow: '0 24px 60px rgba(0,0,0,0.5)',
   };
   const section: React.CSSProperties = {
@@ -92,69 +111,79 @@ function ShareModal({ conv, onClose }: { conv: Conversation; onClose: () => void
   return (
     <div style={overlay} onClick={onClose}>
       <div style={modal} onClick={e => e.stopPropagation()}>
+        {/* Header */}
         <div style={{ ...section, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <span style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: '15px' }}>Share Conversation</span>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer', fontSize: '18px' }}>✕</button>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer', fontSize: '18px' }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+          </button>
         </div>
 
+        {/* Share Link */}
         <div style={section}>
-          <div style={label}>Visibility</div>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            {(['private', 'team', 'public'] as const).map(v => (
-              <button
-                key={v}
-                onClick={() => setVisibility(conv.id, v)}
-                style={{
-                  ...btn,
-                  flex: 1,
-                  background: conv.visibility === v ? 'var(--accent)' : 'var(--bg-hover)',
-                  color: conv.visibility === v ? '#fff' : 'var(--text-secondary)',
-                  borderColor: conv.visibility === v ? 'var(--accent)' : 'var(--border)',
-                }}
-              >
-                {v === 'private' ? '🔒 Private' : v === 'team' ? '👥 Team' : '🌐 Public'}
-              </button>
-            ))}
+          <div style={label}>Share Link</div>
+          <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginBottom: '10px' }}>
+            Anyone with this link can view the conversation in ArcadIA.
           </div>
-        </div>
-
-        {conv.visibility !== 'private' && (
-          <div style={section}>
-            <div style={label}>Share Link</div>
+          {generating ? (
+            <div style={{ padding: '12px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '12px' }}>
+              Generating share link...
+            </div>
+          ) : (
             <div style={{ display: 'flex', gap: '8px' }}>
               <input
                 readOnly
                 value={shareUrl}
+                onClick={e => (e.target as HTMLInputElement).select()}
                 style={{
                   flex: 1, padding: '8px 12px', background: 'var(--bg-primary)',
                   border: '1px solid var(--border)', borderRadius: '8px',
-                  color: 'var(--text-secondary)', fontSize: '12px', fontFamily: 'monospace', outline: 'none',
+                  color: 'var(--text-secondary)', fontSize: '11px', fontFamily: 'monospace', outline: 'none',
+                  textOverflow: 'ellipsis',
                 }}
               />
               <button
                 onClick={handleCopy}
                 style={{
                   ...btn,
-                  background: copied ? 'rgba(34,197,94,0.15)' : 'var(--bg-hover)',
-                  color: copied ? '#22c55e' : 'var(--text-secondary)',
-                  borderColor: copied ? 'rgba(34,197,94,0.3)' : 'var(--border)',
+                  background: copied ? 'rgba(34,197,94,0.15)' : 'var(--accent)',
+                  color: copied ? '#22c55e' : '#fff',
+                  borderColor: copied ? 'rgba(34,197,94,0.3)' : 'var(--accent)',
                   whiteSpace: 'nowrap',
+                  display: 'flex', alignItems: 'center', gap: '4px',
                 }}
               >
-                {copied ? '✓ Copied!' : '📋 Copy'}
+                {copied ? (
+                  <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12" /></svg> Copied!</>
+                ) : (
+                  <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" /></svg> Copy</>  
+                )}
               </button>
             </div>
-          </div>
-        )}
+          )}
+          {urlWarning && (
+            <div style={{ marginTop: '8px', padding: '8px 10px', background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.2)', borderRadius: '6px', fontSize: '11px', color: '#f59e0b' }}>
+              {urlWarning}
+            </div>
+          )}
+        </div>
 
+        {/* Export */}
         <div style={section}>
           <div style={label}>Export</div>
           <div style={{ display: 'flex', gap: '8px' }}>
-            <button onClick={handleExportMarkdown} style={{ ...btn, flex: 1 }}>📄 Markdown</button>
-            <button onClick={handleExportJSON} style={{ ...btn, flex: 1 }}>📦 JSON</button>
+            <button onClick={handleExportMarkdown} style={{ ...btn, flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>
+              Markdown
+            </button>
+            <button onClick={handleExportJSON} style={{ ...btn, flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /></svg>
+              JSON
+            </button>
           </div>
         </div>
 
+        {/* Stats */}
         <div style={{ ...section, borderBottom: 'none' }}>
           <div style={label}>Stats</div>
           <div style={{ display: 'flex', gap: '16px' }}>

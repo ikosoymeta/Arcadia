@@ -1,0 +1,26 @@
+SHARE URL DESIGN
+================
+
+Since ArcadIA is a static SPA on GitHub Pages (no backend), we need a client-side approach:
+
+APPROACH: URL hash with compressed conversation data
+- Encode conversation data (title + messages) as JSON
+- Compress with pako/deflate (built into browsers via CompressionStream)
+- Base64url encode and put in URL hash: https://ikosoymeta.github.io/Arcadia/#share=<data>
+- URL hash doesn't go to server, so no 404 issues on GitHub Pages
+- On load, App.tsx checks for #share= prefix and loads the conversation
+
+LIMITATIONS:
+- URL length limit ~2000 chars for some browsers/platforms
+- For long conversations, we'll truncate or warn
+
+ALTERNATIVE for large conversations:
+- Use a GitHub Gist to store the data, share the gist URL
+- But that requires auth, so let's start with hash approach
+- For large convos, fall back to "Copy to clipboard" as JSON
+
+PLAN:
+1. Create a share utility: encodeConversation / decodeConversation
+2. Redesign ShareModal: just show the URL + copy button + export options
+3. In App.tsx: on mount, check window.location.hash for #share= prefix
+4. If found, decode and create a temporary read-only conversation view

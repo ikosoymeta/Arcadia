@@ -29,6 +29,7 @@ interface ChatContextType extends ChatState {
   togglePin: (id: string) => void;
   setVisibility: (id: string, visibility: 'private' | 'team' | 'public') => void;
   generateShareUrl: (id: string) => string;
+  importConversation: (conv: Conversation) => void;
   moveToFolder: (conversationId: string, folderId: string | null) => void;
   addCheckpoint: (conversationId: string, label: string) => void;
   restoreCheckpoint: (conversationId: string, checkpointId: string) => void;
@@ -189,6 +190,20 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       ),
     }));
     return url;
+  }, []);
+
+  const importConversation = useCallback((conv: Conversation) => {
+    setState(prev => {
+      // Don't import if already exists
+      if (prev.conversations.some(c => c.id === conv.id)) {
+        return { ...prev, activeConversationId: conv.id };
+      }
+      return {
+        ...prev,
+        conversations: [conv, ...prev.conversations],
+        activeConversationId: conv.id,
+      };
+    });
   }, []);
 
   const moveToFolder = useCallback((conversationId: string, folderId: string | null) => {
@@ -362,6 +377,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       togglePin,
       setVisibility,
       generateShareUrl,
+      importConversation,
       moveToFolder,
       addCheckpoint,
       restoreCheckpoint,

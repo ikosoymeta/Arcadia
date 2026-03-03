@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, lazy, Suspense, useEffect } from 'react';
-import { ChatProvider } from './store/ChatContext';
+import { ChatProvider, useChat } from './store/ChatContext';
 import { ConnectionProvider } from './store/ConnectionContext';
 import { PreviewProvider } from './store/PreviewContext';
 import { Sidebar } from './components/Sidebar/Sidebar';
@@ -50,6 +50,36 @@ function ResizeHandle({ onMouseDown }: { onMouseDown: (e: React.MouseEvent) => v
       <div className={styles.resizeLine} />
     </div>
   );
+}
+
+// ─── Shared Conversation Loader ─────────────────────────────────────────────
+// This must be inside ChatProvider to access importConversation.
+function SharedConversationLoader() {
+  const { importConversation } = useChat();
+  const loadedRef = useRef(false);
+
+  useEffect(() => {
+    if (loadedRef.current) return;
+    const hash = window.location.hash;
+    if (!hash.startsWith('#share=')) return;
+    loadedRef.current = true;
+
+    (async () => {
+      try {
+        const { decodeShareHash } = await import('./services/share');
+        const conv = await decodeShareHash();
+        if (conv) {
+          importConversation(conv);
+          // Clean up the hash so it doesn't reload on refresh
+          history.replaceState(null, '', window.location.pathname + window.location.search);
+        }
+      } catch (err) {
+        console.error('Failed to load shared conversation:', err);
+      }
+    })();
+  }, [importConversation]);
+
+  return null;
 }
 
 // ─── App ──────────────────────────────────────────────────────────────────────
@@ -137,6 +167,7 @@ function App() {
   return (
     <ConnectionProvider>
       <ChatProvider>
+        <SharedConversationLoader />
         <PreviewProvider>
           {/* Drag overlay to prevent iframe/element interference during resize */}
           {isDragging && <div className={styles.dragOverlay} />}
