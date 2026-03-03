@@ -6,6 +6,7 @@ import { useChat } from '../../store/ChatContext';
 import { sendMessage } from '../../services/claude';
 import { trackMessage } from '../../services/analytics';
 import type { Message, Artifact, ImageAttachment, ToolUseBlock } from '../../types';
+import { CLAUDE_MODELS } from '../../types';
 import styles from './SimpleView.module.css';
 
 // ─── Quick suggestion prompts ─────────────────────────────────────────────────
@@ -428,7 +429,7 @@ function ActivityFeed({ steps }: { steps: ActivityStep[] }) {
 // ─── Main SimpleView ──────────────────────────────────────────────────────────
 
 export function SimpleView() {
-  const { activeConnection, isMetaProxy, configStatus, retryAutoConnect } = useConnection();
+  const { activeConnection, updateConnection, isMetaProxy, configStatus, retryAutoConnect } = useConnection();
   const {
     getActiveConversation, addMessage, createConversation,
     isStreaming, setStreaming, streamingText, setStreamingText,
@@ -442,6 +443,7 @@ export function SimpleView() {
   const [error, setError] = useState('');
   const [followUps, setFollowUps] = useState<string[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+  const [showModelSelector, setShowModelSelector] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -648,8 +650,36 @@ export function SimpleView() {
             <p className={styles.emptySubtitle}>
               Powered by {activeConnection ? activeConnection.label : 'Claude'}
               {activeConnection && (
-                <span className={styles.modelPill}>
-                  {activeConnection.model.replace('claude-', '').replace(/-\d{8}$/, '')}
+                <span className={styles.modelSelectorWrapper}>
+                  <button
+                    className={styles.modelPill}
+                    onClick={() => setShowModelSelector(!showModelSelector)}
+                    title="Click to change model"
+                  >
+                    {activeConnection.model.replace('claude-', '').replace(/-\d{8}$/, '')}
+                    <span className={styles.modelPillArrow}>{showModelSelector ? '▲' : '▼'}</span>
+                  </button>
+                  {showModelSelector && (
+                    <div className={styles.modelDropdown}>
+                      <div className={styles.modelDropdownHeader}>Select Model</div>
+                      {CLAUDE_MODELS.map(m => (
+                        <button
+                          key={m.id}
+                          className={`${styles.modelOption} ${activeConnection.model === m.id ? styles.modelOptionActive : ''}`}
+                          onClick={() => {
+                            updateConnection(activeConnection.id, { model: m.id });
+                            setShowModelSelector(false);
+                          }}
+                        >
+                          <div className={styles.modelOptionMain}>
+                            <span className={styles.modelOptionName}>{m.label}</span>
+                            {m.badge && <span className={styles.modelOptionBadge}>{m.badge}</span>}
+                          </div>
+                          <div className={styles.modelOptionDesc}>{m.desc}</div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </span>
               )}
             </p>
