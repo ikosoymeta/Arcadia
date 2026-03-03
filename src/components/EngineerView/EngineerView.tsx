@@ -1127,7 +1127,7 @@ function ValidationPanel() {
 // ─── Main EngineerView ────────────────────────────────────────────────────────
 
 export function EngineerView() {
-  const [tab, setTab] = useState<EngTab>('chat');
+  const [tab, setTab] = useState<EngTab>('terminal');
 
   return (
     <div className={styles.container}>
