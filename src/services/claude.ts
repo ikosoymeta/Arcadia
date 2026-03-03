@@ -139,13 +139,15 @@ export async function sendMessage(
     if (!reader) throw new Error('No response stream');
 
     const decoder = new TextDecoder();
+    let buffer = '';
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
 
-      const chunk = decoder.decode(value, { stream: true });
-      const lines = chunk.split('\n');
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || ''; // keep last (potentially incomplete) line
 
       for (const line of lines) {
         if (!line.startsWith('data: ')) continue;
@@ -273,12 +275,14 @@ export async function sendBenchmarkMessage(
   const reader = response.body?.getReader();
   if (!reader) throw new Error('No stream');
   const decoder = new TextDecoder();
+  let buffer = '';
 
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
-    const chunk = decoder.decode(value, { stream: true });
-    const lines = chunk.split('\n');
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
     for (const line of lines) {
       if (!line.startsWith('data: ')) continue;
       const data = line.slice(6);
