@@ -12,12 +12,12 @@ import styles from './SimpleView.module.css';
 // ─── Quick suggestion prompts ─────────────────────────────────────────────────
 
 const SUGGESTIONS = [
-  { icon: '🌐', label: 'Build a website', prompt: 'Build me a beautiful landing page for a tech startup with a hero section, features, and contact form. Use HTML, CSS, and JavaScript.' },
-  { icon: '📝', label: 'Write an email', prompt: 'Write a professional email to schedule a meeting with a client to discuss a new project proposal.' },
-  { icon: '🔍', label: 'Explain a concept', prompt: 'Explain how machine learning works in simple terms, with a real-world analogy.' },
+  { icon: '🌐', label: 'Build a component', prompt: 'Build me a React component for a developer dashboard with a metrics overview, recent activity feed, and quick action buttons. Use TypeScript and TailwindCSS.' },
+  { icon: '📝', label: 'Write a design doc', prompt: 'Write a technical design document for a new feature: a real-time notification system using WebSockets. Include architecture, API design, data model, and rollout plan.' },
+  { icon: '🔍', label: 'Explain a concept', prompt: 'Explain how React Server Components work under the hood, including the streaming protocol and how they differ from traditional SSR.' },
   { icon: '🐛', label: 'Debug my code', prompt: 'Help me debug this code:\n\n```python\ndef calculate_average(numbers):\n    total = 0\n    for n in numbers:\n        total += n\n    return total / len(numbers)\n\nprint(calculate_average([]))\n```\n\nWhat\'s wrong and how do I fix it?' },
-  { icon: '📊', label: 'Analyze data', prompt: 'Help me write a Python script to analyze a CSV file and create a summary with statistics (mean, median, max, min) for each numeric column.' },
-  { icon: '✍️', label: 'Write content', prompt: 'Write a compelling 500-word blog post about the future of AI assistants and how they will change the way we work.' },
+  { icon: '📊', label: 'Analyze data', prompt: 'Help me write a Python script to query a Presto table, aggregate metrics by date, and generate a summary report with key statistics and trends.' },
+  { icon: '✍️', label: 'Write a RFC', prompt: 'Write an RFC proposing a migration from REST to GraphQL for our internal API. Include motivation, technical approach, migration strategy, and trade-offs.' },
 ];
 
 // ─── Follow-up suggestions based on response type ─────────────────────────────
