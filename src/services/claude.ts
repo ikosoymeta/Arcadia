@@ -235,12 +235,16 @@ export async function sendMessage(opts: SendMessageOptions): Promise<SendMessage
   let outputTokens: number | undefined;
   let currentToolCall: Partial<ToolUseBlock> | null = null;
   let currentToolInputStr = '';
+  let rawChunks: string[] = []; // Debug: collect raw chunks
+  let eventCount = 0;
 
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
 
-    buffer += decoder.decode(value, { stream: true });
+    const chunk = decoder.decode(value, { stream: true });
+    rawChunks.push(chunk);
+    buffer += chunk;
     const lines = buffer.split('\n');
     buffer = lines.pop() ?? '';
 
@@ -255,6 +259,8 @@ export async function sendMessage(opts: SendMessageOptions): Promise<SendMessage
       } else if (trimmedLine.startsWith('data:')) {
         data = trimmedLine.slice(5).trim();
       } else {
+        // Not an SSE data line — could be raw text from a non-SSE response
+        // Collect it as potential fallback content
         continue;
       }
       if (!data || data === '[DONE]') continue;
@@ -262,7 +268,10 @@ export async function sendMessage(opts: SendMessageOptions): Promise<SendMessage
       let event: Record<string, unknown>;
       try {
         event = JSON.parse(data);
+        eventCount++;
       } catch {
+        // If JSON parse fails, the data line might contain raw text
+        console.warn('[ArcadIA] SSE parse warning: non-JSON data line:', data.slice(0, 100));
         continue;
       }
 
@@ -328,6 +337,64 @@ export async function sendMessage(opts: SendMessageOptions): Promise<SendMessage
         const usage = (event.usage as Record<string, number> | undefined);
         if (usage) outputTokens = usage.output_tokens;
       }
+    }
+  }
+
+  // Process any remaining buffer content
+  if (buffer.trim()) {
+    const trimmedLine = buffer.trim();
+    if (trimmedLine.startsWith('data: ') || trimmedLine.startsWith('data:')) {
+      const data = trimmedLine.startsWith('data: ') ? trimmedLine.slice(6).trim() : trimmedLine.slice(5).trim();
+      if (data && data !== '[DONE]') {
+        try {
+          const event = JSON.parse(data);
+          if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+            const text = event.delta.text as string;
+            if (!ttft) ttft = Date.now() - startTime;
+            fullText += text;
+            onToken?.(text);
+          }
+        } catch { /* ignore */ }
+      }
+    }
+  }
+
+  // Fallback: if no SSE events were parsed, try to interpret the raw response
+  if (eventCount === 0 && rawChunks.length > 0) {
+    const rawBody = rawChunks.join('');
+    console.warn('[ArcadIA] No SSE events parsed. Raw response:', rawBody.slice(0, 500));
+    try {
+      // Maybe the response is a plain JSON message (non-streaming)
+      const jsonResponse = JSON.parse(rawBody);
+      if (jsonResponse.content && Array.isArray(jsonResponse.content)) {
+        for (const block of jsonResponse.content) {
+          if (block.type === 'text' && block.text) {
+            fullText += block.text;
+            onToken?.(block.text);
+          }
+        }
+        if (jsonResponse.usage) {
+          inputTokens = jsonResponse.usage.input_tokens;
+          outputTokens = jsonResponse.usage.output_tokens;
+        }
+      } else if (typeof jsonResponse.content === 'string') {
+        fullText = jsonResponse.content;
+        onToken?.(jsonResponse.content);
+      }
+    } catch {
+      // Not JSON either — treat raw text as the response
+      if (rawBody.trim() && !rawBody.includes('event:') && !rawBody.includes('data:')) {
+        fullText = rawBody.trim();
+        onToken?.(fullText);
+      }
+    }
+  }
+
+  // Debug log
+  if (!fullText) {
+    console.error('[ArcadIA] Empty response. Events parsed:', eventCount, 'Raw chunks:', rawChunks.length);
+    if (rawChunks.length > 0) {
+      console.error('[ArcadIA] First raw chunk:', rawChunks[0].slice(0, 300));
     }
   }
 

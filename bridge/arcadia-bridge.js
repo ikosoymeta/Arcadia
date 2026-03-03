@@ -169,17 +169,29 @@ function handleMessages(req, res, body) {
       if (firstChunk) {
         firstChunk = false;
         const lines = text.split('\n');
-        // Remove header lines (e.g. "Claude Code at Meta (https://...)")
-        while (lines.length > 0 && (
-          lines[0].includes('Claude Code at Meta') ||
-          lines[0].includes('fburl.com') ||
-          lines[0].trim() === ''
-        )) {
-          lines.shift();
+        // Only remove header lines from the very beginning
+        let headerEnd = 0;
+        for (let i = 0; i < Math.min(lines.length, 5); i++) {
+          if (
+            lines[i].includes('Claude Code at Meta') ||
+            lines[i].includes('fburl.com') ||
+            lines[i].includes('claude.ai') ||
+            (lines[i].trim() === '' && i < 3)
+          ) {
+            headerEnd = i + 1;
+          } else {
+            break;
+          }
+        }
+        if (headerEnd > 0) {
+          lines.splice(0, headerEnd);
         }
         text = lines.join('\n');
-        if (!text) return; // All was header, skip
+        // Even if text is empty after header removal, don't skip — 
+        // more data chunks will follow
       }
+
+      if (!text) return; // Skip empty chunks
 
       totalChars += text.length;
       output += text;
@@ -256,12 +268,21 @@ function handleMessages(req, res, body) {
       if (firstChunk) {
         firstChunk = false;
         const lines = text.split('\n');
-        while (lines.length > 0 && (
-          lines[0].includes('Claude Code at Meta') ||
-          lines[0].includes('fburl.com') ||
-          lines[0].trim() === ''
-        )) {
-          lines.shift();
+        let headerEnd = 0;
+        for (let i = 0; i < Math.min(lines.length, 5); i++) {
+          if (
+            lines[i].includes('Claude Code at Meta') ||
+            lines[i].includes('fburl.com') ||
+            lines[i].includes('claude.ai') ||
+            (lines[i].trim() === '' && i < 3)
+          ) {
+            headerEnd = i + 1;
+          } else {
+            break;
+          }
+        }
+        if (headerEnd > 0) {
+          lines.splice(0, headerEnd);
         }
         text = lines.join('\n');
       }
