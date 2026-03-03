@@ -18,13 +18,17 @@
   cursor: col-resize;
 }
 
-/* ─── Sidebar Panel ────────────────────────────────────────────────────────── */
+/* ─── Sidebar Panel (fixed width, not resizable) ─────────────────────────── */
 .sidebarPanel {
+  width: 280px;
+  min-width: 280px;
+  max-width: 280px;
   height: 100vh;
   flex-shrink: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  border-right: 1px solid var(--border);
 }
 
 .sidebarPanel > * {
@@ -32,7 +36,7 @@
   height: 100%;
 }
 
-/* ─── Main Content Panel ───────────────────────────────────────────────────── */
+/* ─── Main Content Panel (fills all remaining space) ─────────────────────── */
 .mainContent {
   flex: 1;
   display: flex;
@@ -58,7 +62,7 @@
   height: 100%;
 }
 
-/* ─── Resize Handle ────────────────────────────────────────────────────────── */
+/* ─── Resize Handle (preview only) ────────────────────────────────────────── */
 .resizeHandle {
   width: 6px;
   height: 100vh;
@@ -89,14 +93,6 @@
   border-radius: 1px;
   transition: all 0.15s;
   opacity: 0.6;
-}
-
-.resizeLeft {
-  /* Between sidebar and main */
-}
-
-.resizeRight {
-  /* Between main and preview */
 }
 
 .resizeHandle:active .resizeLine {
@@ -170,6 +166,8 @@
   border-bottom: 1px solid var(--border);
   background: var(--bg-secondary);
   flex-shrink: 0;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .modeHint {
@@ -177,12 +175,13 @@
   color: var(--text-tertiary);
 }
 
-/* ─── Chat Layout ──────────────────────────────────────────────────────────── */
+/* ─── Chat Layout (fills all available space) ─────────────────────────────── */
 .chatLayout {
   flex: 1;
   display: flex;
   min-width: 0;
   overflow: hidden;
+  width: 100%;
 }
 
 .engineerLayout {
@@ -190,11 +189,39 @@
   display: flex;
   min-width: 0;
   overflow: hidden;
+  width: 100%;
 }
 
 .fullWidth {
   flex: 1;
   overflow: auto;
+  width: 100%;
+}
+
+/* ─── Persistent Help Link ────────────────────────────────────────────────── */
+.persistentHelp {
+  position: fixed;
+  bottom: 12px;
+  right: 12px;
+  z-index: 200;
+  padding: 6px 14px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  text-decoration: none;
+  transition: all 0.2s;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  opacity: 0.7;
+}
+
+.persistentHelp:hover {
+  opacity: 1;
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--bg-tertiary);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
 }
 
 /* ─── Responsive: Mobile ───────────────────────────────────────────────────── */
@@ -237,30 +264,4 @@
     bottom: 10px;
     transform: none;
   }
-}
-
-/* ─── Persistent Help Link ────────────────────────────────────────────────── */
-.persistentHelp {
-  position: fixed;
-  bottom: 12px;
-  right: 12px;
-  z-index: 200;
-  padding: 6px 14px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: 20px;
-  color: var(--text-tertiary);
-  font-size: 11px;
-  text-decoration: none;
-  transition: all 0.2s;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-  opacity: 0.7;
-}
-
-.persistentHelp:hover {
-  opacity: 1;
-  color: var(--accent);
-  border-color: var(--accent);
-  background: var(--bg-tertiary);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
 }
