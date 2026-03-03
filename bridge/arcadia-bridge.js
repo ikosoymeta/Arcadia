@@ -1,10 +1,14 @@
 #!/usr/bin/env node
 /**
- * ArcadIA Bridge v2.0.0 — Local proxy connecting ArcadIA web app to Claude Code
+ * ArcadIA Bridge v2.1.0 — Local proxy connecting ArcadIA web app to Claude Code
  * 
  * Runs on localhost:8087 and forwards requests from the ArcadIA web app
  * to Claude Code CLI, which handles Meta internal authentication.
  * 
+ * v2.1.0 improvements:
+ * - Added /v1/validate endpoint for running lint/typecheck/test commands
+ * - Added /v1/auto-fix endpoint for autonomous error correction
+ *
  * v2.0.0 improvements:
  * - SSE keepalive pings every 2s so the browser doesn't time out
  * - Progress status events sent to frontend during long waits
@@ -18,7 +22,7 @@ const os = require('os');
 
 const PORT = 8087;
 const HOST = '127.0.0.1';
-const VERSION = '2.0.0';
+const VERSION = '2.1.0';
 const TIMEOUT_MS = 180000; // 3 minute timeout (increased for slow first requests)
 const KEEPALIVE_INTERVAL_MS = 2000; // Send SSE comment every 2s to keep connection alive
 
@@ -96,6 +100,11 @@ function handleHealthCheck(res) {
     claude_version: claudeVersion,
     warmed_up: warmedUp,
     warmup_time_ms: warmupTime,
+    capabilities: {
+      validate: true,
+      auto_fix: true,
+      streaming: true,
+    },
     stats: {
       total_requests: totalRequests,
       active_requests: activeRequests,
@@ -512,6 +521,173 @@ function handleMessages(req, res, body) {
   }
 }
 
+// ─── Validation endpoint: run lint/typecheck/test commands ─────────────────
+
+const VALIDATE_TIMEOUT_MS = 60000; // 1 minute timeout for validation commands
+
+function handleValidate(req, res, body) {
+  setCorsHeaders(res);
+
+  let payload;
+  try {
+    payload = JSON.parse(body);
+  } catch (e) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Invalid JSON body' }));
+    return;
+  }
+
+  const commands = payload.commands || [];
+  const cwd = payload.cwd || process.env.HOME || os.homedir();
+
+  if (!commands.length) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'No commands provided. Send { "commands": ["yarn lint", "yarn typecheck"] }' }));
+    return;
+  }
+
+  console.log(`[${new Date().toISOString()}] 🔍 Validate: ${commands.length} commands in ${cwd}`);
+
+  // Run commands sequentially, collect results
+  const results = [];
+  let commandIndex = 0;
+
+  function runNext() {
+    if (commandIndex >= commands.length) {
+      // All done — send results
+      const allPassed = results.every(r => r.passed);
+      const summary = {
+        passed: allPassed,
+        total: results.length,
+        passed_count: results.filter(r => r.passed).length,
+        failed_count: results.filter(r => !r.passed).length,
+        results: results,
+        timestamp: new Date().toISOString(),
+      };
+
+      console.log(`[${new Date().toISOString()}] 🔍 Validate result: ${summary.passed_count}/${summary.total} passed`);
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(summary));
+      return;
+    }
+
+    const cmd = commands[commandIndex];
+    const startTime = Date.now();
+    console.log(`[${new Date().toISOString()}]   Running: ${cmd}`);
+
+    const proc = spawn('sh', ['-c', cmd], {
+      cwd: cwd,
+      env: { ...process.env },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      shell: false,
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    proc.stdout.on('data', (data) => { stdout += data.toString(); });
+    proc.stderr.on('data', (data) => { stderr += data.toString(); });
+
+    const timeout = setTimeout(() => {
+      proc.kill('SIGTERM');
+      stderr += '\n[Timed out after 60s]';
+    }, VALIDATE_TIMEOUT_MS);
+
+    proc.on('close', (code) => {
+      clearTimeout(timeout);
+      const elapsed = Date.now() - startTime;
+      const passed = code === 0;
+
+      results.push({
+        command: cmd,
+        passed: passed,
+        exit_code: code,
+        stdout: stdout.slice(-5000), // Last 5KB
+        stderr: stderr.slice(-5000),
+        duration_ms: elapsed,
+      });
+
+      console.log(`[${new Date().toISOString()}]   ${passed ? '✓' : '✗'} ${cmd} (${(elapsed / 1000).toFixed(1)}s, exit=${code})`);
+
+      commandIndex++;
+      runNext();
+    });
+
+    proc.on('error', (err) => {
+      clearTimeout(timeout);
+      results.push({
+        command: cmd,
+        passed: false,
+        exit_code: -1,
+        stdout: '',
+        stderr: `Failed to run command: ${err.message}`,
+        duration_ms: Date.now() - startTime,
+      });
+      commandIndex++;
+      runNext();
+    });
+  }
+
+  runNext();
+}
+
+// ─── Auto-fix endpoint: send errors to Claude for fixing ───────────────────
+
+function handleAutoFix(req, res, body) {
+  setCorsHeaders(res);
+
+  let payload;
+  try {
+    payload = JSON.parse(body);
+  } catch (e) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Invalid JSON body' }));
+    return;
+  }
+
+  const errors = payload.errors || '';
+  const originalPrompt = payload.original_prompt || '';
+  const code = payload.code || '';
+  const maxRetries = payload.max_retries || 3;
+
+  if (!errors) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'No errors provided' }));
+    return;
+  }
+
+  // Build a fix prompt that includes the original context and errors
+  const fixPrompt = [
+    'The following code was generated but failed validation. Please fix the errors.',
+    '',
+    '--- ORIGINAL REQUEST ---',
+    originalPrompt,
+    '',
+    '--- GENERATED CODE ---',
+    code.slice(0, 10000),
+    '',
+    '--- VALIDATION ERRORS ---',
+    errors.slice(0, 5000),
+    '',
+    '--- INSTRUCTIONS ---',
+    'Fix the validation errors above. Output ONLY the corrected code, no explanations.',
+    'Preserve the original functionality and intent.',
+  ].join('\n');
+
+  console.log(`[${new Date().toISOString()}] 🔧 Auto-fix: ${errors.slice(0, 100)}...`);
+
+  // Reuse the messages handler with a synthetic request
+  const syntheticBody = JSON.stringify({
+    model: payload.model || 'claude-sonnet-4-20250514',
+    max_tokens: payload.max_tokens || 8192,
+    stream: payload.stream !== false,
+    messages: [{ role: 'user', content: fixPrompt }],
+  });
+
+  handleMessages(req, res, syntheticBody);
+}
+
 // ─── HTTP Server ─────────────────────────────────────────────────────────────
 const server = http.createServer((req, res) => {
   if (req.method === 'OPTIONS') {
@@ -530,6 +706,20 @@ const server = http.createServer((req, res) => {
     let body = '';
     req.on('data', chunk => { body += chunk; });
     req.on('end', () => handleMessages(req, res, body));
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/v1/validate') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => handleValidate(req, res, body));
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/v1/auto-fix') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => handleAutoFix(req, res, body));
     return;
   }
 

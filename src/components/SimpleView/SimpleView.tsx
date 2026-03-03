@@ -446,15 +446,41 @@ export function SimpleView() {
   const [showModelSelector, setShowModelSelector] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesAreaRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const userScrolledUpRef = useRef(false);
 
   const conversation = getActiveConversation();
   const messages = conversation?.messages ?? [];
 
+  // Smart auto-scroll: only scroll to bottom if user hasn't scrolled up
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (!userScrolledUpRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [messages, streamingText]);
+
+  // Detect when user scrolls up manually
+  useEffect(() => {
+    const area = messagesAreaRef.current;
+    if (!area) return;
+    const handleScroll = () => {
+      const distanceFromBottom = area.scrollHeight - area.scrollTop - area.clientHeight;
+      // If user is more than 150px from bottom, they've scrolled up
+      userScrolledUpRef.current = distanceFromBottom > 150;
+    };
+    area.addEventListener('scroll', handleScroll, { passive: true });
+    return () => area.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  // Reset scroll lock when a new message is sent by the user
+  useEffect(() => {
+    const lastMsg = messages[messages.length - 1];
+    if (lastMsg?.role === 'user') {
+      userScrolledUpRef.current = false;
+    }
+  }, [messages.length]);
 
   const setStep = useCallback((id: string, status: ActivityStep['status'], detail?: string) => {
     setActivitySteps(prev => prev.map(s => s.id === id ? { ...s, status, detail: detail ?? s.detail } : s));
@@ -642,7 +668,7 @@ export function SimpleView() {
       )}
 
       {/* Messages area */}
-      <div className={styles.messagesArea}>
+      <div className={styles.messagesArea} ref={messagesAreaRef}>
         {isEmpty && !isStreaming ? (
           <div className={styles.emptyState}>
             <div className={styles.emptyLogo}>✦</div>

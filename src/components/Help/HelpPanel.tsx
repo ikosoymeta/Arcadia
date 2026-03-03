@@ -29,10 +29,26 @@ const SECTIONS = [
     icon: '⌨️',
     title: 'Engineer Mode',
     content: [
-      { q: 'What is Engineer mode?', a: 'Engineer mode adds developer tools: a terminal emulator, debug console with raw API logs, token metrics (TTFT, tokens/sec), and a tool call inspector. Switch to it using the toggle at the top of the screen.' },
+      { q: 'What is Engineer mode?', a: 'Engineer mode adds developer tools: a terminal emulator, debug console with raw API logs, token metrics (TTFT, tokens/sec), a tool call inspector, and the Validation Pipeline. Switch to it using the toggle at the top of the screen.' },
       { q: 'What does the API Logs tab show?', a: 'Every request and response to/from Claude, with timestamps, raw JSON, token counts, and timing metrics. Useful for debugging prompts and understanding Claude\'s behavior.' },
       { q: 'What does the Terminal tab do?', a: 'An interactive terminal emulator with command history. Useful for running commands, checking output, and debugging.' },
       { q: 'What are token metrics?', a: 'TTFT (Time to First Token): how fast Claude starts responding. Tokens/sec: generation speed. Input/output tokens: how much context you\'re using vs. how much Claude generates.' },
+    ],
+  },
+  {
+    icon: '✅',
+    title: 'Validation Pipeline',
+    content: [
+      { q: 'What is the Validation Pipeline?', a: 'The Validation Pipeline is an autonomous code quality system inspired by the GSD Auto-Worker pattern. It automatically runs your validation commands (lint, typecheck, tests, build) and — when errors are found — sends them to Claude for automatic fixing. This creates a generate → validate → fix loop that dramatically reduces manual debugging.' },
+      { q: 'How do I access it?', a: 'Switch to Engineer Mode (toggle at the top), then click the "✅ Validate" tab. You\'ll see the pipeline visualization, controls, and configuration.' },
+      { q: 'How do I set up validation commands?', a: 'Click "⚙ Configure" to open the configuration panel. You\'ll see default commands (yarn lint, yarn typecheck, etc.). You can:\n\n• Toggle commands on/off with the checkbox\n• Remove commands with the ✕ button\n• Add custom commands with the "+ Add" form\n• Set your project directory (where commands will run)\n\nYour configuration is saved automatically in your browser.' },
+      { q: 'What commands should I add?', a: 'Common validation commands for Meta projects:\n\n• yarn lint — Check for code style issues\n• yarn typecheck — Verify TypeScript types\n• yarn test --watchAll=false — Run unit tests\n• yarn build — Verify the project builds\n• arc lint — Run Meta\'s Arc linter\n\nYou can add any shell command that returns exit code 0 on success.' },
+      { q: 'What is Auto-Fix?', a: 'When enabled, the pipeline automatically sends validation errors to Claude Code for correction. Claude reads the error output, understands the issue, and applies fixes to your codebase. The pipeline then re-validates to check if the fix worked. This repeats up to your configured max retries (default: 3).\n\nThis is the same pattern used by the GSD Auto-Worker pipeline that achieved 100% manual coding reduction on internal tasks.' },
+      { q: 'What does the pipeline visualization show?', a: 'The pipeline has 4 stages shown at the top:\n\n• Generate — Claude generates or modifies code\n• Validate — Your configured commands run\n• Auto-Fix — Claude attempts to fix any errors\n• Done — All checks pass (or max retries reached)\n\nEach stage shows its status: pending (gray), active (purple/spinning), complete (green), or failed (red).' },
+      { q: 'What is the Pipeline Activity log?', a: 'The activity log shows real-time updates during the validation and auto-fix process. It tells you what\'s happening at each step: which errors were found, when Claude is attempting a fix, and whether the re-validation passed.' },
+      { q: 'What is Validation History?', a: 'Every validation run is recorded with its results. Click any run to see detailed output for each command — including error messages, exit codes, and duration. Failed runs show a red border, passed runs show green.' },
+      { q: 'Do I need the bridge running?', a: 'Yes. The Validation Pipeline requires bridge v2.1.0 or later. The panel will show a warning if the bridge is not detected or is too old. Start the bridge with:\n\ncd ~/Arcadia && node bridge/arcadia-bridge.js\n\nThe bridge runs validation commands on your local machine where your code lives.' },
+      { q: 'Can I use this with any project?', a: 'Yes! Set the "Project Directory" in the configuration to point to any project on your machine. The validation commands will run in that directory. This works with any tech stack — React, Python, Go, etc. — as long as you configure the right commands.' },
     ],
   },
   {

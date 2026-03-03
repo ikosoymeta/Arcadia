@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
+import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useConnection } from '../../store/ConnectionContext';
@@ -9,7 +10,7 @@ import type { Message, ApiLogEntry, ImageAttachment, ToolDefinition, ToolUseBloc
 import { CLAUDE_MODELS } from '../../types';
 import styles from './EngineerView.module.css';
 
-type EngTab = 'chat' | 'logs' | 'terminal' | 'debug';
+type EngTab = 'chat' | 'validate' | 'logs' | 'terminal' | 'debug';
 
 // ─── Built-in tools ───────────────────────────────────────────────────────────
 
@@ -654,6 +655,475 @@ function EngineerChat() {
   );
 }
 
+// ─── Validation Pipeline Panel ──────────────────────────────────────────────
+
+interface ValidationCommand {
+  id: string;
+  label: string;
+  command: string;
+  enabled: boolean;
+}
+
+interface ValidationResult {
+  command: string;
+  passed: boolean;
+  exit_code: number;
+  stdout: string;
+  stderr: string;
+  duration_ms: number;
+}
+
+interface ValidationRun {
+  id: string;
+  timestamp: number;
+  passed: boolean;
+  total: number;
+  passed_count: number;
+  failed_count: number;
+  results: ValidationResult[];
+  auto_fix_attempt?: number;
+}
+
+type PipelineStage = 'idle' | 'validating' | 'fixing' | 'done';
+
+const DEFAULT_COMMANDS: ValidationCommand[] = [
+  { id: '1', label: 'Lint', command: 'yarn lint', enabled: true },
+  { id: '2', label: 'Type Check', command: 'yarn typecheck', enabled: true },
+  { id: '3', label: 'Unit Tests', command: 'yarn test --watchAll=false', enabled: false },
+  { id: '4', label: 'Build', command: 'yarn build', enabled: false },
+];
+
+const STORAGE_KEY = 'arcadia-validation-commands';
+const BRIDGE_URL = 'http://127.0.0.1:8087';
+
+function loadCommands(): ValidationCommand[] {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    return saved ? JSON.parse(saved) : DEFAULT_COMMANDS;
+  } catch { return DEFAULT_COMMANDS; }
+}
+
+function saveCommands(cmds: ValidationCommand[]) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(cmds));
+}
+
+function ValidationPanel() {
+  const [commands, setCommands] = useState<ValidationCommand[]>(loadCommands);
+  const [runs, setRuns] = useState<ValidationRun[]>([]);
+  const [stage, setStage] = useState<PipelineStage>('idle');
+  const [autoFix, setAutoFix] = useState(true);
+  const [maxRetries, setMaxRetries] = useState(3);
+  const [currentRetry, setCurrentRetry] = useState(0);
+  const [projectDir, setProjectDir] = useState('');
+  const [showConfig, setShowConfig] = useState(false);
+  const [newCmd, setNewCmd] = useState({ label: '', command: '' });
+  const [bridgeOk, setBridgeOk] = useState<boolean | null>(null);
+  const [selectedRun, setSelectedRun] = useState<ValidationRun | null>(null);
+  const [fixLog, setFixLog] = useState<string[]>([]);
+
+  // Check bridge connectivity
+  useEffect(() => {
+    const check = async () => {
+      try {
+        const r = await fetch(`${BRIDGE_URL}/health`);
+        const data = await r.json();
+        setBridgeOk(data.capabilities?.validate === true);
+      } catch { setBridgeOk(false); }
+    };
+    check();
+    const interval = setInterval(check, 15000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const enabledCommands = commands.filter(c => c.enabled);
+
+  const toggleCommand = (id: string) => {
+    const updated = commands.map(c => c.id === id ? { ...c, enabled: !c.enabled } : c);
+    setCommands(updated);
+    saveCommands(updated);
+  };
+
+  const removeCommand = (id: string) => {
+    const updated = commands.filter(c => c.id !== id);
+    setCommands(updated);
+    saveCommands(updated);
+  };
+
+  const addCommand = () => {
+    if (!newCmd.label.trim() || !newCmd.command.trim()) return;
+    const updated = [...commands, { id: crypto.randomUUID(), label: newCmd.label, command: newCmd.command, enabled: true }];
+    setCommands(updated);
+    saveCommands(updated);
+    setNewCmd({ label: '', command: '' });
+  };
+
+  const runValidation = async () => {
+    if (enabledCommands.length === 0) return;
+    setStage('validating');
+    setCurrentRetry(0);
+    setFixLog([]);
+    setSelectedRun(null);
+
+    try {
+      const response = await fetch(`${BRIDGE_URL}/v1/validate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          commands: enabledCommands.map(c => c.command),
+          cwd: projectDir || undefined,
+        }),
+      });
+
+      const data = await response.json();
+      const run: ValidationRun = {
+        id: crypto.randomUUID(),
+        timestamp: Date.now(),
+        passed: data.passed,
+        total: data.total,
+        passed_count: data.passed_count,
+        failed_count: data.failed_count,
+        results: data.results,
+      };
+
+      setRuns(prev => [run, ...prev]);
+      setSelectedRun(run);
+
+      if (!data.passed && autoFix) {
+        await runAutoFixLoop(data, 1);
+      } else {
+        setStage('done');
+      }
+    } catch (err) {
+      setFixLog(prev => [...prev, `Error: ${err instanceof Error ? err.message : 'Unknown error'}. Is the bridge running?`]);
+      setStage('idle');
+    }
+  };
+
+  const runAutoFixLoop = async (validationData: { results: ValidationResult[] }, attempt: number) => {
+    if (attempt > maxRetries) {
+      setFixLog(prev => [...prev, `Reached max retries (${maxRetries}). Some errors remain.`]);
+      setStage('done');
+      return;
+    }
+
+    setStage('fixing');
+    setCurrentRetry(attempt);
+
+    // Collect all errors
+    const failedResults = validationData.results.filter(r => !r.passed);
+    const errorText = failedResults.map(r => 
+      `Command: ${r.command}\nExit code: ${r.exit_code}\nStderr: ${r.stderr}\nStdout: ${r.stdout}`
+    ).join('\n\n---\n\n');
+
+    setFixLog(prev => [...prev, `Auto-fix attempt ${attempt}/${maxRetries}: Sending ${failedResults.length} error(s) to Claude...`]);
+
+    try {
+      const response = await fetch(`${BRIDGE_URL}/v1/auto-fix`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          errors: errorText,
+          original_prompt: 'Fix the validation errors in the codebase',
+          code: '',
+          max_retries: maxRetries,
+          stream: false,
+        }),
+      });
+
+      // Read the SSE stream for the fix response
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let fixContent = '';
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunk = decoder.decode(value, { stream: true });
+          // Parse SSE events
+          const lines = chunk.split('\n');
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const event = JSON.parse(line.slice(6));
+                if (event.type === 'content_block_delta' && event.delta?.text) {
+                  fixContent += event.delta.text;
+                }
+              } catch { /* skip non-JSON lines */ }
+            }
+          }
+        }
+      }
+
+      setFixLog(prev => [...prev, `Claude suggested fix (${fixContent.length} chars). Re-validating...`]);
+
+      // Re-run validation
+      const revalidateResponse = await fetch(`${BRIDGE_URL}/v1/validate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          commands: enabledCommands.map(c => c.command),
+          cwd: projectDir || undefined,
+        }),
+      });
+
+      const revalidateData = await revalidateResponse.json();
+      const rerun: ValidationRun = {
+        id: crypto.randomUUID(),
+        timestamp: Date.now(),
+        passed: revalidateData.passed,
+        total: revalidateData.total,
+        passed_count: revalidateData.passed_count,
+        failed_count: revalidateData.failed_count,
+        results: revalidateData.results,
+        auto_fix_attempt: attempt,
+      };
+
+      setRuns(prev => [rerun, ...prev]);
+      setSelectedRun(rerun);
+
+      if (revalidateData.passed) {
+        setFixLog(prev => [...prev, `All checks passed after ${attempt} fix attempt(s)!`]);
+        setStage('done');
+      } else {
+        setFixLog(prev => [...prev, `Still ${revalidateData.failed_count} failure(s). Retrying...`]);
+        await runAutoFixLoop(revalidateData, attempt + 1);
+      }
+    } catch (err) {
+      setFixLog(prev => [...prev, `Auto-fix error: ${err instanceof Error ? err.message : 'Unknown'}`]);
+      setStage('done');
+    }
+  };
+
+  const pipelineStages = [
+    { key: 'generate', label: 'Generate', icon: '💬', desc: 'Claude generates code' },
+    { key: 'validate', label: 'Validate', icon: '🔍', desc: `Run ${enabledCommands.length} check(s)` },
+    { key: 'fix', label: 'Auto-Fix', icon: '🔧', desc: autoFix ? `Up to ${maxRetries} retries` : 'Disabled' },
+    { key: 'done', label: 'Done', icon: '✅', desc: 'All checks pass' },
+  ];
+
+  const getStageStatus = (key: string) => {
+    if (stage === 'idle') return 'pending';
+    if (key === 'generate') return 'complete';
+    if (key === 'validate') {
+      if (stage === 'validating') return 'active';
+      if (stage === 'fixing' || stage === 'done') return selectedRun?.passed ? 'complete' : 'failed';
+    }
+    if (key === 'fix') {
+      if (stage === 'fixing') return 'active';
+      if (stage === 'done' && currentRetry > 0) return selectedRun?.passed ? 'complete' : 'failed';
+      if (stage === 'done' && currentRetry === 0) return 'skipped';
+    }
+    if (key === 'done') {
+      if (stage === 'done') return selectedRun?.passed ? 'complete' : 'failed';
+    }
+    return 'pending';
+  };
+
+  return (
+    <div className={styles.validatePanel}>
+      {/* Pipeline visualization */}
+      <div className={styles.pipeline}>
+        <div className={styles.pipelineTitle}>Autonomous Dev Pipeline</div>
+        <div className={styles.pipelineStages}>
+          {pipelineStages.map((s, i) => {
+            const status = getStageStatus(s.key);
+            return (
+              <React.Fragment key={s.key}>
+                <div className={`${styles.pipelineStage} ${styles[`stage_${status}`]}`}>
+                  <div className={styles.stageIcon}>
+                    {status === 'active' ? <span className={styles.stageSpinner}>⟳</span> : s.icon}
+                  </div>
+                  <div className={styles.stageLabel}>{s.label}</div>
+                  <div className={styles.stageDesc}>{s.desc}</div>
+                </div>
+                {i < pipelineStages.length - 1 && (
+                  <div className={`${styles.pipelineArrow} ${status === 'complete' || status === 'failed' ? styles.arrowActive : ''}`}>→</div>
+                )}
+              </React.Fragment>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Bridge status */}
+      {bridgeOk === false && (
+        <div className={styles.validateWarning}>
+          Bridge not detected or missing validation support. Start the bridge (v2.1.0+):
+          <code>node bridge/arcadia-bridge.js</code>
+        </div>
+      )}
+
+      {/* Controls */}
+      <div className={styles.validateControls}>
+        <div className={styles.validateControlsLeft}>
+          <button
+            className={styles.validateRunBtn}
+            onClick={runValidation}
+            disabled={stage === 'validating' || stage === 'fixing' || enabledCommands.length === 0 || bridgeOk === false}
+          >
+            {stage === 'validating' ? '🔍 Validating...' : stage === 'fixing' ? `🔧 Fixing (${currentRetry}/${maxRetries})...` : '▶ Run Validation'}
+          </button>
+          <label className={styles.toggleLabel}>
+            <input type="checkbox" checked={autoFix} onChange={e => setAutoFix(e.target.checked)} />
+            <span>Auto-fix with Claude</span>
+          </label>
+          {autoFix && (
+            <label className={styles.toggleLabel}>
+              <span>Max retries:</span>
+              <select
+                value={maxRetries}
+                onChange={e => setMaxRetries(Number(e.target.value))}
+                style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '4px', padding: '2px 4px', fontSize: '12px' }}
+              >
+                {[1, 2, 3, 5].map(n => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </label>
+          )}
+        </div>
+        <div className={styles.validateControlsRight}>
+          <button
+            className={`${styles.systemBtn} ${showConfig ? styles.systemBtnActive : ''}`}
+            onClick={() => setShowConfig(p => !p)}
+          >
+            ⚙ Configure
+          </button>
+        </div>
+      </div>
+
+      {/* Configuration */}
+      {showConfig && (
+        <div className={styles.validateConfig}>
+          <div className={styles.configSection}>
+            <div className={styles.configLabel}>Project Directory (optional)</div>
+            <input
+              className={styles.configInput}
+              value={projectDir}
+              onChange={e => setProjectDir(e.target.value)}
+              placeholder="/path/to/your/project (leave empty for home dir)"
+            />
+          </div>
+          <div className={styles.configSection}>
+            <div className={styles.configLabel}>Validation Commands</div>
+            <div className={styles.commandList}>
+              {commands.map(cmd => (
+                <div key={cmd.id} className={styles.commandItem}>
+                  <input
+                    type="checkbox"
+                    checked={cmd.enabled}
+                    onChange={() => toggleCommand(cmd.id)}
+                  />
+                  <span className={styles.commandLabel}>{cmd.label}</span>
+                  <code className={styles.commandCode}>{cmd.command}</code>
+                  <button className={styles.commandRemove} onClick={() => removeCommand(cmd.id)}>✕</button>
+                </div>
+              ))}
+            </div>
+            <div className={styles.addCommandRow}>
+              <input
+                className={styles.configInput}
+                value={newCmd.label}
+                onChange={e => setNewCmd(p => ({ ...p, label: e.target.value }))}
+                placeholder="Label (e.g. Lint)"
+                style={{ width: '120px' }}
+              />
+              <input
+                className={styles.configInput}
+                value={newCmd.command}
+                onChange={e => setNewCmd(p => ({ ...p, command: e.target.value }))}
+                placeholder="Command (e.g. yarn lint)"
+                style={{ flex: 1 }}
+                onKeyDown={e => { if (e.key === 'Enter') addCommand(); }}
+              />
+              <button className={styles.systemBtn} onClick={addCommand}>+ Add</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Results area */}
+      <div className={styles.validateResults}>
+        {/* Fix log */}
+        {fixLog.length > 0 && (
+          <div className={styles.fixLog}>
+            <div className={styles.fixLogTitle}>Pipeline Activity</div>
+            {fixLog.map((line, i) => (
+              <div key={i} className={styles.fixLogLine}>
+                <span className={styles.fixLogTime}>{new Date().toLocaleTimeString()}</span>
+                {line}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Run history */}
+        {runs.length > 0 && (
+          <div className={styles.runHistory}>
+            <div className={styles.runHistoryTitle}>Validation History</div>
+            {runs.map(run => (
+              <div
+                key={run.id}
+                className={`${styles.runItem} ${selectedRun?.id === run.id ? styles.runSelected : ''} ${run.passed ? styles.runPassed : styles.runFailed}`}
+                onClick={() => setSelectedRun(run)}
+              >
+                <span className={styles.runIcon}>{run.passed ? '✅' : '❌'}</span>
+                <span className={styles.runSummary}>
+                  {run.passed_count}/{run.total} passed
+                  {run.auto_fix_attempt != null && ` (fix #${run.auto_fix_attempt})`}
+                </span>
+                <span className={styles.runTime}>{new Date(run.timestamp).toLocaleTimeString()}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Selected run details */}
+        {selectedRun && (
+          <div className={styles.runDetails}>
+            <div className={styles.runDetailsTitle}>
+              Run Details — {selectedRun.passed ? 'All Passed' : `${selectedRun.failed_count} Failed`}
+            </div>
+            {selectedRun.results.map((r, i) => (
+              <div key={i} className={`${styles.resultItem} ${r.passed ? styles.resultPassed : styles.resultFailed}`}>
+                <div className={styles.resultHeader}>
+                  <span>{r.passed ? '✅' : '❌'} {r.command}</span>
+                  <span className={styles.resultDuration}>{(r.duration_ms / 1000).toFixed(1)}s</span>
+                </div>
+                {!r.passed && (
+                  <pre className={styles.resultOutput}>
+                    {r.stderr || r.stdout || `Exit code: ${r.exit_code}`}
+                  </pre>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Empty state */}
+        {runs.length === 0 && stage === 'idle' && (
+          <div className={styles.validateEmpty}>
+            <div className={styles.validateEmptyIcon}>🔍</div>
+            <div className={styles.validateEmptyTitle}>Autonomous Validation Pipeline</div>
+            <div className={styles.validateEmptyDesc}>
+              Inspired by the GSD Auto-Worker pattern. Configure your validation commands
+              (lint, typecheck, tests) and run them automatically after Claude generates code.
+              <br /><br />
+              When auto-fix is enabled, validation errors are automatically sent back to Claude
+              for correction, creating an autonomous generate → validate → fix loop.
+              <br /><br />
+              <strong>How to use:</strong>
+              <br />1. Configure your validation commands (click ⚙ Configure)
+              <br />2. Set your project directory
+              <br />3. Click "Run Validation" to start the pipeline
+              <br />4. Enable "Auto-fix with Claude" for autonomous error correction
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Main EngineerView ────────────────────────────────────────────────────────
 
 export function EngineerView() {
@@ -662,13 +1132,14 @@ export function EngineerView() {
   return (
     <div className={styles.container}>
       <div className={styles.tabBar}>
-        {(['chat', 'logs', 'terminal', 'debug'] as EngTab[]).map(t => (
+        {(['chat', 'validate', 'logs', 'terminal', 'debug'] as EngTab[]).map(t => (
           <button
             key={t}
             className={`${styles.tab} ${tab === t ? styles.tabActive : ''}`}
             onClick={() => setTab(t)}
           >
             {t === 'chat' && '💬 Chat'}
+            {t === 'validate' && '✅ Validate'}
             {t === 'logs' && '📡 API Logs'}
             {t === 'terminal' && '⌨ Terminal'}
             {t === 'debug' && '🐛 Debug'}
@@ -677,6 +1148,7 @@ export function EngineerView() {
       </div>
       <div className={styles.tabContent}>
         {tab === 'chat' && <EngineerChat />}
+        {tab === 'validate' && <ValidationPanel />}
         {tab === 'logs' && <ApiLogsPanel />}
         {tab === 'terminal' && <Terminal />}
         {tab === 'debug' && <DebugPanel />}
