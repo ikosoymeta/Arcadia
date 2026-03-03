@@ -1,0 +1,18 @@
+.app {
+  display: flex;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.mainContent {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+  position: relative;
+}
+
+.fullWidth {
+  flex: 1;
+  overflow: auto;
+}
