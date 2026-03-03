@@ -1,0 +1,19 @@
+FREEZE ROOT CAUSE ANALYSIS
+==========================
+
+When user clicks Share during streaming:
+1. handleShare() finds the conv and sets shareConv state
+2. ShareModal renders, calls generateShareUrl(conv.id) on line 20
+3. generateShareUrl does setState() which maps over ALL conversations 
+4. This triggers the useEffect on line 70-77 which saves to storage
+5. During streaming, appendStreamingText is also calling setState rapidly
+6. The combination of: ShareModal rendering + generateShareUrl state update + 
+   storage save + streaming text updates = main thread overload
+
+The key issue: generateShareUrl is called during RENDER (line 20: const shareUrl = conv.shareUrl ?? generateShareUrl(conv.id))
+This is a side effect during render! It calls setState during render which is bad React practice.
+
+FIX:
+1. Guard handleShare to not open during streaming (already done)
+2. Fix generateShareUrl to not be called during render - use useMemo or useEffect instead
+3. Make the ShareModal compute the URL without triggering state updates during render

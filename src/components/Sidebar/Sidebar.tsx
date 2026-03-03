@@ -16,8 +16,15 @@ interface SidebarProps {
 function ShareModal({ conv, onClose }: { conv: Conversation; onClose: () => void }) {
   const { generateShareUrl, setVisibility } = useChat();
   const [copied, setCopied] = useState(false);
+  const [shareUrl, setShareUrl] = useState(conv.shareUrl || '');
 
-  const shareUrl = conv.shareUrl ?? generateShareUrl(conv.id);
+  // Generate share URL on mount, not during render (avoids setState-during-render)
+  React.useEffect(() => {
+    if (!shareUrl) {
+      const url = generateShareUrl(conv.id);
+      setShareUrl(url);
+    }
+  }, [conv.id, shareUrl, generateShareUrl]);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(shareUrl);
@@ -212,7 +219,7 @@ function MoveModal({ conv, folders, onClose }: { conv: Conversation; folders: Fo
 
 export function Sidebar({ viewMode, onViewChange, collapsed, onToggleCollapse }: SidebarProps) {
   const {
-    conversations, folders, activeConversationId, chatMode, coworkTasks,
+    conversations, folders, activeConversationId, chatMode, coworkTasks, isStreaming,
     createConversation, deleteConversation, renameConversation, setActiveConversation,
     clearActiveConversation, togglePin, setVisibility, createFolder, toggleFolderExpand,
     deleteFolder, setFolderInstructions,
@@ -273,6 +280,7 @@ export function Sidebar({ viewMode, onViewChange, collapsed, onToggleCollapse }:
   };
 
   const handleShare = (id: string) => {
+    if (isStreaming) return; // Don't open share modal during streaming — causes freeze
     const conv = conversations.find(c => c.id === id);
     if (conv) setShareConv(conv);
     setContextMenu(null);
