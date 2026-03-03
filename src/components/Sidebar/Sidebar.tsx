@@ -214,7 +214,7 @@ export function Sidebar({ viewMode, onViewChange, collapsed, onToggleCollapse }:
   const {
     conversations, folders, activeConversationId, chatMode, coworkTasks,
     createConversation, deleteConversation, renameConversation, setActiveConversation,
-    togglePin, setVisibility, createFolder, toggleFolderExpand,
+    clearActiveConversation, togglePin, setVisibility, createFolder, toggleFolderExpand,
     deleteFolder, setFolderInstructions,
   } = useChat();
   const { connections, activeConnection } = useConnection();
@@ -299,7 +299,12 @@ export function Sidebar({ viewMode, onViewChange, collapsed, onToggleCollapse }:
   return (
     <div className={`${styles.sidebar} ${collapsed ? styles.collapsed : ''}`}>
       <div className={styles.header}>
-        <span className={styles.logo}>ArcadIA Editor</span>
+        <button
+          className={styles.logo}
+          onClick={() => { clearActiveConversation(); onViewChange('chat'); }}
+          title="Return to home"
+          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, font: 'inherit', color: 'inherit' }}
+        >ArcadIA Editor</button>
         <button className={styles.collapseBtn} onClick={onToggleCollapse}>◁</button>
       </div>
 
@@ -373,6 +378,14 @@ export function Sidebar({ viewMode, onViewChange, collapsed, onToggleCollapse }:
               borderRadius: '6px', color: '#fff', cursor: 'pointer', fontSize: '12px',
             }}
           >✓</button>
+          <button
+            onClick={() => { setShowNewFolder(false); setNewFolderName(''); }}
+            style={{
+              padding: '6px 10px', background: 'var(--bg-hover)', border: '1px solid var(--border)',
+              borderRadius: '6px', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '12px',
+            }}
+            title="Cancel"
+          >✕</button>
         </div>
       )}
 

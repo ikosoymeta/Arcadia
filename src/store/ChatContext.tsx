@@ -20,6 +20,7 @@ interface ChatContextType extends ChatState {
   deleteConversation: (id: string) => void;
   renameConversation: (id: string, title: string) => void;
   setActiveConversation: (id: string) => void;
+  clearActiveConversation: () => void;
   addMessage: (conversationId: string, message: Message) => void;
   setStreaming: (streaming: boolean) => void;
   setStreamingText: (text: string) => void;
@@ -116,6 +117,10 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
   const setActiveConversation = useCallback((id: string) => {
     setState(prev => ({ ...prev, activeConversationId: id }));
+  }, []);
+
+  const clearActiveConversation = useCallback(() => {
+    setState(prev => ({ ...prev, activeConversationId: null }));
   }, []);
 
   const addMessage = useCallback((conversationId: string, message: Message) => {
@@ -340,6 +345,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       deleteConversation,
       renameConversation,
       setActiveConversation,
+      clearActiveConversation,
       addMessage,
       setStreaming,
       setStreamingText,
