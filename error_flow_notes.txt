@@ -1,0 +1,28 @@
+Error Flow Analysis for HTTP 451 and similar errors:
+
+1. Claude CLI outputs "API Error: 451 status code (no body)" to stdout
+2. Bridge captures this in stdout handler, strips header, sends as text_delta SSE event
+3. Frontend receives it as normal text content via onToken callback
+4. Content "API Error: 451 status code (no body)" becomes the assistant message content
+5. MessageBubble renders it as plain markdown text
+
+The error is NOT thrown as an exception - it flows through as normal content.
+So we need to detect error patterns in the CONTENT itself, both:
+  a) In the bridge (add error detection in stdout before sending)
+  b) In the frontend (detect error patterns in received content and show informative UI)
+
+Error patterns to detect:
+- "API Error: NNN status code" - Claude CLI API errors
+- "[Bridge Error: ...]" - Bridge-generated errors
+- "status code (no body)" - Empty error responses
+- HTTP 429 - Rate limiting
+- HTTP 451 - Content policy / legal restriction
+- HTTP 500/502/503 - Server errors
+- "command not found" - Missing CLI
+- "SIGTERM" / "timed out" - Timeout errors
+
+Strategy:
+1. Add a helper function in claude.ts that detects error patterns in content
+2. When detected, enhance the message with user-friendly explanation
+3. Update both SimpleView and EngineerView to show enhanced error UI
+4. Update predefined prompts to Meta-specific ones

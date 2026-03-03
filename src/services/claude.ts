@@ -224,6 +224,101 @@ export function trimMessagesForContext(
   return result;
 }
 
+// ─── Error Detection & User-Friendly Messages ──────────────────────────────
+
+interface DetectedError {
+  type: 'api_error' | 'bridge_error' | 'rate_limit' | 'content_policy' | 'timeout' | 'server_error' | 'cli_error';
+  statusCode?: number;
+  title: string;
+  message: string;
+  suggestion: string;
+}
+
+export function detectErrorInContent(content: string): DetectedError | null {
+  const c = content.trim();
+
+  // HTTP 451 — Content policy / legal restriction
+  const match451 = c.match(/(?:API Error|Error):?\s*451\s*(?:status code)?/i);
+  if (match451) {
+    return {
+      type: 'content_policy',
+      statusCode: 451,
+      title: 'Content Policy Restriction (HTTP 451)',
+      message: 'Meta\'s content policy system flagged this request. This can happen with certain topics, long prompts, or prompts that trigger automated safety filters — even when the content is benign.',
+      suggestion: 'Try rephrasing your request, breaking it into smaller parts, or using a different prompt. This is a Meta infrastructure restriction, not an ArcadIA issue.',
+    };
+  }
+
+  // HTTP 429 — Rate limiting
+  const match429 = c.match(/(?:API Error|Error):?\s*429/i) || c.match(/rate.?limit/i) || c.match(/too many requests/i);
+  if (match429) {
+    return {
+      type: 'rate_limit',
+      statusCode: 429,
+      title: 'Rate Limited (HTTP 429)',
+      message: 'You\'ve hit the API rate limit. Claude Code at Meta has usage quotas that reset periodically.',
+      suggestion: 'Wait a minute and try again. If this persists, check your Claude Code usage quota.',
+    };
+  }
+
+  // HTTP 5xx — Server errors
+  const match5xx = c.match(/(?:API Error|Error):?\s*(5\d{2})\s*(?:status code)?/i);
+  if (match5xx) {
+    return {
+      type: 'server_error',
+      statusCode: parseInt(match5xx[1]),
+      title: `Server Error (HTTP ${match5xx[1]})`,
+      message: 'The Claude Code API server returned an error. This is typically a temporary issue with Meta\'s infrastructure.',
+      suggestion: 'Wait a moment and retry. If the issue persists, check the Claude Code at Meta status page.',
+    };
+  }
+
+  // Generic API Error with status code
+  const matchApi = c.match(/API Error:?\s*(\d{3})\s*status code/i);
+  if (matchApi) {
+    const code = parseInt(matchApi[1]);
+    return {
+      type: 'api_error',
+      statusCode: code,
+      title: `API Error (HTTP ${code})`,
+      message: `Claude Code returned HTTP ${code}. This may indicate a temporary service issue or a problem with the request.`,
+      suggestion: 'Try again with a simpler prompt. If the error persists, restart the bridge and try again.',
+    };
+  }
+
+  // Bridge errors
+  const matchBridge = c.match(/\[Bridge Error:(.+?)\]/s);
+  if (matchBridge) {
+    const detail = matchBridge[1].trim();
+    if (detail.includes('timed out')) {
+      return {
+        type: 'timeout',
+        title: 'Request Timed Out',
+        message: 'Claude Code took too long to respond. Complex prompts or heavy server load can cause timeouts.',
+        suggestion: 'Try a shorter or simpler prompt. If this keeps happening, the Claude Code service may be under heavy load.',
+      };
+    }
+    return {
+      type: 'bridge_error',
+      title: 'Bridge Error',
+      message: `The ArcadIA bridge encountered an issue: ${detail}`,
+      suggestion: 'Check that the bridge is running and restart it if needed: pkill -f arcadia-bridge && node bridge/arcadia-bridge.js',
+    };
+  }
+
+  // CLI not found
+  if (c.includes('command not found') && c.includes('claude')) {
+    return {
+      type: 'cli_error',
+      title: 'Claude Code Not Found',
+      message: 'The Claude Code CLI is not installed or not in the system PATH.',
+      suggestion: 'Install Claude Code at Meta: https://fburl.com/claude.code.users',
+    };
+  }
+
+  return null;
+}
+
 // ─── Artifact Extraction ──────────────────────────────────────────────────────
 
 export function extractArtifacts(text: string): Artifact[] {

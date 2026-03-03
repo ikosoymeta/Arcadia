@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useConnection } from '../../store/ConnectionContext';
 import { useChat } from '../../store/ChatContext';
-import { sendMessage } from '../../services/claude';
+import { sendMessage, detectErrorInContent } from '../../services/claude';
 import { trackMessage } from '../../services/analytics';
 import type { Message, Artifact, ImageAttachment, ToolUseBlock } from '../../types';
 import { CLAUDE_MODELS } from '../../types';
@@ -12,12 +12,12 @@ import styles from './SimpleView.module.css';
 // ─── Quick suggestion prompts ─────────────────────────────────────────────────
 
 const SUGGESTIONS = [
-  { icon: '🌐', label: 'Build a component', prompt: 'Build me a React component for a developer dashboard with a metrics overview, recent activity feed, and quick action buttons. Use TypeScript and TailwindCSS.' },
-  { icon: '📝', label: 'Write a design doc', prompt: 'Write a technical design document for a new feature: a real-time notification system using WebSockets. Include architecture, API design, data model, and rollout plan.' },
-  { icon: '🔍', label: 'Explain a concept', prompt: 'Explain how React Server Components work under the hood, including the streaming protocol and how they differ from traditional SSR.' },
-  { icon: '🐛', label: 'Debug my code', prompt: 'Help me debug this code:\n\n```python\ndef calculate_average(numbers):\n    total = 0\n    for n in numbers:\n        total += n\n    return total / len(numbers)\n\nprint(calculate_average([]))\n```\n\nWhat\'s wrong and how do I fix it?' },
-  { icon: '📊', label: 'Analyze data', prompt: 'Help me write a Python script to query a Presto table, aggregate metrics by date, and generate a summary report with key statistics and trends.' },
-  { icon: '✍️', label: 'Write a RFC', prompt: 'Write an RFC proposing a migration from REST to GraphQL for our internal API. Include motivation, technical approach, migration strategy, and trade-offs.' },
+  { icon: '📋', label: 'HPM Self-Review', prompt: 'Help me draft my HPM self-review for this half. I\'m a software engineer. Include sections for Impact, Execution, and Collaboration. Ask me clarifying questions about my projects and accomplishments before writing the draft.' },
+  { icon: '📝', label: 'Write a design doc', prompt: 'Help me write a technical design document. Include sections for: Problem Statement, Proposed Solution, Architecture Overview, Data Model, API Design, Rollout Plan, and Open Questions. Start by asking me what the feature is about.' },
+  { icon: '💻', label: 'Write a React component', prompt: 'Write a React component in TypeScript with hooks. It should be a reusable data table with sorting, filtering, and pagination. Include proper types and follow Meta\'s coding conventions.' },
+  { icon: '🐛', label: 'Debug help', prompt: 'Help me debug an issue. I\'ll describe the symptoms and share relevant code. Walk me through a systematic debugging approach and suggest potential fixes.' },
+  { icon: '📊', label: 'Presto query', prompt: 'Help me write a Presto SQL query to analyze user engagement metrics. I need to aggregate daily active users, session duration, and retention rates from our events table, broken down by platform.' },
+  { icon: '✍️', label: 'Peer review draft', prompt: 'Help me write a thoughtful peer review for a colleague. I want to highlight their strengths, provide constructive feedback, and suggest growth areas. Ask me about their contributions first.' },
 ];
 
 // ─── Follow-up suggestions based on response type ─────────────────────────────
@@ -377,11 +377,33 @@ const MessageBubble = memo(function MessageBubble({ message }: { message: Messag
       <div className={`${styles.bubbleContent} ${isUser ? styles.userContent : styles.assistantContent}`}>
         {isUser ? (
           <p>{message.content}</p>
-        ) : message.content ? (
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
-        ) : (
-          <p className={styles.emptyResponse}>Response content unavailable. The bridge may have returned an empty response.</p>
-        )}
+        ) : (() => {
+          const detectedError = message.content ? detectErrorInContent(message.content) : null;
+          if (detectedError) {
+            return (
+              <div className={styles.errorCard}>
+                <div className={styles.errorCardHeader}>
+                  <span className={styles.errorCardIcon}>
+                    {detectedError.type === 'content_policy' ? '⚠️' :
+                     detectedError.type === 'rate_limit' ? '⏳' :
+                     detectedError.type === 'timeout' ? '⏱️' :
+                     detectedError.type === 'server_error' ? '🛠️' : '❌'}
+                  </span>
+                  <span className={styles.errorCardTitle}>{detectedError.title}</span>
+                </div>
+                <p className={styles.errorCardMessage}>{detectedError.message}</p>
+                <div className={styles.errorCardSuggestion}>
+                  <strong>What to try:</strong> {detectedError.suggestion}
+                </div>
+              </div>
+            );
+          }
+          return message.content ? (
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+          ) : (
+            <p className={styles.emptyResponse}>Response content unavailable. The bridge may have returned an empty response.</p>
+          );
+        })()}
       </div>
 
       {/* Artifacts */}

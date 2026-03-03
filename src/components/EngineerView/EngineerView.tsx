@@ -5,7 +5,7 @@ import remarkGfm from 'remark-gfm';
 import { useConnection } from '../../store/ConnectionContext';
 import { useChat } from '../../store/ChatContext';
 import { usePreview } from '../../store/PreviewContext';
-import { sendMessage, getApiLogs, clearApiLogs, subscribeToApiLogs } from '../../services/claude';
+import { sendMessage, getApiLogs, clearApiLogs, subscribeToApiLogs, detectErrorInContent } from '../../services/claude';
 import { trackMessage } from '../../services/analytics';
 import type { Message, ApiLogEntry, ImageAttachment, ToolDefinition, ToolUseBlock, Artifact } from '../../types';
 import { CLAUDE_MODELS } from '../../types';
@@ -525,13 +525,28 @@ function EngineerChat() {
                 </div>
               )}
               <div className={styles.engMsgContent}>
-                {msg.role === 'assistant' ? (
-                  msg.content ? (
+                {msg.role === 'assistant' ? (() => {
+                  const detectedError = msg.content ? detectErrorInContent(msg.content) : null;
+                  if (detectedError) {
+                    return (
+                      <div className={styles.engErrorCard}>
+                        <div className={styles.engErrorHeader}>
+                          <span>{detectedError.type === 'content_policy' ? '⚠️' : detectedError.type === 'rate_limit' ? '⏳' : detectedError.type === 'timeout' ? '⏱️' : detectedError.type === 'server_error' ? '🛠️' : '❌'}</span>
+                          <strong>{detectedError.title}</strong>
+                        </div>
+                        <p style={{ margin: '8px 0', color: 'var(--text-secondary)', fontSize: '13px' }}>{detectedError.message}</p>
+                        <div className={styles.engErrorSuggestion}>
+                          <strong>What to try:</strong> {detectedError.suggestion}
+                        </div>
+                      </div>
+                    );
+                  }
+                  return msg.content ? (
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
                   ) : (
                     <p style={{ color: 'var(--text-tertiary)', fontStyle: 'italic' }}>Empty response — bridge may have returned no content.</p>
-                  )
-                ) : (
+                  );
+                })() : (
                   <pre className={styles.engUserText}>{msg.content}</pre>
                 )}
               </div>

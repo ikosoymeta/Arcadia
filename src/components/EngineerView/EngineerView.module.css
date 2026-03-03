@@ -407,6 +407,36 @@
 
 .engError button { background: none; border: none; color: #ef4444; cursor: pointer; }
 
+.engErrorCard {
+  background: rgba(239, 68, 68, 0.06);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.engErrorHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: #ef4444;
+}
+
+.engErrorSuggestion {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  background: rgba(99, 102, 241, 0.06);
+  border: 1px solid rgba(99, 102, 241, 0.15);
+  border-radius: 6px;
+  padding: 8px 10px;
+  line-height: 1.5;
+}
+
+.engErrorSuggestion strong {
+  color: var(--accent);
+}
+
 .engInputArea {
   padding: 8px 12px 10px;
   border-top: 1px solid var(--border);
