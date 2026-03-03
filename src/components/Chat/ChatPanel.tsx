@@ -157,7 +157,7 @@ export function ChatPanel({ sidebarCollapsed, onExpandSidebar }: ChatPanelProps)
       <div className={styles.messages} ref={messagesRef}>
         {!conversation || conversation.messages.length === 0 ? (
           <div className={styles.welcome}>
-            <div className={styles.welcomeTitle}>Claude Editor</div>
+            <div className={styles.welcomeTitle}>ArcadIA Editor</div>
             <div className={styles.welcomeSubtitle}>
               Your AI-powered workspace. Ask Claude to write code, create documents,
               analyze data, or build anything — with real-time preview.

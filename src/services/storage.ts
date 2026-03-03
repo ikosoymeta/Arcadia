@@ -1,58 +1,47 @@
-import type { Conversation, Connection, BenchmarkSuite } from '../types';
+import type { Conversation, Connection, BenchmarkSuite, Folder, Skill, TeamPod } from '../types';
 
 const KEYS = {
-  conversations: 'claude-editor-conversations',
-  connections: 'claude-editor-connections',
-  activeConnection: 'claude-editor-active-connection',
-  benchmarks: 'claude-editor-benchmarks',
-  settings: 'claude-editor-settings',
+  conversations: 'arcadia-conversations',
+  connections: 'arcadia-connections',
+  activeConnection: 'arcadia-active-connection',
+  benchmarks: 'arcadia-benchmarks',
+  folders: 'arcadia-folders',
+  skills: 'arcadia-skills',
+  teams: 'arcadia-teams',
 } as const;
 
+function load<T>(key: string, fallback: T): T {
+  try {
+    const data = localStorage.getItem(key);
+    return data ? JSON.parse(data) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function save(key: string, data: unknown): void {
+  localStorage.setItem(key, JSON.stringify(data));
+}
+
 export const storage = {
-  getConversations(): Conversation[] {
-    try {
-      const data = localStorage.getItem(KEYS.conversations);
-      return data ? JSON.parse(data) : [];
-    } catch {
-      return [];
-    }
-  },
+  getConversations: (): Conversation[] => load(KEYS.conversations, []),
+  saveConversations: (c: Conversation[]) => save(KEYS.conversations, c),
 
-  saveConversations(conversations: Conversation[]): void {
-    localStorage.setItem(KEYS.conversations, JSON.stringify(conversations));
-  },
+  getConnections: (): Connection[] => load(KEYS.connections, []),
+  saveConnections: (c: Connection[]) => save(KEYS.connections, c),
 
-  getConnections(): Connection[] {
-    try {
-      const data = localStorage.getItem(KEYS.connections);
-      return data ? JSON.parse(data) : [];
-    } catch {
-      return [];
-    }
-  },
+  getActiveConnectionId: (): string | null => localStorage.getItem(KEYS.activeConnection),
+  setActiveConnectionId: (id: string) => localStorage.setItem(KEYS.activeConnection, id),
 
-  saveConnections(connections: Connection[]): void {
-    localStorage.setItem(KEYS.connections, JSON.stringify(connections));
-  },
+  getBenchmarks: (): BenchmarkSuite[] => load(KEYS.benchmarks, []),
+  saveBenchmarks: (b: BenchmarkSuite[]) => save(KEYS.benchmarks, b),
 
-  getActiveConnectionId(): string | null {
-    return localStorage.getItem(KEYS.activeConnection);
-  },
+  getFolders: (): Folder[] => load(KEYS.folders, []),
+  saveFolders: (f: Folder[]) => save(KEYS.folders, f),
 
-  setActiveConnectionId(id: string): void {
-    localStorage.setItem(KEYS.activeConnection, id);
-  },
+  getSkills: (): Skill[] => load(KEYS.skills, []),
+  saveSkills: (s: Skill[]) => save(KEYS.skills, s),
 
-  getBenchmarks(): BenchmarkSuite[] {
-    try {
-      const data = localStorage.getItem(KEYS.benchmarks);
-      return data ? JSON.parse(data) : [];
-    } catch {
-      return [];
-    }
-  },
-
-  saveBenchmarks(benchmarks: BenchmarkSuite[]): void {
-    localStorage.setItem(KEYS.benchmarks, JSON.stringify(benchmarks));
-  },
+  getTeams: (): TeamPod[] => load(KEYS.teams, []),
+  saveTeams: (t: TeamPod[]) => save(KEYS.teams, t),
 };

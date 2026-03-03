@@ -5,6 +5,7 @@ import { PreviewProvider } from './store/PreviewContext';
 import { Sidebar } from './components/Sidebar/Sidebar';
 import { ChatPanel } from './components/Chat/ChatPanel';
 import { PreviewPanel } from './components/Preview/PreviewPanel';
+import { OnboardingWizard } from './components/Onboarding/OnboardingWizard';
 import type { ViewMode } from './types';
 import styles from './App.module.css';
 
@@ -12,17 +13,15 @@ import styles from './App.module.css';
 const SettingsPanel = lazy(() => import('./components/Settings/SettingsPanel').then(m => ({ default: m.SettingsPanel })));
 const BenchmarkPanel = lazy(() => import('./components/Benchmark/BenchmarkPanel').then(m => ({ default: m.BenchmarkPanel })));
 const CodeWorkspace = lazy(() => import('./components/CodeWorkspace/CodeWorkspace').then(m => ({ default: m.CodeWorkspace })));
+const SkillsPanel = lazy(() => import('./components/Skills/SkillsPanel').then(m => ({ default: m.SkillsPanel })));
+const TeamPanel = lazy(() => import('./components/Team/TeamPanel').then(m => ({ default: m.TeamPanel })));
+const HelpPanel = lazy(() => import('./components/Help/HelpPanel').then(m => ({ default: m.HelpPanel })));
 
 function LoadingFallback() {
   return (
     <div style={{
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      height: '100%',
-      width: '100%',
-      color: 'var(--text-tertiary)',
-      fontSize: '13px',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      height: '100%', width: '100%', color: 'var(--text-tertiary)', fontSize: '13px',
     }}>
       Loading...
     </div>
@@ -33,11 +32,17 @@ function App() {
   const [viewMode, setViewMode] = useState<ViewMode>('chat');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [previewCollapsed, setPreviewCollapsed] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(
+    () => !localStorage.getItem('arcadia-onboarding-complete')
+  );
 
   return (
     <ConnectionProvider>
       <ChatProvider>
         <PreviewProvider>
+          {showOnboarding && (
+            <OnboardingWizard onComplete={() => setShowOnboarding(false)} />
+          )}
           <div className={styles.app}>
             <Sidebar
               viewMode={viewMode}
@@ -74,6 +79,27 @@ function App() {
                 <div className={styles.fullWidth}>
                   <Suspense fallback={<LoadingFallback />}>
                     <BenchmarkPanel />
+                  </Suspense>
+                </div>
+              )}
+              {viewMode === 'skills' && (
+                <div className={styles.fullWidth}>
+                  <Suspense fallback={<LoadingFallback />}>
+                    <SkillsPanel />
+                  </Suspense>
+                </div>
+              )}
+              {viewMode === 'team' && (
+                <div className={styles.fullWidth}>
+                  <Suspense fallback={<LoadingFallback />}>
+                    <TeamPanel />
+                  </Suspense>
+                </div>
+              )}
+              {viewMode === 'help' && (
+                <div className={styles.fullWidth}>
+                  <Suspense fallback={<LoadingFallback />}>
+                    <HelpPanel />
                   </Suspense>
                 </div>
               )}
