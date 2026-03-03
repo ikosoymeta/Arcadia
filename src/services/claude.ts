@@ -1,4 +1,4 @@
-import type { Connection, Message, Artifact, ApiLogEntry, ToolDefinition, ContentBlock } from '../types';
+import type { Connection, Message, Artifact, ContentBlock, ToolDefinition, ApiLogEntry, ToolUseBlock } from '../types';
 
 // ─── API Log Store (in-memory, for engineer console) ─────────────────────────
 
@@ -38,10 +38,24 @@ function notifyLogListeners(): void {
   logListeners.forEach(fn => fn(snapshot));
 }
 
+// ─── Connection type detection ────────────────────────────────────────────────
+
+function isMetaLdar(conn: Connection): boolean {
+  return !!(conn.baseUrl?.includes('localhost:8087'));
+}
+
+function isMetaGen(conn: Connection): boolean {
+  return !!(conn.apiKey?.startsWith('mg-api-') || conn.baseUrl?.includes('metagen.meta.com'));
+}
+
 // ─── Build Request ────────────────────────────────────────────────────────────
 
 function buildEndpoint(conn: Connection): string {
-  if (conn.baseUrl) return `${conn.baseUrl}/v1/messages`;
+  if (conn.baseUrl) {
+    // Normalize: strip trailing /v1/messages if already included
+    const base = conn.baseUrl.replace(/\/v1\/messages$/, '');
+    return `${base}/v1/messages`;
+  }
   if (import.meta.env.DEV) return '/api/claude';
   return 'https://api.anthropic.com/v1/messages';
 }
@@ -51,10 +65,12 @@ function buildHeaders(conn: Connection): Record<string, string> {
     'Content-Type': 'application/json',
     'anthropic-version': '2023-06-01',
   };
-  if (conn.baseUrl) {
-    // Corporate proxy mode (e.g. Meta LDAR) — proxy handles auth, no API key needed
-    // Some proxies accept an optional key; include it only if provided
-    if (conn.apiKey) headers['x-api-key'] = conn.apiKey;
+
+  if (isMetaLdar(conn)) {
+    // Meta LDAR proxy — proxy handles auth, no API key header needed
+  } else if (isMetaGen(conn)) {
+    // MetaGen — use mg-api-... key as x-api-key
+    headers['x-api-key'] = conn.apiKey;
   } else if (import.meta.env.DEV) {
     // Dev proxy handles key injection
   } else {
@@ -103,6 +119,37 @@ export function extractArtifacts(text: string): Artifact[] {
   return artifacts;
 }
 
+// ─── Test Connection ──────────────────────────────────────────────────────────
+
+export async function testConnection(apiKey: string, model: string): Promise<boolean> {
+  try {
+    const isMetaGenKey = apiKey.startsWith('mg-api-');
+    const endpoint = isMetaGenKey
+      ? 'https://metagen.meta.com/v1/messages'
+      : 'https://api.anthropic.com/v1/messages';
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'anthropic-version': '2023-06-01',
+      'x-api-key': apiKey,
+    };
+    if (!isMetaGenKey) {
+      headers['anthropic-dangerous-direct-browser-access'] = 'true';
+    }
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        model,
+        max_tokens: 16,
+        messages: [{ role: 'user', content: 'Say ok' }],
+      }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 // ─── Send Message (streaming) ─────────────────────────────────────────────────
 
 export interface SendMessageOptions {
@@ -110,110 +157,84 @@ export interface SendMessageOptions {
   messages: Message[];
   systemPrompt?: string;
   tools?: ToolDefinition[];
-  onToken: (text: string) => void;
+  enableThinking?: boolean;
+  thinkingBudget?: number;
+  onToken?: (text: string) => void;
   onThinking?: (text: string) => void;
-  onToolCall?: (toolCall: { name: string; input: Record<string, unknown> }) => void;
-  onLog?: (entry: ApiLogEntry) => void;
+  onToolCall?: (tool: ToolUseBlock) => void;
   signal?: AbortSignal;
 }
 
 export interface SendMessageResult {
   content: string;
   thinkingText?: string;
+  artifacts: Artifact[];
+  toolCalls?: ToolUseBlock[];
   inputTokens?: number;
   outputTokens?: number;
-  artifacts: Artifact[];
   ttft?: number;
   totalTime?: number;
-  tokensPerSecond?: number;
-  toolCalls?: Array<{ id: string; name: string; input: Record<string, unknown> }>;
 }
 
 export async function sendMessage(opts: SendMessageOptions): Promise<SendMessageResult> {
-  const { connection, messages, systemPrompt, tools, onToken, onThinking, onToolCall, signal } = opts;
+  const { connection, messages, systemPrompt, tools, enableThinking, thinkingBudget, onToken, onThinking, onToolCall, signal } = opts;
 
   const endpoint = buildEndpoint(connection);
   const headers = buildHeaders(connection);
+  const startTime = Date.now();
+  let ttft: number | undefined;
 
-  const apiMessages = convertMessages(messages);
+  // Build system prompt with folder instructions if any
+  const systemParts: string[] = [];
+  if (systemPrompt) systemParts.push(systemPrompt);
+  const system = systemParts.join('\n\n') || undefined;
 
   // Build request body
   const body: Record<string, unknown> = {
     model: connection.model,
-    max_tokens: connection.maxTokens ?? 4096,
-    messages: apiMessages,
+    max_tokens: connection.maxTokens || 4096,
+    messages: convertMessages(messages),
     stream: true,
   };
 
-  if (connection.apiKey && import.meta.env.DEV) {
-    (body as Record<string, unknown>).apiKey = connection.apiKey;
-  }
+  if (system) body.system = system;
+  if (tools && tools.length > 0) body.tools = tools;
 
-  if (systemPrompt) {
-    body.system = systemPrompt;
-  }
-
-  if (tools && tools.length > 0) {
-    body.tools = tools;
-  }
-
-  // Extended thinking
-  if (connection.enableThinking) {
+  const useThinking = enableThinking ?? connection.enableThinking;
+  if (useThinking) {
     body.thinking = {
       type: 'enabled',
-      budget_tokens: connection.thinkingBudget ?? 10000,
+      budget_tokens: thinkingBudget ?? connection.thinkingBudget ?? 8000,
     };
-    // Thinking requires temperature=1
-    body.temperature = 1;
-  } else {
-    body.temperature = connection.temperature ?? 0.7;
   }
 
-  // Log request
-  addLog({
-    direction: 'request',
-    data: { ...body, messages: `[${apiMessages.length} messages]` },
-    model: connection.model,
-    label: `POST ${endpoint}`,
-  });
+  addLog({ direction: 'request', data: body, model: connection.model, label: 'API Request' });
 
-  const startTime = performance.now();
-  let ttft: number | undefined;
-
-  const response = await fetch(endpoint, {
+  const res = await fetch(endpoint, {
     method: 'POST',
     headers,
     body: JSON.stringify(body),
     signal,
   });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    let errorMsg: string;
-    try {
-      const errorJson = JSON.parse(errorText);
-      errorMsg = errorJson.error?.message ?? errorText;
-    } catch {
-      errorMsg = errorText;
-    }
-    addLog({ direction: 'error', data: { status: response.status, error: errorMsg }, model: connection.model });
-    throw new Error(`Claude API error ${response.status}: ${errorMsg}`);
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}));
+    const errMsg = (errBody as { error?: { message?: string } }).error?.message ?? `HTTP ${res.status}`;
+    addLog({ direction: 'error', data: errBody, label: `Error: ${res.status}` });
+    throw new Error(errMsg);
   }
 
-  // Stream SSE
-  const reader = response.body!.getReader();
+  // ── Stream parsing ────────────────────────────────────────────────────────
+  const reader = res.body!.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
   let fullText = '';
   let thinkingText = '';
+  const toolCalls: ToolUseBlock[] = [];
   let inputTokens: number | undefined;
   let outputTokens: number | undefined;
-  const toolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }> = [];
-  let currentToolId = '';
-  let currentToolName = '';
+  let currentToolCall: Partial<ToolUseBlock> | null = null;
   let currentToolInputStr = '';
-  // Track thinking block state (used for future tool-use interleaving)
-  let _inThinkingBlock = false; void _inThinkingBlock;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -237,17 +258,21 @@ export async function sendMessage(opts: SendMessageOptions): Promise<SendMessage
 
       const type = event.type as string;
 
+      if (type === 'message_start') {
+        const usage = (event.message as Record<string, unknown>)?.usage as Record<string, number> | undefined;
+        if (usage) inputTokens = usage.input_tokens;
+      }
+
       if (type === 'content_block_start') {
         const block = event.content_block as Record<string, unknown>;
-        if (block?.type === 'thinking') {
-          _inThinkingBlock = true;
-        } else if (block?.type === 'tool_use') {
-          currentToolId = block.id as string;
-          currentToolName = block.name as string;
+        if (block?.type === 'tool_use') {
+          currentToolCall = {
+            type: 'tool_use',
+            id: block.id as string,
+            name: block.name as string,
+            input: {},
+          };
           currentToolInputStr = '';
-          _inThinkingBlock = false;
-        } else {
-          _inThinkingBlock = false;
         }
       }
 
@@ -255,67 +280,60 @@ export async function sendMessage(opts: SendMessageOptions): Promise<SendMessage
         const delta = event.delta as Record<string, unknown>;
         if (!delta) continue;
 
+        if (delta.type === 'text_delta') {
+          const text = delta.text as string;
+          if (!ttft) ttft = Date.now() - startTime;
+          fullText += text;
+          onToken?.(text);
+          addLog({ direction: 'stream_token', data: text, label: 'Token' });
+        }
+
         if (delta.type === 'thinking_delta') {
-          const chunk = delta.thinking as string ?? '';
-          thinkingText += chunk;
-          if (onThinking) onThinking(chunk);
-          addLog({ direction: 'thinking', data: chunk, label: 'thinking_delta' });
-        } else if (delta.type === 'text_delta') {
-          const chunk = delta.text as string ?? '';
-          if (ttft === undefined) {
-            ttft = performance.now() - startTime;
-          }
-          fullText += chunk;
-          onToken(chunk);
-        } else if (delta.type === 'input_json_delta') {
-          currentToolInputStr += delta.partial_json as string ?? '';
+          const thinking = delta.thinking as string;
+          thinkingText += thinking;
+          onThinking?.(thinking);
+          addLog({ direction: 'thinking', data: thinking, label: 'Thinking' });
+        }
+
+        if (delta.type === 'input_json_delta' && currentToolCall) {
+          currentToolInputStr += delta.partial_json as string;
         }
       }
 
-      if (type === 'content_block_stop') {
-        if (currentToolName) {
-          let toolInput: Record<string, unknown> = {};
-          try { toolInput = JSON.parse(currentToolInputStr); } catch { /* ignore */ }
-          toolCalls.push({ id: currentToolId, name: currentToolName, input: toolInput });
-          if (onToolCall) onToolCall({ name: currentToolName, input: toolInput });
-          addLog({
-            direction: 'tool_call',
-            data: { id: currentToolId, name: currentToolName, input: toolInput },
-            label: `tool_use: ${currentToolName}`,
-          });
-          currentToolName = '';
-          currentToolId = '';
-          currentToolInputStr = '';
+      if (type === 'content_block_stop' && currentToolCall) {
+        try {
+          currentToolCall.input = JSON.parse(currentToolInputStr || '{}');
+        } catch {
+          currentToolCall.input = {};
         }
-        _inThinkingBlock = false;
+        const tc = currentToolCall as ToolUseBlock;
+        toolCalls.push(tc);
+        onToolCall?.(tc);
+        addLog({ direction: 'tool_call', data: tc, label: `Tool: ${tc.name}` });
+        currentToolCall = null;
+        currentToolInputStr = '';
       }
 
       if (type === 'message_delta') {
-        const usage = (event.usage as Record<string, unknown>) ?? {};
-        if (usage.output_tokens) outputTokens = usage.output_tokens as number;
-      }
-
-      if (type === 'message_start') {
-        const msg = event.message as Record<string, unknown>;
-        const usage = (msg?.usage as Record<string, unknown>) ?? {};
-        if (usage.input_tokens) inputTokens = usage.input_tokens as number;
+        const usage = (event.usage as Record<string, number> | undefined);
+        if (usage) outputTokens = usage.output_tokens;
       }
     }
   }
 
-  const totalTime = performance.now() - startTime;
-  const tokensPerSecond = outputTokens && totalTime > 0 ? (outputTokens / (totalTime / 1000)) : undefined;
+  const totalTime = Date.now() - startTime;
+  const tokensPerSecond = outputTokens && totalTime > 0 ? Math.round(outputTokens / (totalTime / 1000)) : undefined;
 
   addLog({
     direction: 'response',
-    data: { text: fullText.slice(0, 200) + (fullText.length > 200 ? '...' : ''), inputTokens, outputTokens },
+    data: { content: fullText, toolCalls, inputTokens, outputTokens },
     model: connection.model,
     ttft,
     totalTime,
     tokensPerSecond,
     inputTokens,
     outputTokens,
-    label: `Response (${outputTokens ?? '?'} tokens)`,
+    label: 'Response Complete',
   });
 
   const artifacts = extractArtifacts(fullText);
@@ -323,100 +341,39 @@ export async function sendMessage(opts: SendMessageOptions): Promise<SendMessage
   return {
     content: fullText,
     thinkingText: thinkingText || undefined,
+    artifacts,
+    toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
     inputTokens,
     outputTokens,
-    artifacts,
     ttft,
     totalTime,
-    tokensPerSecond,
-    toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
   };
 }
 
-// ─── Test Connection ──────────────────────────────────────────────────────────
-
-export async function testConnection(apiKey: string, model: string): Promise<boolean> {
-  const conn: Connection = {
-    id: 'test',
-    label: 'test',
-    apiKey,
-    model,
-    maxTokens: 16,
-    temperature: 0.5,
-    isActive: false,
-    status: 'disconnected',
-  };
-
-  try {
-    let got = false;
-    await sendMessage({
-      connection: conn,
-      messages: [{ id: 'test', role: 'user', content: 'Say "ok" in one word.', timestamp: Date.now() }],
-      onToken: () => { got = true; },
-    });
-    return got;
-  } catch {
-    return false;
-  }
-}
-
-// ─── Non-streaming single call (for benchmarks) ───────────────────────────────
-
-export async function sendMessageSimple(
-  connection: Connection,
-  messages: Message[],
-  systemPrompt?: string,
-): Promise<{ content: string; inputTokens?: number; outputTokens?: number }> {
-  let content = '';
-  let inputTokens: number | undefined;
-  let outputTokens: number | undefined;
-
-  const result = await sendMessage({
-    connection,
-    messages,
-    systemPrompt,
-    onToken: t => { content += t; },
-  });
-
-  content = result.content;
-  inputTokens = result.inputTokens;
-  outputTokens = result.outputTokens;
-
-  return { content, inputTokens, outputTokens };
-}
-
-// ─── Benchmark helper (used by benchmark.ts) ──────────────────────────────────
+// ─── Benchmark helper ─────────────────────────────────────────────────────────
 
 export async function sendBenchmarkMessage(
-  prompt: string,
-  apiKey: string,
-  model: string,
-  baseUrl?: string,
-): Promise<{ content: string; ttft: number; totalTime: number; tokensPerSecond: number; totalTokens: number }> {
-  const conn: Connection = {
-    id: 'benchmark',
-    label: 'benchmark',
-    apiKey,
-    model,
-    maxTokens: 2048,
-    temperature: 0.7,
-    isActive: false,
-    status: 'disconnected',
-    baseUrl,
-  };
+  connection: Connection,
+  prompt: string
+): Promise<{ ttft: number; totalTime: number; tokensPerSecond: number; totalTokens: number }> {
+  const start = Date.now();
+  let ttft = 0;
+  let tokenCount = 0;
 
-  let content = '';
-  const result = await sendMessage({
-    connection: conn,
-    messages: [{ id: 'bm', role: 'user', content: prompt, timestamp: Date.now() }],
-    onToken: t => { content += t; },
+  await sendMessage({
+    connection,
+    messages: [{ id: 'bench', role: 'user', content: prompt, timestamp: Date.now() }],
+    onToken: () => {
+      tokenCount++;
+      if (!ttft) ttft = Date.now() - start;
+    },
   });
 
+  const totalTime = Date.now() - start;
   return {
-    content: result.content,
-    ttft: result.ttft ?? 0,
-    totalTime: result.totalTime ?? 0,
-    tokensPerSecond: result.tokensPerSecond ?? 0,
-    totalTokens: (result.inputTokens ?? 0) + (result.outputTokens ?? 0),
+    ttft,
+    totalTime,
+    tokensPerSecond: totalTime > 0 ? Math.round(tokenCount / (totalTime / 1000)) : 0,
+    totalTokens: tokenCount,
   };
 }

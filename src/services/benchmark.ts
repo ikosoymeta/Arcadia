@@ -1,5 +1,6 @@
 import type { BenchmarkResult, BenchmarkSuite, WebVitalsResult } from '../types';
 import { sendBenchmarkMessage } from './claude';
+import type { Connection } from '../types';
 
 const BENCHMARK_PROMPTS = [
   {
@@ -34,6 +35,17 @@ export async function runBenchmarkSuite(
   onProgress: (completed: number, total: number, current: string) => void,
   baseUrl?: string,
 ): Promise<BenchmarkSuite> {
+  const connection: Connection = {
+    id: 'bench',
+    label: 'Benchmark',
+    apiKey,
+    model,
+    maxTokens: 4096,
+    temperature: 1,
+    isActive: true,
+    baseUrl: baseUrl || 'https://api.anthropic.com',
+    status: 'connected',
+  };
   const results: BenchmarkResult[] = [];
   const total = BENCHMARK_PROMPTS.length;
 
@@ -43,7 +55,7 @@ export async function runBenchmarkSuite(
 
     try {
       const renderStart = performance.now();
-      const result = await sendBenchmarkMessage(bp.prompt, apiKey, model, baseUrl);
+      const result = await sendBenchmarkMessage(connection, bp.prompt);
       const renderTime = performance.now() - renderStart - result.totalTime;
 
       const br: BenchmarkResult = {

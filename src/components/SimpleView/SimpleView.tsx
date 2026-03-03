@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useConnection } from '../../store/ConnectionContext';
@@ -10,13 +10,32 @@ import styles from './SimpleView.module.css';
 // ─── Quick suggestion prompts ─────────────────────────────────────────────────
 
 const SUGGESTIONS = [
-  { icon: '🌐', label: 'Build a website', prompt: 'Build me a beautiful landing page for a tech startup with a hero section, features, and contact form' },
-  { icon: '📝', label: 'Write an email', prompt: 'Write a professional email to schedule a meeting with a client' },
-  { icon: '🔍', label: 'Explain a concept', prompt: 'Explain how machine learning works in simple terms' },
-  { icon: '🐛', label: 'Debug my code', prompt: 'Help me debug this code and explain what\'s wrong' },
-  { icon: '📊', label: 'Analyze data', prompt: 'Help me analyze and visualize this dataset' },
-  { icon: '✍️', label: 'Write content', prompt: 'Write a compelling blog post about the future of AI' },
+  { icon: '🌐', label: 'Build a website', prompt: 'Build me a beautiful landing page for a tech startup with a hero section, features, and contact form. Use HTML, CSS, and JavaScript.' },
+  { icon: '📝', label: 'Write an email', prompt: 'Write a professional email to schedule a meeting with a client to discuss a new project proposal.' },
+  { icon: '🔍', label: 'Explain a concept', prompt: 'Explain how machine learning works in simple terms, with a real-world analogy.' },
+  { icon: '🐛', label: 'Debug my code', prompt: 'Help me debug this code:\n\n```python\ndef calculate_average(numbers):\n    total = 0\n    for n in numbers:\n        total += n\n    return total / len(numbers)\n\nprint(calculate_average([]))\n```\n\nWhat\'s wrong and how do I fix it?' },
+  { icon: '📊', label: 'Analyze data', prompt: 'Help me write a Python script to analyze a CSV file and create a summary with statistics (mean, median, max, min) for each numeric column.' },
+  { icon: '✍️', label: 'Write content', prompt: 'Write a compelling 500-word blog post about the future of AI assistants and how they will change the way we work.' },
 ];
+
+// ─── Follow-up suggestions based on response type ─────────────────────────────
+
+function getFollowUpSuggestions(content: string): string[] {
+  const lower = content.toLowerCase();
+  if (lower.includes('```html') || lower.includes('landing page') || lower.includes('website')) {
+    return ['Add a dark mode toggle', 'Make it mobile responsive', 'Add animations', 'Add a pricing section'];
+  }
+  if (lower.includes('```python') || lower.includes('```javascript') || lower.includes('```typescript')) {
+    return ['Add error handling', 'Write unit tests for this', 'Optimize for performance', 'Add documentation'];
+  }
+  if (lower.includes('email') || lower.includes('write') || lower.includes('draft')) {
+    return ['Make it more formal', 'Make it shorter', 'Add bullet points', 'Translate to Spanish'];
+  }
+  if (lower.includes('explain') || lower.includes('how') || lower.includes('what is')) {
+    return ['Give me a practical example', 'Go deeper on this', 'Explain like I\'m 5', 'What are the downsides?'];
+  }
+  return ['Tell me more', 'Give me an example', 'How do I use this?', 'What are alternatives?'];
+}
 
 // ─── Activity Step ────────────────────────────────────────────────────────────
 
@@ -53,10 +72,7 @@ function ArtifactCard({ artifact }: { artifact: Artifact }) {
         </div>
         <div className={styles.artifactActions}>
           {artifact.type === 'html' && (
-            <button
-              className={styles.artifactBtn}
-              onClick={() => setShowPreview(p => !p)}
-            >
+            <button className={styles.artifactBtn} onClick={() => setShowPreview(p => !p)}>
               {showPreview ? '📝 Code' : '👁 Preview'}
             </button>
           )}
@@ -64,30 +80,18 @@ function ArtifactCard({ artifact }: { artifact: Artifact }) {
             {copied ? '✓ Copied' : '📋 Copy'}
           </button>
           {artifact.type === 'html' && (
-            <button
-              className={styles.artifactBtn}
-              onClick={() => {
-                const blob = new Blob([artifact.content], { type: 'text/html' });
-                const url = URL.createObjectURL(blob);
-                window.open(url, '_blank');
-              }}
-            >
-              ↗ Open
-            </button>
+            <button className={styles.artifactBtn} onClick={() => {
+              const blob = new Blob([artifact.content], { type: 'text/html' });
+              const url = URL.createObjectURL(blob);
+              window.open(url, '_blank');
+            }}>↗ Open</button>
           )}
         </div>
       </div>
       {showPreview && artifact.type === 'html' ? (
-        <iframe
-          srcDoc={artifact.content}
-          className={styles.artifactIframe}
-          sandbox="allow-scripts allow-same-origin"
-          title="Preview"
-        />
+        <iframe srcDoc={artifact.content} className={styles.artifactIframe} sandbox="allow-scripts allow-same-origin" title="Preview" />
       ) : (
-        <pre className={styles.artifactCode}>
-          <code>{artifact.content}</code>
-        </pre>
+        <pre className={styles.artifactCode}><code>{artifact.content}</code></pre>
       )}
     </div>
   );
@@ -98,8 +102,8 @@ function ArtifactCard({ artifact }: { artifact: Artifact }) {
 function MessageBubble({ message }: { message: Message }) {
   const isUser = message.role === 'user';
   const hasArtifacts = message.artifacts && message.artifacts.length > 0;
-  const hasThinking = !!message.thinkingText;
   const [showThinking, setShowThinking] = useState(false);
+  const hasImages = message.contentBlocks?.some(b => b.type === 'image');
 
   return (
     <div className={`${styles.messageBubble} ${isUser ? styles.userBubble : styles.assistantBubble}`}>
@@ -107,24 +111,49 @@ function MessageBubble({ message }: { message: Message }) {
         <div className={styles.avatarRow}>
           <div className={styles.claudeAvatar}>✦</div>
           <span className={styles.claudeLabel}>Claude</span>
-          {message.model && <span className={styles.modelBadge}>{message.model.split('-').slice(0, 3).join(' ')}</span>}
+          {message.model && (
+            <span className={styles.modelBadge}>
+              {message.model.replace('claude-', '').replace(/-\d{8}$/, '')}
+            </span>
+          )}
+          {message.ttft && (
+            <span className={styles.modelBadge}>{message.ttft}ms TTFT</span>
+          )}
         </div>
       )}
-      {isUser && message.contentBlocks?.some(b => b.type === 'image') && (
+
+      {/* Image attachments for user messages */}
+      {isUser && hasImages && (
         <div className={styles.imageAttachments}>
-          {message.contentBlocks.filter(b => b.type === 'image').map((b, i) => {
-            const img = b as { type: 'image'; source: { data: string; media_type: string } };
+          {message.contentBlocks?.filter(b => b.type === 'image').map((b, i) => {
+            if (b.type !== 'image') return null;
             return (
               <img
                 key={i}
-                src={`data:${img.source.media_type};base64,${img.source.data}`}
-                alt="attachment"
+                src={`data:${b.source.media_type};base64,${b.source.data}`}
+                alt="Attachment"
                 className={styles.attachedImage}
               />
             );
           })}
         </div>
       )}
+
+      {/* Thinking section */}
+      {message.thinkingText && (
+        <div className={styles.thinkingSection}>
+          <button className={styles.thinkingToggle} onClick={() => setShowThinking(p => !p)}>
+            🧠 {showThinking ? 'Hide' : 'Show'} thinking ({Math.round(message.thinkingText.length / 4)} tokens)
+          </button>
+          {showThinking && (
+            <div className={styles.thinkingContent}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.thinkingText}</ReactMarkdown>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Main content */}
       <div className={`${styles.bubbleContent} ${isUser ? styles.userContent : styles.assistantContent}`}>
         {isUser ? (
           <p>{message.content}</p>
@@ -132,28 +161,20 @@ function MessageBubble({ message }: { message: Message }) {
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
         )}
       </div>
-      {hasThinking && (
-        <div className={styles.thinkingSection}>
-          <button className={styles.thinkingToggle} onClick={() => setShowThinking(p => !p)}>
-            🧠 {showThinking ? 'Hide' : 'Show'} reasoning ({Math.round((message.thinkingText?.length ?? 0) / 4)} tokens)
-          </button>
-          {showThinking && (
-            <div className={styles.thinkingContent}>
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.thinkingText!}</ReactMarkdown>
-            </div>
-          )}
-        </div>
-      )}
+
+      {/* Artifacts */}
       {hasArtifacts && (
         <div className={styles.artifactsSection}>
           {message.artifacts!.map(a => <ArtifactCard key={a.id} artifact={a} />)}
         </div>
       )}
-      {message.totalTime && (
+
+      {/* Message meta */}
+      {!isUser && (message.inputTokens || message.outputTokens) && (
         <div className={styles.messageMeta}>
-          {message.outputTokens && <span>{message.outputTokens} tokens</span>}
-          {message.ttft && <span>TTFT {message.ttft.toFixed(0)}ms</span>}
-          <span>{(message.totalTime / 1000).toFixed(1)}s</span>
+          {message.inputTokens && <span>{message.inputTokens} in</span>}
+          {message.outputTokens && <span>{message.outputTokens} out</span>}
+          {message.totalTime && <span>{(message.totalTime / 1000).toFixed(1)}s</span>}
         </div>
       )}
     </div>
@@ -168,15 +189,10 @@ function ActivityFeed({ steps }: { steps: ActivityStep[] }) {
       {steps.map(step => (
         <div key={step.id} className={`${styles.activityStep} ${styles[`step_${step.status}`]}`}>
           <div className={styles.stepIconWrap}>
-            {step.status === 'active' ? (
-              <span className={styles.spinnerDot} />
-            ) : step.status === 'done' ? (
-              <span className={styles.stepCheck}>✓</span>
-            ) : step.status === 'error' ? (
-              <span className={styles.stepError}>✗</span>
-            ) : (
-              <span className={styles.stepPending}>{step.icon}</span>
-            )}
+            {step.status === 'active' && <span className={styles.spinnerDot} />}
+            {step.status === 'done' && <span className={styles.stepCheck}>✓</span>}
+            {step.status === 'error' && <span className={styles.stepError}>✗</span>}
+            {step.status === 'pending' && <span className={styles.stepPending}>{step.icon}</span>}
           </div>
           <div className={styles.stepBody}>
             <div className={styles.stepLabel}>{step.label}</div>
@@ -192,13 +208,19 @@ function ActivityFeed({ steps }: { steps: ActivityStep[] }) {
 
 export function SimpleView() {
   const { activeConnection, isMetaProxy } = useConnection();
-  const { getActiveConversation, addMessage, createConversation, isStreaming, setStreaming, streamingText, setStreamingText, appendStreamingText, streamingReasoning, setStreamingReasoning, appendStreamingReasoning } = useChat();
+  const {
+    getActiveConversation, addMessage, createConversation,
+    isStreaming, setStreaming, streamingText, setStreamingText,
+    appendStreamingText, streamingReasoning, setStreamingReasoning, appendStreamingReasoning,
+  } = useChat();
 
   const [input, setInput] = useState('');
   const [images, setImages] = useState<ImageAttachment[]>([]);
   const [activitySteps, setActivitySteps] = useState<ActivityStep[]>([]);
   const [showActivity, setShowActivity] = useState(false);
   const [error, setError] = useState('');
+  const [followUps, setFollowUps] = useState<string[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -215,8 +237,8 @@ export function SimpleView() {
     setActivitySteps(prev => prev.map(s => s.id === id ? { ...s, status, detail: detail ?? s.detail } : s));
   }, []);
 
-  const handleSend = useCallback(async () => {
-    const text = input.trim();
+  const handleSend = useCallback(async (overrideText?: string) => {
+    const text = (overrideText ?? input).trim();
     if (!text && images.length === 0) return;
     if (!activeConnection) { setError('No connection configured. Go to Settings to add your API key.'); return; }
     if (isStreaming) return;
@@ -224,6 +246,7 @@ export function SimpleView() {
     setError('');
     setInput('');
     setImages([]);
+    setFollowUps([]);
 
     // Ensure conversation exists
     let convId = conversation?.id;
@@ -276,6 +299,8 @@ export function SimpleView() {
         connection: activeConnection,
         messages: allMessages,
         systemPrompt: conversation?.systemPrompt,
+        enableThinking: conversation?.enableThinking ?? activeConnection.enableThinking,
+        thinkingBudget: conversation?.thinkingBudget ?? activeConnection.thinkingBudget,
         onToken: (chunk) => {
           if (!firstToken) {
             firstToken = true;
@@ -309,7 +334,12 @@ export function SimpleView() {
       };
 
       addMessage(convId, assistantMsg);
-      setStep('artifacts', 'done', result.artifacts.length > 0 ? `${result.artifacts.length} artifact${result.artifacts.length !== 1 ? 's' : ''} ready` : 'Done');
+      setStep('artifacts', 'done', result.artifacts.length > 0
+        ? `${result.artifacts.length} artifact${result.artifacts.length !== 1 ? 's' : ''} ready`
+        : 'Done');
+
+      // Generate contextual follow-up suggestions
+      setFollowUps(getFollowUpSuggestions(result.content));
 
       setTimeout(() => setShowActivity(false), 2000);
     } catch (err: unknown) {
@@ -326,7 +356,8 @@ export function SimpleView() {
       setStreamingText('');
       setStreamingReasoning('');
     }
-  }, [input, images, activeConnection, isStreaming, conversation, createConversation, addMessage, setStreaming, setStreamingText, appendStreamingText, setStreamingReasoning, appendStreamingReasoning, setStep]);
+  }, [input, images, activeConnection, isStreaming, conversation, createConversation, addMessage,
+    setStreaming, setStreamingText, appendStreamingText, setStreamingReasoning, appendStreamingReasoning, setStep]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -336,8 +367,13 @@ export function SimpleView() {
   };
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files ?? []);
+    processFiles(Array.from(e.target.files ?? []));
+    e.target.value = '';
+  };
+
+  const processFiles = (files: File[]) => {
     files.forEach(file => {
+      if (!file.type.startsWith('image/')) return;
       const reader = new FileReader();
       reader.onload = (ev) => {
         const dataUrl = ev.target?.result as string;
@@ -353,13 +389,33 @@ export function SimpleView() {
       };
       reader.readAsDataURL(file);
     });
-    e.target.value = '';
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    processFiles(Array.from(e.dataTransfer.files));
+  };
+
+  const handleStop = () => {
+    abortRef.current?.abort();
   };
 
   const isEmpty = messages.length === 0;
 
   return (
-    <div className={styles.container}>
+    <div
+      className={styles.container}
+      onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
+      onDragLeave={() => setIsDragging(false)}
+      onDrop={handleDrop}
+    >
+      {isDragging && (
+        <div className={styles.dropOverlay}>
+          <div className={styles.dropMessage}>📎 Drop image to attach</div>
+        </div>
+      )}
+
       {/* Messages area */}
       <div className={styles.messagesArea}>
         {isEmpty && !isStreaming ? (
@@ -368,7 +424,11 @@ export function SimpleView() {
             <h1 className={styles.emptyTitle}>What can I help you with?</h1>
             <p className={styles.emptySubtitle}>
               Powered by {activeConnection ? activeConnection.label : 'Claude'}
-              {activeConnection && <span className={styles.modelPill}>{activeConnection.model.split('-').slice(1, 4).join(' ')}</span>}
+              {activeConnection && (
+                <span className={styles.modelPill}>
+                  {activeConnection.model.replace('claude-', '').replace(/-\d{8}$/, '')}
+                </span>
+              )}
             </p>
             {!activeConnection && (
               <div className={styles.noConnectionBanner}>
@@ -390,7 +450,7 @@ export function SimpleView() {
                 <button
                   key={s.label}
                   className={styles.suggestionBtn}
-                  onClick={() => { setInput(s.prompt); textareaRef.current?.focus(); }}
+                  onClick={() => handleSend(s.prompt)}
                 >
                   <span className={styles.suggestionIcon}>{s.icon}</span>
                   <span>{s.label}</span>
@@ -443,67 +503,75 @@ export function SimpleView() {
         </div>
       )}
 
+      {/* Follow-up suggestions */}
+      {followUps.length > 0 && !isStreaming && messages.length > 0 && (
+        <div className={styles.followUpRow}>
+          {followUps.map(f => (
+            <button
+              key={f}
+              className={styles.followUpBtn}
+              onClick={() => handleSend(f)}
+            >
+              {f}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Input area */}
       <div className={styles.inputArea}>
+        {/* Image previews */}
         {images.length > 0 && (
-          <div className={styles.imagePreviewRow}>
+          <div className={styles.imagePreviews}>
             {images.map(img => (
               <div key={img.id} className={styles.imagePreviewItem}>
-                <img src={img.previewUrl} alt={img.name} className={styles.imageThumb} />
-                <button className={styles.removeImageBtn} onClick={() => setImages(prev => prev.filter(i => i.id !== img.id))}>✕</button>
+                <img src={img.previewUrl} alt={img.name} className={styles.imagePreviewThumb} />
+                <button
+                  className={styles.imageRemoveBtn}
+                  onClick={() => setImages(prev => prev.filter(i => i.id !== img.id))}
+                >×</button>
               </div>
             ))}
           </div>
         )}
+
         <div className={styles.inputRow}>
           <button
             className={styles.attachBtn}
             onClick={() => fileInputRef.current?.click()}
             title="Attach image"
-          >
-            📎
-          </button>
+          >📎</button>
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/jpeg,image/png,image/gif,image/webp"
+            accept="image/*"
             multiple
-            style={{ display: 'none' }}
             onChange={handleImageUpload}
+            style={{ display: 'none' }}
           />
           <textarea
             ref={textareaRef}
-            className={styles.inputBox}
+            className={styles.textarea}
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={activeConnection ? 'Ask Claude anything... (Shift+Enter for new line)' : 'Add your API key in Settings to start chatting'}
+            placeholder="Ask Claude anything... (Shift+Enter for new line)"
             rows={1}
-            disabled={!activeConnection || isStreaming}
+            style={{ resize: 'none' }}
           />
           {isStreaming ? (
-            <button
-              className={styles.stopBtn}
-              onClick={() => abortRef.current?.abort()}
-            >
-              ⏹ Stop
-            </button>
+            <button className={styles.stopBtn} onClick={handleStop} title="Stop generation">⏹</button>
           ) : (
             <button
               className={styles.sendBtn}
-              onClick={handleSend}
-              disabled={(!input.trim() && images.length === 0) || !activeConnection}
-            >
-              ↑
-            </button>
+              onClick={() => handleSend()}
+              disabled={!input.trim() && images.length === 0}
+              title="Send (Enter)"
+            >↑</button>
           )}
         </div>
         <div className={styles.inputHint}>
-          {activeConnection ? (
-            <>Claude may make mistakes. Verify important information.</>
-          ) : (
-            <>Go to Settings to add your Anthropic API key.</>
-          )}
+          Enter to send · Shift+Enter for new line · Drag & drop images
         </div>
       </div>
     </div>

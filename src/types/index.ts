@@ -322,7 +322,7 @@ export interface WebVitalsResult {
   inp?: number;
 }
 
-export type ViewMode = 'chat' | 'settings' | 'benchmarks' | 'code-workspace' | 'skills' | 'team' | 'help';
+export type ViewMode = 'chat' | 'settings' | 'benchmarks' | 'code-workspace' | 'skills' | 'team' | 'help' | 'integrations';
 
 export interface FileNode {
   name: string;

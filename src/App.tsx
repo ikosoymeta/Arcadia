@@ -17,6 +17,7 @@ const CodeWorkspace = lazy(() => import('./components/CodeWorkspace/CodeWorkspac
 const SkillsPanel = lazy(() => import('./components/Skills/SkillsPanel').then(m => ({ default: m.SkillsPanel })));
 const TeamPanel = lazy(() => import('./components/Team/TeamPanel').then(m => ({ default: m.TeamPanel })));
 const HelpPanel = lazy(() => import('./components/Help/HelpPanel').then(m => ({ default: m.HelpPanel })));
+const IntegrationsPanel = lazy(() => import('./components/Integrations/IntegrationsPanel').then(m => ({ default: m.IntegrationsPanel })));
 const PreviewPanel = lazy(() => import('./components/Preview/PreviewPanel').then(m => ({ default: m.PreviewPanel })));
 
 function LoadingFallback() {
@@ -144,6 +145,13 @@ function App() {
                 <div className={styles.fullWidth}>
                   <Suspense fallback={<LoadingFallback />}>
                     <HelpPanel />
+                  </Suspense>
+                </div>
+              )}
+              {viewMode === 'integrations' && (
+                <div className={styles.fullWidth}>
+                  <Suspense fallback={<LoadingFallback />}>
+                    <IntegrationsPanel />
                   </Suspense>
                 </div>
               )}
