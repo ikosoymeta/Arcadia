@@ -65,7 +65,7 @@ function App() {
               )}
               {viewMode === 'code-workspace' && (
                 <Suspense fallback={<LoadingFallback />}>
-                  <CodeWorkspace />
+                  <CodeWorkspace onNavigateHome={() => setViewMode('chat')} />
                 </Suspense>
               )}
               {viewMode === 'settings' && (

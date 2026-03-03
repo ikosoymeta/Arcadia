@@ -124,7 +124,11 @@ npm run dev
   },
 ];
 
-export function CodeWorkspace() {
+interface CodeWorkspaceProps {
+  onNavigateHome?: () => void;
+}
+
+export function CodeWorkspace({ onNavigateHome }: CodeWorkspaceProps) {
   const { artifacts } = usePreview();
   const [explorerCollapsed, setExplorerCollapsed] = useState(false);
   const [debugCollapsed, setDebugCollapsed] = useState(true);
@@ -258,6 +262,11 @@ export function CodeWorkspace() {
         <div className={styles.toolTitle}>
           Claude Code Workspace
         </div>
+        {onNavigateHome && (
+          <button className={styles.toolBtn} onClick={onNavigateHome} title="Back to Chat">
+            ← Home
+          </button>
+        )}
         <button className={styles.toolBtn} title="Split Editor">⫽</button>
         <button className={styles.toolBtn} title="Search">🔍</button>
         <button className={styles.toolBtn} title="Git">⎇</button>
