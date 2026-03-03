@@ -1,10 +1,38 @@
+/* ─── Root Layout ──────────────────────────────────────────────────────────── */
 .app {
   display: flex;
   width: 100vw;
   height: 100vh;
   overflow: hidden;
+  position: relative;
 }
 
+/* ─── Drag Overlay (prevents iframe/element interference during resize) ───── */
+.dragOverlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 9999;
+  cursor: col-resize;
+}
+
+/* ─── Sidebar Panel ────────────────────────────────────────────────────────── */
+.sidebarPanel {
+  height: 100vh;
+  flex-shrink: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebarPanel > * {
+  width: 100%;
+  height: 100%;
+}
+
+/* ─── Main Content Panel ───────────────────────────────────────────────────── */
 .mainContent {
   flex: 1;
   display: flex;
@@ -12,8 +40,128 @@
   min-width: 0;
   position: relative;
   overflow: hidden;
+  height: 100vh;
 }
 
+/* ─── Preview Panel ────────────────────────────────────────────────────────── */
+.previewPanel {
+  height: 100vh;
+  flex-shrink: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border);
+}
+
+.previewPanel > * {
+  width: 100%;
+  height: 100%;
+}
+
+/* ─── Resize Handle ────────────────────────────────────────────────────────── */
+.resizeHandle {
+  width: 6px;
+  height: 100vh;
+  flex-shrink: 0;
+  cursor: col-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  z-index: 10;
+  transition: background 0.15s;
+}
+
+.resizeHandle:hover {
+  background: rgba(99, 102, 241, 0.12);
+}
+
+.resizeHandle:hover .resizeLine {
+  background: var(--accent);
+  opacity: 1;
+  width: 3px;
+}
+
+.resizeLine {
+  width: 1px;
+  height: 100%;
+  background: var(--border);
+  border-radius: 1px;
+  transition: all 0.15s;
+  opacity: 0.6;
+}
+
+.resizeLeft {
+  /* Between sidebar and main */
+}
+
+.resizeRight {
+  /* Between main and preview */
+}
+
+.resizeHandle:active .resizeLine {
+  background: var(--accent);
+  width: 3px;
+  opacity: 1;
+}
+
+/* ─── Panel Restore Button (collapsed sidebar / preview) ───────────────────── */
+.panelRestoreBtn {
+  position: fixed;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 8px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  writing-mode: vertical-lr;
+  text-orientation: mixed;
+  transition: all 0.2s;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.panelRestoreBtn:hover {
+  background: var(--bg-tertiary);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.restoreIcon {
+  font-size: 10px;
+}
+
+.restoreLabel {
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+/* ─── Header Icon Button (hamburger, preview toggle) ───────────────────────── */
+.headerIconBtn {
+  padding: 4px 10px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+  font-weight: 500;
+}
+
+.headerIconBtn:hover {
+  background: var(--accent-dim);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* ─── Mode Header ──────────────────────────────────────────────────────────── */
 .modeHeader {
   display: flex;
   align-items: center;
@@ -29,6 +177,7 @@
   color: var(--text-tertiary);
 }
 
+/* ─── Chat Layout ──────────────────────────────────────────────────────────── */
 .chatLayout {
   flex: 1;
   display: flex;
@@ -46,4 +195,46 @@
 .fullWidth {
   flex: 1;
   overflow: auto;
+}
+
+/* ─── Responsive: Mobile ───────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .app {
+    flex-direction: column;
+  }
+
+  .sidebarPanel {
+    width: 100vw !important;
+    min-width: 100vw !important;
+    max-width: 100vw !important;
+    height: auto;
+    max-height: 50vh;
+  }
+
+  .mainContent {
+    width: 100vw !important;
+    height: auto;
+    flex: 1;
+  }
+
+  .previewPanel {
+    width: 100vw !important;
+    min-width: 100vw !important;
+    max-width: 100vw !important;
+    height: auto;
+    max-height: 40vh;
+    border-left: none;
+    border-top: 1px solid var(--border);
+  }
+
+  .resizeHandle {
+    display: none;
+  }
+
+  .panelRestoreBtn {
+    writing-mode: horizontal-tb;
+    top: auto;
+    bottom: 10px;
+    transform: none;
+  }
 }

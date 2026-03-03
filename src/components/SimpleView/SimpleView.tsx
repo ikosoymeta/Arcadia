@@ -432,7 +432,12 @@ export function SimpleView() {
             </p>
             {!activeConnection && (
               <div className={styles.noConnectionBanner}>
-                ⚠ No API key configured.{' '}
+                <div style={{ marginBottom: '6px' }}>⚠ No connection configured</div>
+                <div style={{ fontSize: '12px', opacity: 0.8, marginBottom: '8px' }}>
+                  Meta employees: use your MetaGen key (mg-api-...) or connect via VPN for auto-detect.
+                  <br />
+                  External users: add your Anthropic API key (sk-ant-...).
+                </div>
                 <button className={styles.inlineLinkBtn} onClick={() => {
                   document.dispatchEvent(new CustomEvent('arcadia:navigate', { detail: 'settings' }));
                 }}>
@@ -443,6 +448,11 @@ export function SimpleView() {
             {activeConnection && isMetaProxy && (
               <div className={styles.metaProxyBadge}>
                 🏢 Connected via Meta corporate account
+              </div>
+            )}
+            {activeConnection && !isMetaProxy && (
+              <div className={styles.metaProxyBadge} style={{ background: 'rgba(34,197,94,0.1)', borderColor: 'rgba(34,197,94,0.3)', color: '#22c55e' }}>
+                ✓ Connected — {activeConnection.model.replace('claude-', '').replace(/-\d{8}$/, '')}
               </div>
             )}
             <div className={styles.suggestions}>

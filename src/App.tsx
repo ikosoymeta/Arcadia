@@ -1,4 +1,4 @@
-import { useState, lazy, Suspense, useEffect } from 'react';
+import { useState, useRef, useCallback, lazy, Suspense, useEffect } from 'react';
 import { ChatProvider } from './store/ChatContext';
 import { ConnectionProvider } from './store/ConnectionContext';
 import { PreviewProvider } from './store/PreviewContext';
@@ -20,6 +20,19 @@ const HelpPanel = lazy(() => import('./components/Help/HelpPanel').then(m => ({ 
 const IntegrationsPanel = lazy(() => import('./components/Integrations/IntegrationsPanel').then(m => ({ default: m.IntegrationsPanel })));
 const PreviewPanel = lazy(() => import('./components/Preview/PreviewPanel').then(m => ({ default: m.PreviewPanel })));
 
+// ─── Constants ────────────────────────────────────────────────────────────────
+const SIDEBAR_MIN = 200;
+const SIDEBAR_MAX = 500;
+const PREVIEW_MIN = 200;
+const PREVIEW_MAX = 600;
+const SIDEBAR_DEFAULT = 280;
+const PREVIEW_DEFAULT = 340;
+
+function loadWidth(key: string, fallback: number): number {
+  const v = localStorage.getItem(key);
+  return v ? parseInt(v, 10) : fallback;
+}
+
 function LoadingFallback() {
   return (
     <div style={{
@@ -31,6 +44,19 @@ function LoadingFallback() {
   );
 }
 
+// ─── Resize Handle Component ──────────────────────────────────────────────────
+function ResizeHandle({ onMouseDown, position }: { onMouseDown: (e: React.MouseEvent) => void; position: 'left' | 'right' }) {
+  return (
+    <div
+      className={`${styles.resizeHandle} ${position === 'left' ? styles.resizeLeft : styles.resizeRight}`}
+      onMouseDown={onMouseDown}
+    >
+      <div className={styles.resizeLine} />
+    </div>
+  );
+}
+
+// ─── App ──────────────────────────────────────────────────────────────────────
 function App() {
   const [viewMode, setViewMode] = useState<ViewMode>('chat');
   const [interfaceMode, setInterfaceMode] = useState<InterfaceMode>(
@@ -41,6 +67,20 @@ function App() {
   const [showOnboarding, setShowOnboarding] = useState(
     () => !localStorage.getItem('arcadia-onboarding-complete')
   );
+
+  // Panel widths (px)
+  const [sidebarWidth, setSidebarWidth] = useState(() => loadWidth('arcadia-sidebar-width', SIDEBAR_DEFAULT));
+  const [previewWidth, setPreviewWidth] = useState(() => loadWidth('arcadia-preview-width', PREVIEW_DEFAULT));
+  const [isDragging, setIsDragging] = useState<'sidebar' | 'preview' | null>(null);
+  const dragStartRef = useRef({ x: 0, width: 0 });
+
+  // Persist widths
+  useEffect(() => {
+    localStorage.setItem('arcadia-sidebar-width', String(sidebarWidth));
+  }, [sidebarWidth]);
+  useEffect(() => {
+    localStorage.setItem('arcadia-preview-width', String(previewWidth));
+  }, [previewWidth]);
 
   // Persist interface mode
   useEffect(() => {
@@ -57,10 +97,59 @@ function App() {
     return () => document.removeEventListener('arcadia:navigate', handler);
   }, []);
 
+  // ─── Drag handlers ──────────────────────────────────────────────────────────
+  const handleSidebarDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsDragging('sidebar');
+    dragStartRef.current = { x: e.clientX, width: sidebarWidth };
+  }, [sidebarWidth]);
+
+  const handlePreviewDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsDragging('preview');
+    dragStartRef.current = { x: e.clientX, width: previewWidth };
+  }, [previewWidth]);
+
+  useEffect(() => {
+    if (!isDragging) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const delta = e.clientX - dragStartRef.current.x;
+      if (isDragging === 'sidebar') {
+        const newWidth = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, dragStartRef.current.width + delta));
+        setSidebarWidth(newWidth);
+      } else if (isDragging === 'preview') {
+        const newWidth = Math.min(PREVIEW_MAX, Math.max(PREVIEW_MIN, dragStartRef.current.width - delta));
+        setPreviewWidth(newWidth);
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(null);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'col-resize';
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+    };
+  }, [isDragging]);
+
   const handleInterfaceChange = (mode: InterfaceMode) => {
     setInterfaceMode(mode);
     setViewMode('chat');
   };
+
+  // Determine if preview panel should show
+  const showPreview = viewMode === 'chat' && interfaceMode === 'simple' && !previewCollapsed;
+  const effectiveSidebarWidth = sidebarCollapsed ? 0 : sidebarWidth;
+  const effectivePreviewWidth = showPreview ? previewWidth : 0;
 
   return (
     <ConnectionProvider>
@@ -69,23 +158,78 @@ function App() {
           {showOnboarding && (
             <OnboardingWizard onComplete={() => setShowOnboarding(false)} />
           )}
+
+          {/* Drag overlay to prevent iframe/element interference during resize */}
+          {isDragging && <div className={styles.dragOverlay} />}
+
           <div className={styles.app}>
-            <Sidebar
-              viewMode={viewMode}
-              onViewChange={setViewMode}
-              collapsed={sidebarCollapsed}
-              onToggleCollapse={() => setSidebarCollapsed(p => !p)}
-            />
-            <div className={styles.mainContent}>
-              {/* Mode switcher header — shown only on chat view */}
+            {/* ─── Sidebar Panel ──────────────────────────────────────────── */}
+            {!sidebarCollapsed && (
+              <div
+                className={styles.sidebarPanel}
+                style={{ width: sidebarWidth, minWidth: sidebarWidth, maxWidth: sidebarWidth }}
+              >
+                <Sidebar
+                  viewMode={viewMode}
+                  onViewChange={setViewMode}
+                  collapsed={false}
+                  onToggleCollapse={() => setSidebarCollapsed(true)}
+                />
+              </div>
+            )}
+
+            {/* Sidebar resize handle */}
+            {!sidebarCollapsed && (
+              <ResizeHandle onMouseDown={handleSidebarDragStart} position="left" />
+            )}
+
+            {/* Collapsed sidebar restore button — fixed left edge */}
+            {sidebarCollapsed && (
+              <button
+                className={styles.panelRestoreBtn}
+                style={{ left: 0, borderRadius: '0 8px 8px 0' }}
+                onClick={() => setSidebarCollapsed(false)}
+                title="Show sidebar"
+              >
+                <span className={styles.restoreIcon}>◀</span>
+                <span className={styles.restoreLabel}>Sidebar</span>
+              </button>
+            )}
+
+            {/* ─── Main Content Panel ────────────────────────────────────── */}
+            <div
+              className={styles.mainContent}
+              style={{
+                width: `calc(100vw - ${effectiveSidebarWidth}px - ${effectivePreviewWidth}px - ${!sidebarCollapsed ? 6 : 0}px - ${showPreview ? 6 : 0}px)`,
+              }}
+            >
+              {/* Mode switcher header — always shown on chat view */}
               {viewMode === 'chat' && (
                 <div className={styles.modeHeader}>
+                  {sidebarCollapsed && (
+                    <button
+                      className={styles.headerIconBtn}
+                      onClick={() => setSidebarCollapsed(false)}
+                      title="Show sidebar"
+                    >☰</button>
+                  )}
                   <ModeSwitcher mode={interfaceMode} onChange={handleInterfaceChange} />
                   <div className={styles.modeHint}>
                     {interfaceMode === 'simple'
                       ? 'Friendly mode — just describe what you need'
                       : 'Engineer mode — full API access, logs, terminal'}
                   </div>
+                  <div style={{ flex: 1 }} />
+                  {/* Preview toggle in header */}
+                  {interfaceMode === 'simple' && (
+                    <button
+                      className={styles.headerIconBtn}
+                      onClick={() => setPreviewCollapsed(p => !p)}
+                      title={previewCollapsed ? 'Show preview panel' : 'Hide preview panel'}
+                    >
+                      {previewCollapsed ? '◁ Preview' : 'Preview ▷'}
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -93,12 +237,6 @@ function App() {
               {viewMode === 'chat' && interfaceMode === 'simple' && (
                 <div className={styles.chatLayout}>
                   <SimpleView />
-                  <Suspense fallback={null}>
-                    <PreviewPanel
-                      collapsed={previewCollapsed}
-                      onToggleCollapse={() => setPreviewCollapsed(p => !p)}
-                    />
-                  </Suspense>
                 </div>
               )}
               {viewMode === 'chat' && interfaceMode === 'engineer' && (
@@ -156,6 +294,41 @@ function App() {
                 </div>
               )}
             </div>
+
+            {/* ─── Preview Panel (Simple mode only) ──────────────────────── */}
+            {viewMode === 'chat' && interfaceMode === 'simple' && (
+              <>
+                {!previewCollapsed && (
+                  <ResizeHandle onMouseDown={handlePreviewDragStart} position="right" />
+                )}
+                {!previewCollapsed && (
+                  <div
+                    className={styles.previewPanel}
+                    style={{ width: previewWidth, minWidth: previewWidth, maxWidth: previewWidth }}
+                  >
+                    <Suspense fallback={null}>
+                      <PreviewPanel
+                        collapsed={false}
+                        onToggleCollapse={() => setPreviewCollapsed(true)}
+                      />
+                    </Suspense>
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* Collapsed preview restore button — fixed right edge */}
+            {viewMode === 'chat' && interfaceMode === 'simple' && previewCollapsed && (
+              <button
+                className={styles.panelRestoreBtn}
+                style={{ right: 0, borderRadius: '8px 0 0 8px' }}
+                onClick={() => setPreviewCollapsed(false)}
+                title="Show preview panel"
+              >
+                <span className={styles.restoreLabel}>Preview</span>
+                <span className={styles.restoreIcon}>▶</span>
+              </button>
+            )}
           </div>
         </PreviewProvider>
       </ChatProvider>
