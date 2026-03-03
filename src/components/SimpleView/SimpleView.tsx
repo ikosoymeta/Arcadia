@@ -504,6 +504,21 @@ export function SimpleView() {
     }
   }, [messages.length]);
 
+  // Debounce streaming text for ReactMarkdown to avoid re-parsing on every token.
+  // Updates at most every 80ms during streaming, giving smooth visual updates
+  // without the cost of full markdown parsing on each token.
+  const [debouncedStreamingText, setDebouncedStreamingText] = useState('');
+  useEffect(() => {
+    if (!isStreaming) {
+      setDebouncedStreamingText(streamingText);
+      return;
+    }
+    const timer = setTimeout(() => {
+      setDebouncedStreamingText(streamingText);
+    }, 80);
+    return () => clearTimeout(timer);
+  }, [streamingText, isStreaming]);
+
   const setStep = useCallback((id: string, status: ActivityStep['status'], detail?: string) => {
     setActivitySteps(prev => prev.map(s => s.id === id ? { ...s, status, detail: detail ?? s.detail } : s));
   }, []);
@@ -788,8 +803,8 @@ export function SimpleView() {
                   </div>
                 )}
                 <div className={`${styles.bubbleContent} ${styles.assistantContent}`}>
-                  {streamingText ? (
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{streamingText}</ReactMarkdown>
+                  {debouncedStreamingText ? (
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{debouncedStreamingText}</ReactMarkdown>
                   ) : (
                     <span className={styles.typingDots}><span /><span /><span /></span>
                   )}

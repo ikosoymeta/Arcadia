@@ -493,7 +493,7 @@ export async function sendMessage(opts: SendMessageOptions): Promise<SendMessage
   let outputTokens: number | undefined;
   let currentToolCall: Partial<ToolUseBlock> | null = null;
   let currentToolInputStr = '';
-  let rawChunks: string[] = []; // Debug: collect raw chunks
+  let rawBody = ''; // Collect raw response only for non-SSE fallback
   let eventCount = 0;
 
   while (true) {
@@ -501,7 +501,7 @@ export async function sendMessage(opts: SendMessageOptions): Promise<SendMessage
     if (done) break;
 
     const chunk = decoder.decode(value, { stream: true });
-    rawChunks.push(chunk);
+    if (eventCount === 0) rawBody += chunk; // Only accumulate until we confirm SSE
     buffer += chunk;
     const lines = buffer.split('\n');
     buffer = lines.pop() ?? '';
@@ -562,14 +562,12 @@ export async function sendMessage(opts: SendMessageOptions): Promise<SendMessage
           if (!ttft) ttft = Date.now() - startTime;
           fullText += text;
           onToken?.(text);
-          addLog({ direction: 'stream_token', data: text, label: 'Token' });
         }
 
         if (delta.type === 'thinking_delta') {
           const thinking = delta.thinking as string;
           thinkingText += thinking;
           onThinking?.(thinking);
-          addLog({ direction: 'thinking', data: thinking, label: 'Thinking' });
         }
 
         if (delta.type === 'input_json_delta' && currentToolCall) {
@@ -618,8 +616,7 @@ export async function sendMessage(opts: SendMessageOptions): Promise<SendMessage
   }
 
   // Fallback: if no SSE events were parsed, try to interpret the raw response
-  if (eventCount === 0 && rawChunks.length > 0) {
-    const rawBody = rawChunks.join('');
+  if (eventCount === 0 && rawBody.length > 0) {
     console.warn('[ArcadIA] No SSE events parsed. Raw response:', rawBody.slice(0, 500));
     try {
       // Maybe the response is a plain JSON message (non-streaming)
@@ -650,9 +647,9 @@ export async function sendMessage(opts: SendMessageOptions): Promise<SendMessage
 
   // Debug log
   if (!fullText) {
-    console.error('[ArcadIA] Empty response. Events parsed:', eventCount, 'Raw chunks:', rawChunks.length);
-    if (rawChunks.length > 0) {
-      console.error('[ArcadIA] First raw chunk:', rawChunks[0].slice(0, 300));
+    console.error('[ArcadIA] Empty response. Events parsed:', eventCount, 'Raw body length:', rawBody.length);
+    if (rawBody.length > 0) {
+      console.error('[ArcadIA] Raw body start:', rawBody.slice(0, 300));
     }
   }
 

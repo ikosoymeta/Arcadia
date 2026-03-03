@@ -211,10 +211,9 @@ function buildPrompt(messages, systemPrompt) {
 }
 
 // ─── Context window management ─────────────────────────────────────────────
-// Trims messages to fit within a reasonable context window for the CLI.
-// Claude Code has its own context management, but we should avoid sending
-// excessively long histories that slow down the CLI.
-const MAX_PROMPT_CHARS = 100000; // ~25K tokens
+// Safety-net trim only. The frontend already trims to ~200K tokens.
+// This just prevents accidentally sending absurdly large payloads to the CLI.
+const MAX_PROMPT_CHARS = 600000; // ~150K tokens — above the frontend limit, only catches edge cases
 
 function trimMessages(messages) {
   // Always keep the last user message
