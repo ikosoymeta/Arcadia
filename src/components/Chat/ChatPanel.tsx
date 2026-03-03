@@ -83,7 +83,7 @@ export function ChatPanel({ sidebarCollapsed, onExpandSidebar }: ChatPanelProps)
     if (!messageText || isStreaming) return;
 
     if (!activeConnection) {
-      setError('No API connection configured. Go to Settings to add one.');
+      setError('Connecting to Meta infrastructure... Please wait a moment.');
       return;
     }
 

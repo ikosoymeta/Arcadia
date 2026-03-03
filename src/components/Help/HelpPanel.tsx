@@ -5,8 +5,8 @@ const SECTIONS = [
     title: 'Getting Started',
     content: [
       { q: 'How do I start?', a: 'Click "+ New Chat" in the sidebar or use one of the quick action buttons on the welcome screen. Type your message and press Enter to send.' },
-      { q: 'How do I connect to Claude?', a: 'Go to Settings (gear icon in sidebar) and click "+ Add Connection". Enter your Anthropic API key, choose a model, and click Save. The green dot confirms your connection is active.' },
-      { q: 'What models are available?', a: 'Claude Opus 4 (most capable), Claude Sonnet 4 (balanced), and Claude 3.5 Haiku (fastest). Select your model when creating a connection.' },
+      { q: 'How do I connect to Claude?', a: 'ArcadIA connects automatically when you open it. It detects your Meta corporate infrastructure (LDAR proxy) and configures Claude access silently. A green dot in the sidebar confirms your connection is active. If you see a "Connecting..." message, make sure you are on the Meta network or VPN.' },
+      { q: 'What models are available?', a: 'Claude Opus 4 (most capable), Claude Sonnet 4 (balanced), and Claude 3.5 Haiku (fastest). The default model is selected automatically. You can change it in Settings if needed.' },
     ],
   },
   {

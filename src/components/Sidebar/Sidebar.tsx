@@ -502,21 +502,22 @@ export function Sidebar({ viewMode, onViewChange, collapsed, onToggleCollapse }:
         ))}
       </div>
 
-      {/* Connections */}
+      {/* Connection Status */}
       <div className={styles.connSection}>
-        <div className={styles.sectionTitle}>Connections</div>
+        <div className={styles.sectionTitle}>Connection</div>
         {connections.length === 0 ? (
-          <div className={styles.connItem} onClick={() => onViewChange('settings')} style={{ cursor: 'pointer' }}>
-            <span style={{ color: 'var(--text-tertiary)', fontSize: '12px' }}>+ Add API connection</span>
+          <div className={styles.connItem}>
+            <span className={`${styles.statusDot}`} style={{ background: '#f59e0b' }} />
+            <span className={styles.connLabel} style={{ color: 'var(--text-tertiary)', fontSize: '12px' }}>Connecting...</span>
           </div>
         ) : (
-          connections.map(conn => (
-            <div key={conn.id} className={styles.connItem} onClick={() => onViewChange('settings')}>
+          connections.filter(c => c.isActive).map(conn => (
+            <div key={conn.id} className={styles.connItem}>
               <span className={`${styles.statusDot} ${styles[conn.status]}`} />
               <span className={styles.connLabel}>{conn.label}</span>
-              {conn.apiKey?.startsWith('mg-api-') && (
-                <span style={{ fontSize: '10px', color: '#3b82f6', fontWeight: 600, marginLeft: 'auto' }}>MetaGen</span>
-              )}
+              <span style={{ fontSize: '10px', color: conn.status === 'connected' ? '#22c55e' : '#f59e0b', fontWeight: 600, marginLeft: 'auto' }}>
+                {conn.status === 'connected' ? 'Active' : 'Reconnecting...'}
+              </span>
             </div>
           ))
         )}

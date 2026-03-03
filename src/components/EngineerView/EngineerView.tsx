@@ -344,7 +344,7 @@ function EngineerChat() {
   const handleSend = useCallback(async () => {
     const text = input.trim();
     if (!text && images.length === 0) return;
-    if (!activeConnection) { setError('No connection. Add API key in Settings.'); return; }
+    if (!activeConnection) { setError('Connecting to Meta infrastructure... Please wait.'); return; }
     if (isStreaming) return;
 
     setError('');
@@ -501,7 +501,7 @@ function EngineerChat() {
               <br />Use the tabs above to inspect API logs, terminal, and debug info.
             </div>
             {!activeConnection && (
-              <div className={styles.engNoConn}>⚠ No API key configured — go to Settings</div>
+              <div className={styles.engNoConn}>⚠ Connecting to Meta infrastructure...</div>
             )}
           </div>
         ) : (

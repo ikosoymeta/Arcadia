@@ -119,7 +119,7 @@ export function SettingsPanel() {
 
         {connections.length === 0 && !showForm && (
           <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>
-            No connections yet. Add your Anthropic API key to get started.
+            Auto-configuring connection... This happens automatically on the Meta network.
           </div>
         )}
 

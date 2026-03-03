@@ -3,7 +3,7 @@ import { ChatProvider } from './store/ChatContext';
 import { ConnectionProvider } from './store/ConnectionContext';
 import { PreviewProvider } from './store/PreviewContext';
 import { Sidebar } from './components/Sidebar/Sidebar';
-import { OnboardingWizard } from './components/Onboarding/OnboardingWizard';
+// OnboardingWizard removed — auto-config handles everything silently
 import { SimpleView } from './components/SimpleView/SimpleView';
 import { EngineerView } from './components/EngineerView/EngineerView';
 import { ModeSwitcher } from './components/ModeSwitcher/ModeSwitcher';
@@ -64,9 +64,7 @@ function App() {
   );
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [previewCollapsed, setPreviewCollapsed] = useState(false);
-  const [showOnboarding, setShowOnboarding] = useState(
-    () => !localStorage.getItem('arcadia-onboarding-complete')
-  );
+  // No onboarding needed — auto-config runs silently in ConnectionProvider
 
   // Panel widths (px)
   const [sidebarWidth, setSidebarWidth] = useState(() => loadWidth('arcadia-sidebar-width', SIDEBAR_DEFAULT));
@@ -155,10 +153,6 @@ function App() {
     <ConnectionProvider>
       <ChatProvider>
         <PreviewProvider>
-          {showOnboarding && (
-            <OnboardingWizard onComplete={() => setShowOnboarding(false)} />
-          )}
-
           {/* Drag overlay to prevent iframe/element interference during resize */}
           {isDragging && <div className={styles.dragOverlay} />}
 

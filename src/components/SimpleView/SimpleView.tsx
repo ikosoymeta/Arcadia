@@ -207,7 +207,7 @@ function ActivityFeed({ steps }: { steps: ActivityStep[] }) {
 // ─── Main SimpleView ──────────────────────────────────────────────────────────
 
 export function SimpleView() {
-  const { activeConnection, isMetaProxy } = useConnection();
+  const { activeConnection, isMetaProxy, configStatus, retryAutoConnect } = useConnection();
   const {
     getActiveConversation, addMessage, createConversation,
     isStreaming, setStreaming, streamingText, setStreamingText,
@@ -430,29 +430,43 @@ export function SimpleView() {
                 </span>
               )}
             </p>
-            {!activeConnection && (
-              <div className={styles.noConnectionBanner}>
-                <div style={{ marginBottom: '6px' }}>⚠ No connection configured</div>
-                <div style={{ fontSize: '12px', opacity: 0.8, marginBottom: '8px' }}>
-                  Meta employees: use your MetaGen key (mg-api-...) or connect via VPN for auto-detect.
-                  <br />
-                  External users: add your Anthropic API key (sk-ant-...).
-                </div>
-                <button className={styles.inlineLinkBtn} onClick={() => {
-                  document.dispatchEvent(new CustomEvent('arcadia:navigate', { detail: 'settings' }));
-                }}>
-                  Open Settings →
-                </button>
+            {/* Auto-config progress — no manual setup needed */}
+            {configStatus.phase !== 'ready' && configStatus.phase !== 'idle' && (
+              <div className={styles.autoConfigBanner}>
+                {configStatus.phase === 'error' ? (
+                  <>
+                    <div className={styles.configMessage}>
+                      <span className={styles.configIcon}>⚠</span>
+                      {configStatus.message}
+                    </div>
+                    {configStatus.detail && (
+                      <div className={styles.configDetail}>{configStatus.detail}</div>
+                    )}
+                    <div className={styles.configRetry}>
+                      Auto-retrying...
+                      <button className={styles.retryBtn} onClick={retryAutoConnect}>Retry now</button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className={styles.configMessage}>
+                      <span className={styles.configSpinner} />
+                      {configStatus.message}
+                    </div>
+                    {configStatus.detail && (
+                      <div className={styles.configDetail}>{configStatus.detail}</div>
+                    )}
+                    <div className={styles.progressBar}>
+                      <div className={styles.progressFill} style={{ width: `${configStatus.progress}%` }} />
+                    </div>
+                    <div className={styles.progressLabel}>{configStatus.progress}% complete</div>
+                  </>
+                )}
               </div>
             )}
-            {activeConnection && isMetaProxy && (
+            {activeConnection && (
               <div className={styles.metaProxyBadge}>
-                🏢 Connected via Meta corporate account
-              </div>
-            )}
-            {activeConnection && !isMetaProxy && (
-              <div className={styles.metaProxyBadge} style={{ background: 'rgba(34,197,94,0.1)', borderColor: 'rgba(34,197,94,0.3)', color: '#22c55e' }}>
-                ✓ Connected — {activeConnection.model.replace('claude-', '').replace(/-\d{8}$/, '')}
+                {isMetaProxy ? '🏢 Connected via Meta corporate account' : `✓ Connected — ${activeConnection.model.replace('claude-', '').replace(/-\d{8}$/, '')}`}
               </div>
             )}
             <div className={styles.suggestions}>
