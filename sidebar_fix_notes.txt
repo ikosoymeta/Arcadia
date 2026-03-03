@@ -1,0 +1,26 @@
+SIDEBAR FIX ANALYSIS
+====================
+
+Current state from code review:
+1. togglePin() in ChatContext.tsx (line 164) - WORKS correctly, toggles isPinned and saves
+2. generateShareUrl() in ChatContext.tsx (line 182) - generates URL like origin/base/shared/{id}
+3. ShareModal - Opens when onShare is called, has visibility toggle, share link copy, export MD/JSON
+4. ConvItem (line 630-705) - Shows star and link icons on hover
+
+ISSUES:
+- From screenshot: star (⭐) and link (🔗) icons appear but look like raw emoji, not polished
+- The icons show on hover but the user says they "don't work" 
+- The star icon appears as a plain emoji character, not a proper icon
+- The share link icon appears as a plain emoji character
+
+FIX PLAN:
+1. The convActionBtn class is referenced in JSX but NOT defined in CSS - that's why they look bad!
+   Need to add .convActionBtn styles to Sidebar.module.css
+2. Make sure the click handlers actually work (they look correct in code)
+3. Add visual feedback: star should stay highlighted when pinned
+4. Share modal opens correctly from code, but need to verify
+
+CSS needed for .convActionBtn:
+- Small button with no background
+- Proper sizing and hover effects
+- Smooth transitions
