@@ -245,9 +245,19 @@ export async function sendMessage(opts: SendMessageOptions): Promise<SendMessage
     buffer = lines.pop() ?? '';
 
     for (const line of lines) {
-      if (!line.startsWith('data: ')) continue;
-      const data = line.slice(6).trim();
-      if (data === '[DONE]') continue;
+      const trimmedLine = line.trim();
+      // Skip empty lines and event: prefix lines
+      if (!trimmedLine || trimmedLine.startsWith('event:')) continue;
+      // Extract data payload
+      let data: string;
+      if (trimmedLine.startsWith('data: ')) {
+        data = trimmedLine.slice(6).trim();
+      } else if (trimmedLine.startsWith('data:')) {
+        data = trimmedLine.slice(5).trim();
+      } else {
+        continue;
+      }
+      if (!data || data === '[DONE]') continue;
 
       let event: Record<string, unknown>;
       try {

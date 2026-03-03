@@ -524,7 +524,11 @@ function EngineerChat() {
               )}
               <div className={styles.engMsgContent}>
                 {msg.role === 'assistant' ? (
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                  msg.content ? (
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                  ) : (
+                    <p style={{ color: 'var(--text-tertiary)', fontStyle: 'italic' }}>Empty response — bridge may have returned no content.</p>
+                  )
                 ) : (
                   <pre className={styles.engUserText}>{msg.content}</pre>
                 )}

@@ -376,8 +376,10 @@ function MessageBubble({ message }: { message: Message }) {
       <div className={`${styles.bubbleContent} ${isUser ? styles.userContent : styles.assistantContent}`}>
         {isUser ? (
           <p>{message.content}</p>
-        ) : (
+        ) : message.content ? (
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+        ) : (
+          <p className={styles.emptyResponse}>Response content unavailable. The bridge may have returned an empty response.</p>
         )}
       </div>
 

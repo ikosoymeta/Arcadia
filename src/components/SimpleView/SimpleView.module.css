@@ -393,6 +393,13 @@
   margin: 8px 0;
 }
 
+.emptyResponse {
+  color: var(--text-tertiary);
+  font-style: italic;
+  font-size: 13px;
+  margin: 0;
+}
+
 .imageAttachments {
   display: flex;
   gap: 8px;

@@ -1,5 +1,6 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useChat } from '../../store/ChatContext';
+import type { Conversation } from '../../types';
 import {
   computeAnalytics,
   dismissAnnouncement,
@@ -49,7 +50,7 @@ const ANNOUNCEMENT_ICONS: Record<string, string> = {
   info: 'ℹ️',
 };
 
-type TabId = 'overview' | 'usage' | 'requests' | 'content' | 'users' | 'status';
+type TabId = 'overview' | 'usage' | 'requests' | 'content' | 'users' | 'performance' | 'status';
 
 // ─── Token Usage Chart ───────────────────────────────────────────────────────
 
@@ -264,6 +265,7 @@ export function AnalyticsPanel() {
     { id: 'requests', label: 'Requests', icon: '📋' },
     { id: 'content', label: 'Content', icon: '📝' },
     { id: 'users', label: 'Users', icon: '👥' },
+    { id: 'performance', label: 'Performance', icon: '⚡' },
     { id: 'status', label: 'Status', icon: '📡' },
   ];
 
@@ -684,6 +686,11 @@ export function AnalyticsPanel() {
         </>
       )}
 
+      {/* ─── Performance Tab ──────────────────────────────────────────────── */}
+      {activeTab === 'performance' && (
+        <PerformanceTab conversations={conversations} />
+      )}
+
       {/* ─── Status Tab ─────────────────────────────────────────────────────── */}
       {activeTab === 'status' && (
         <>
@@ -757,6 +764,346 @@ export function AnalyticsPanel() {
         </>
       )}
     </div>
+  );
+}
+
+// ─── Performance Tab Component ───────────────────────────────────────────
+
+interface PerfMetrics {
+  avgTtft: number;
+  minTtft: number;
+  maxTtft: number;
+  avgResponseTime: number;
+  minResponseTime: number;
+  maxResponseTime: number;
+  avgTokensPerSec: number;
+  totalRequests: number;
+  successRate: number;
+  p50ResponseTime: number;
+  p95ResponseTime: number;
+  p99ResponseTime: number;
+  dailyPerf: { date: string; avgTtft: number; avgResponseTime: number; avgTps: number; count: number }[];
+}
+
+function computePerfMetrics(conversations: Conversation[]): PerfMetrics {
+  const ttfts: number[] = [];
+  const responseTimes: number[] = [];
+  const tpsValues: number[] = [];
+  const dailyMap: Record<string, { ttfts: number[]; responseTimes: number[]; tps: number[] }> = {};
+  let totalMsgs = 0;
+  let successMsgs = 0;
+
+  for (const conv of conversations) {
+    for (const msg of conv.messages) {
+      if (msg.role !== 'assistant') continue;
+      totalMsgs++;
+
+      const dateKey = new Date(msg.timestamp).toISOString().slice(0, 10);
+      if (!dailyMap[dateKey]) dailyMap[dateKey] = { ttfts: [], responseTimes: [], tps: [] };
+
+      if (msg.content && msg.content.length > 0) successMsgs++;
+
+      if (msg.ttft != null && msg.ttft > 0) {
+        ttfts.push(msg.ttft);
+        dailyMap[dateKey].ttfts.push(msg.ttft);
+      }
+      if (msg.totalTime != null && msg.totalTime > 0) {
+        responseTimes.push(msg.totalTime);
+        dailyMap[dateKey].responseTimes.push(msg.totalTime);
+      }
+      if (msg.outputTokens != null && msg.totalTime != null && msg.totalTime > 0) {
+        const tps = Math.round(msg.outputTokens / (msg.totalTime / 1000));
+        if (tps > 0) {
+          tpsValues.push(tps);
+          dailyMap[dateKey].tps.push(tps);
+        }
+      }
+    }
+  }
+
+  const avg = (arr: number[]) => arr.length > 0 ? Math.round(arr.reduce((s, v) => s + v, 0) / arr.length) : 0;
+  const percentile = (arr: number[], p: number) => {
+    if (arr.length === 0) return 0;
+    const sorted = [...arr].sort((a, b) => a - b);
+    const idx = Math.ceil((p / 100) * sorted.length) - 1;
+    return sorted[Math.max(0, idx)];
+  };
+
+  // Build daily performance for last 14 days
+  const dailyPerf: PerfMetrics['dailyPerf'] = [];
+  for (let i = 13; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const dateKey = d.toISOString().slice(0, 10);
+    const day = dailyMap[dateKey];
+    dailyPerf.push({
+      date: dateKey,
+      avgTtft: day ? avg(day.ttfts) : 0,
+      avgResponseTime: day ? avg(day.responseTimes) : 0,
+      avgTps: day ? avg(day.tps) : 0,
+      count: day ? day.responseTimes.length : 0,
+    });
+  }
+
+  return {
+    avgTtft: avg(ttfts),
+    minTtft: ttfts.length > 0 ? Math.min(...ttfts) : 0,
+    maxTtft: ttfts.length > 0 ? Math.max(...ttfts) : 0,
+    avgResponseTime: avg(responseTimes),
+    minResponseTime: responseTimes.length > 0 ? Math.min(...responseTimes) : 0,
+    maxResponseTime: responseTimes.length > 0 ? Math.max(...responseTimes) : 0,
+    avgTokensPerSec: avg(tpsValues),
+    totalRequests: totalMsgs,
+    successRate: totalMsgs > 0 ? Math.round((successMsgs / totalMsgs) * 100) : 100,
+    p50ResponseTime: percentile(responseTimes, 50),
+    p95ResponseTime: percentile(responseTimes, 95),
+    p99ResponseTime: percentile(responseTimes, 99),
+    dailyPerf,
+  };
+}
+
+function PerformanceTab({ conversations }: { conversations: Conversation[] }) {
+  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
+  const perf = useMemo(() => computePerfMetrics(conversations), [conversations]);
+
+  const fmtMs = (ms: number) => {
+    if (ms === 0) return '—';
+    if (ms < 1000) return `${ms}ms`;
+    return `${(ms / 1000).toFixed(1)}s`;
+  };
+
+  const maxRT = Math.max(1, ...perf.dailyPerf.map(d => d.avgResponseTime));
+  const maxTps = Math.max(1, ...perf.dailyPerf.map(d => d.avgTps));
+
+  const hasData = perf.totalRequests > 0;
+
+  return (
+    <>
+      {/* Top-level performance metrics */}
+      <div className={styles.metricsGrid}>
+        <div className={styles.metricCard}>
+          <div className={styles.metricLabel}>Avg TTFB</div>
+          <div className={styles.metricValue} style={{ color: perf.avgTtft < 1000 ? '#22c55e' : perf.avgTtft < 3000 ? '#f59e0b' : '#ef4444' }}>
+            {fmtMs(perf.avgTtft)}
+          </div>
+          <div className={styles.metricSub}>Time to first byte</div>
+        </div>
+        <div className={styles.metricCard}>
+          <div className={styles.metricLabel}>Avg Response Time</div>
+          <div className={styles.metricValue}>{fmtMs(perf.avgResponseTime)}</div>
+          <div className={styles.metricSub}>End-to-end latency</div>
+        </div>
+        <div className={styles.metricCard}>
+          <div className={styles.metricLabel}>Throughput</div>
+          <div className={styles.metricValue}>{perf.avgTokensPerSec > 0 ? `${perf.avgTokensPerSec}` : '—'}</div>
+          <div className={styles.metricSub}>avg tokens/second</div>
+        </div>
+        <div className={styles.metricCard}>
+          <div className={styles.metricLabel}>Success Rate</div>
+          <div className={styles.metricValue} style={{ color: perf.successRate >= 95 ? '#22c55e' : '#f59e0b' }}>
+            {perf.successRate}%
+          </div>
+          <div className={styles.metricSub}>{perf.totalRequests} total requests</div>
+        </div>
+      </div>
+
+      {/* Latency Breakdown */}
+      <div className={styles.section}>
+        <div className={styles.sectionHeader}>
+          <div className={styles.sectionTitle}>
+            <span className={styles.sectionIcon}>⏱️</span>
+            Latency Breakdown
+          </div>
+        </div>
+        {hasData ? (
+          <div className={styles.contentGrid}>
+            <div className={styles.contentCard}>
+              <div className={styles.contentCardTitle}>TTFB (Time to First Byte)</div>
+              <div className={styles.artifactRow}>
+                <span className={styles.artifactType}>Average</span>
+                <span className={styles.artifactCount}>{fmtMs(perf.avgTtft)}</span>
+              </div>
+              <div className={styles.artifactRow}>
+                <span className={styles.artifactType}>Minimum</span>
+                <span className={styles.artifactCount}>{fmtMs(perf.minTtft)}</span>
+              </div>
+              <div className={styles.artifactRow}>
+                <span className={styles.artifactType}>Maximum</span>
+                <span className={styles.artifactCount}>{fmtMs(perf.maxTtft)}</span>
+              </div>
+            </div>
+            <div className={styles.contentCard}>
+              <div className={styles.contentCardTitle}>Response Time Percentiles</div>
+              <div className={styles.artifactRow}>
+                <span className={styles.artifactType}>p50 (Median)</span>
+                <span className={styles.artifactCount}>{fmtMs(perf.p50ResponseTime)}</span>
+              </div>
+              <div className={styles.artifactRow}>
+                <span className={styles.artifactType}>p95</span>
+                <span className={styles.artifactCount}>{fmtMs(perf.p95ResponseTime)}</span>
+              </div>
+              <div className={styles.artifactRow}>
+                <span className={styles.artifactType}>p99</span>
+                <span className={styles.artifactCount}>{fmtMs(perf.p99ResponseTime)}</span>
+              </div>
+              <div className={styles.artifactRow}>
+                <span className={styles.artifactType}>Min / Max</span>
+                <span className={styles.artifactCount}>{fmtMs(perf.minResponseTime)} / {fmtMs(perf.maxResponseTime)}</span>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className={styles.emptyState}>
+            <div className={styles.emptyIcon}>⏱️</div>
+            <div className={styles.emptyTitle}>No performance data yet</div>
+            <div className={styles.emptyDesc}>Send messages to Claude to start collecting performance metrics.</div>
+          </div>
+        )}
+      </div>
+
+      {/* Response Time Trend Chart */}
+      {hasData && (
+        <div className={styles.section}>
+          <div className={styles.sectionHeader}>
+            <div className={styles.sectionTitle}>
+              <span className={styles.sectionIcon}>📈</span>
+              Response Time Trend (14 Days)
+            </div>
+          </div>
+          <div className={styles.chartArea}>
+            {perf.dailyPerf.map((day, i) => {
+              const heightPct = day.avgResponseTime > 0 ? Math.max(2, (day.avgResponseTime / maxRT) * 100) : 0;
+              return (
+                <div
+                  key={day.date}
+                  className={styles.chartBar}
+                  style={{
+                    height: `${heightPct}%`,
+                    background: day.avgResponseTime > 0
+                      ? day.avgResponseTime < 3000 ? 'linear-gradient(to top, #22c55e, rgba(34, 197, 94, 0.6))'
+                      : day.avgResponseTime < 10000 ? 'linear-gradient(to top, #f59e0b, rgba(245, 158, 11, 0.6))'
+                      : 'linear-gradient(to top, #ef4444, rgba(239, 68, 68, 0.6))'
+                      : 'var(--bg-tertiary)',
+                  }}
+                  onMouseEnter={() => setHoveredIdx(i)}
+                  onMouseLeave={() => setHoveredIdx(null)}
+                >
+                  {hoveredIdx === i && day.count > 0 && (
+                    <div className={styles.tooltip}>
+                      <div className={styles.tooltipDate}>{formatDate(day.date)}</div>
+                      <div className={styles.tooltipRow}>
+                        <span>Avg Response:</span>
+                        <span className={styles.tooltipValue}>{fmtMs(day.avgResponseTime)}</span>
+                      </div>
+                      <div className={styles.tooltipRow}>
+                        <span>Avg TTFB:</span>
+                        <span className={styles.tooltipValue}>{fmtMs(day.avgTtft)}</span>
+                      </div>
+                      <div className={styles.tooltipRow}>
+                        <span>Avg TPS:</span>
+                        <span className={styles.tooltipValue}>{day.avgTps} tok/s</span>
+                      </div>
+                      <div className={styles.tooltipRow}>
+                        <span>Requests:</span>
+                        <span className={styles.tooltipValue}>{day.count}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <div className={styles.chartLabels}>
+            {perf.dailyPerf.filter((_, i) => i % 2 === 0).map(day => (
+              <span key={day.date} className={styles.chartLabel}>{formatDate(day.date)}</span>
+            ))}
+          </div>
+          <div className={styles.chartLegend}>
+            <div className={styles.legendItem}>
+              <div className={styles.legendDot} style={{ background: '#22c55e' }} />
+              <span>&lt; 3s</span>
+            </div>
+            <div className={styles.legendItem}>
+              <div className={styles.legendDot} style={{ background: '#f59e0b' }} />
+              <span>3–10s</span>
+            </div>
+            <div className={styles.legendItem}>
+              <div className={styles.legendDot} style={{ background: '#ef4444' }} />
+              <span>&gt; 10s</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Throughput Chart */}
+      {hasData && (
+        <div className={styles.section}>
+          <div className={styles.sectionHeader}>
+            <div className={styles.sectionTitle}>
+              <span className={styles.sectionIcon}>🚀</span>
+              Throughput (Tokens/Second) — 14 Days
+            </div>
+          </div>
+          <div className={styles.chartArea}>
+            {perf.dailyPerf.map((day, i) => {
+              const heightPct = day.avgTps > 0 ? Math.max(2, (day.avgTps / maxTps) * 100) : 0;
+              return (
+                <div
+                  key={day.date}
+                  className={`${styles.chartBar} ${styles.chartBarTotal}`}
+                  style={{ height: `${heightPct}%` }}
+                  onMouseEnter={() => setHoveredIdx(100 + i)}
+                  onMouseLeave={() => setHoveredIdx(null)}
+                >
+                  {hoveredIdx === 100 + i && day.count > 0 && (
+                    <div className={styles.tooltip}>
+                      <div className={styles.tooltipDate}>{formatDate(day.date)}</div>
+                      <div className={styles.tooltipRow}>
+                        <span>Avg TPS:</span>
+                        <span className={styles.tooltipValue}>{day.avgTps} tok/s</span>
+                      </div>
+                      <div className={styles.tooltipRow}>
+                        <span>Requests:</span>
+                        <span className={styles.tooltipValue}>{day.count}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <div className={styles.chartLabels}>
+            {perf.dailyPerf.filter((_, i) => i % 2 === 0).map(day => (
+              <span key={day.date} className={styles.chartLabel}>{formatDate(day.date)}</span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Performance Tips */}
+      <div className={styles.section}>
+        <div className={styles.sectionHeader}>
+          <div className={styles.sectionTitle}>
+            <span className={styles.sectionIcon}>💡</span>
+            Performance Tips
+          </div>
+        </div>
+        <div style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.7 }}>
+          <div style={{ marginBottom: '10px' }}>
+            <strong style={{ color: 'var(--text-primary)' }}>TTFB (Time to First Byte)</strong> — The time from sending your prompt until the first token arrives. Lower is better. Affected by model load, prompt complexity, and network latency.
+          </div>
+          <div style={{ marginBottom: '10px' }}>
+            <strong style={{ color: 'var(--text-primary)' }}>Response Time</strong> — Total end-to-end time from prompt submission to full response. Includes TTFB + token generation time. Longer prompts and responses naturally take more time.
+          </div>
+          <div style={{ marginBottom: '10px' }}>
+            <strong style={{ color: 'var(--text-primary)' }}>Throughput (Tokens/sec)</strong> — How fast Claude generates output tokens. Higher is better. Varies by model and server load.
+          </div>
+          <div>
+            <strong style={{ color: 'var(--text-primary)' }}>Percentiles</strong> — p50 is the median response time, p95 covers 95% of requests, and p99 covers 99%. High p99 values may indicate occasional slow requests.
+          </div>
+        </div>
+      </div>
+    </>
   );
 }
 
