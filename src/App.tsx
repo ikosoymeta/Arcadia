@@ -1,15 +1,33 @@
-import { useState } from 'react';
+import { useState, lazy, Suspense } from 'react';
 import { ChatProvider } from './store/ChatContext';
 import { ConnectionProvider } from './store/ConnectionContext';
 import { PreviewProvider } from './store/PreviewContext';
 import { Sidebar } from './components/Sidebar/Sidebar';
 import { ChatPanel } from './components/Chat/ChatPanel';
 import { PreviewPanel } from './components/Preview/PreviewPanel';
-import { SettingsPanel } from './components/Settings/SettingsPanel';
-import { BenchmarkPanel } from './components/Benchmark/BenchmarkPanel';
-import { CodeWorkspace } from './components/CodeWorkspace/CodeWorkspace';
-import { ViewMode } from './types';
+import type { ViewMode } from './types';
 import styles from './App.module.css';
+
+// Lazy-loaded panels for code splitting
+const SettingsPanel = lazy(() => import('./components/Settings/SettingsPanel').then(m => ({ default: m.SettingsPanel })));
+const BenchmarkPanel = lazy(() => import('./components/Benchmark/BenchmarkPanel').then(m => ({ default: m.BenchmarkPanel })));
+const CodeWorkspace = lazy(() => import('./components/CodeWorkspace/CodeWorkspace').then(m => ({ default: m.CodeWorkspace })));
+
+function LoadingFallback() {
+  return (
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      height: '100%',
+      width: '100%',
+      color: 'var(--text-tertiary)',
+      fontSize: '13px',
+    }}>
+      Loading...
+    </div>
+  );
+}
 
 function App() {
   const [viewMode, setViewMode] = useState<ViewMode>('chat');
@@ -41,16 +59,22 @@ function App() {
                 </>
               )}
               {viewMode === 'code-workspace' && (
-                <CodeWorkspace />
+                <Suspense fallback={<LoadingFallback />}>
+                  <CodeWorkspace />
+                </Suspense>
               )}
               {viewMode === 'settings' && (
                 <div className={styles.fullWidth}>
-                  <SettingsPanel />
+                  <Suspense fallback={<LoadingFallback />}>
+                    <SettingsPanel />
+                  </Suspense>
                 </div>
               )}
               {viewMode === 'benchmarks' && (
                 <div className={styles.fullWidth}>
-                  <BenchmarkPanel />
+                  <Suspense fallback={<LoadingFallback />}>
+                    <BenchmarkPanel />
+                  </Suspense>
                 </div>
               )}
             </div>

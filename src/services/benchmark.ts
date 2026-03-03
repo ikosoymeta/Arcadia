@@ -1,4 +1,4 @@
-import { BenchmarkResult, BenchmarkSuite, WebVitalsResult } from '../types';
+import type { BenchmarkResult, BenchmarkSuite, WebVitalsResult } from '../types';
 import { sendBenchmarkMessage } from './claude';
 
 const BENCHMARK_PROMPTS = [

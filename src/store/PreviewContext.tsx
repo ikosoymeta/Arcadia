@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
-import { Artifact } from '../types';
+import type { Artifact } from '../types';
 
 interface PreviewContextType {
   artifacts: Artifact[];

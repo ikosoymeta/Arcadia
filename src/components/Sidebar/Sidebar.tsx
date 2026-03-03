@@ -1,7 +1,7 @@
 import React from 'react';
 import { useChat } from '../../store/ChatContext';
 import { useConnection } from '../../store/ConnectionContext';
-import { ViewMode } from '../../types';
+import type { ViewMode } from '../../types';
 import styles from './Sidebar.module.css';
 
 interface SidebarProps {

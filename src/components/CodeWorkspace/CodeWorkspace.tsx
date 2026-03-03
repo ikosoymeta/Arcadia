@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { usePreview } from '../../store/PreviewContext';
-import { FileNode, TerminalEntry } from '../../types';
+import type { FileNode, TerminalEntry } from '../../types';
 import styles from './CodeWorkspace.module.css';
 
 // Build a file tree from artifacts

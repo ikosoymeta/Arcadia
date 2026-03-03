@@ -1,4 +1,4 @@
-import { Artifact, Message } from '../types';
+import type { Artifact, Message } from '../types';
 
 interface StreamCallbacks {
   onToken: (text: string) => void;

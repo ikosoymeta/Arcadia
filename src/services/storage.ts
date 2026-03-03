@@ -1,4 +1,4 @@
-import { Conversation, Connection, BenchmarkSuite } from '../types';
+import type { Conversation, Connection, BenchmarkSuite } from '../types';
 
 const KEYS = {
   conversations: 'claude-editor-conversations',

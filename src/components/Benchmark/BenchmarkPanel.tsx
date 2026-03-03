@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useConnection } from '../../store/ConnectionContext';
 import { runBenchmarkSuite, identifyWorstCases } from '../../services/benchmark';
-import { BenchmarkSuite } from '../../types';
+import type { BenchmarkSuite } from '../../types';
 import { storage } from '../../services/storage';
 import styles from './Benchmark.module.css';
 

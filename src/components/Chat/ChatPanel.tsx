@@ -1,11 +1,11 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, memo, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useChat } from '../../store/ChatContext';
 import { useConnection } from '../../store/ConnectionContext';
 import { usePreview } from '../../store/PreviewContext';
 import { sendMessage, abortStream } from '../../services/claude';
-import { Artifact, Message } from '../../types';
+import type { Artifact, Message } from '../../types';
 import styles from './ChatPanel.module.css';
 
 interface ChatPanelProps {
@@ -125,7 +125,7 @@ export function ChatPanel({ sidebarCollapsed, onExpandSidebar }: ChatPanelProps)
     }
   };
 
-  const handleCodeClick = (code: string, language?: string) => {
+  const handleCodeClick = useCallback((code: string, language?: string) => {
     const isHtml = language === 'html' && (
       code.includes('<html') || code.includes('<!DOCTYPE') || code.includes('<body')
     );
@@ -136,7 +136,7 @@ export function ChatPanel({ sidebarCollapsed, onExpandSidebar }: ChatPanelProps)
       content: code,
       title: `${language || 'Code'} snippet`,
     });
-  };
+  }, [addArtifact]);
 
   return (
     <div className={styles.chatPanel}>
@@ -177,39 +177,11 @@ export function ChatPanel({ sidebarCollapsed, onExpandSidebar }: ChatPanelProps)
         ) : (
           <>
             {conversation.messages.map(msg => (
-              <div key={msg.id} className={`${styles.message} ${styles[msg.role]}`}>
-                <div className={`${styles.avatar} ${msg.role === 'user' ? styles.userAvatar : styles.assistantAvatar}`}>
-                  {msg.role === 'user' ? 'U' : 'C'}
-                </div>
-                <div className={`${styles.bubble} ${msg.role === 'user' ? styles.userBubble : styles.assistantBubble}`}>
-                  {msg.role === 'user' ? (
-                    msg.content
-                  ) : (
-                    <ReactMarkdown
-                      remarkPlugins={[remarkGfm]}
-                      components={{
-                        code({ className, children, ...props }) {
-                          const match = /language-(\w+)/.exec(className || '');
-                          const codeStr = String(children).replace(/\n$/, '');
-                          if (match) {
-                            return (
-                              <pre onClick={() => handleCodeClick(codeStr, match[1])}>
-                                <code className={className} {...props}>{children}</code>
-                              </pre>
-                            );
-                          }
-                          return <code className={className} {...props}>{children}</code>;
-                        },
-                        pre({ children }) {
-                          return <>{children}</>;
-                        },
-                      }}
-                    >
-                      {msg.content}
-                    </ReactMarkdown>
-                  )}
-                </div>
-              </div>
+              <MemoizedMessage
+                key={msg.id}
+                msg={msg}
+                onCodeClick={handleCodeClick}
+              />
             ))}
 
             {isStreaming && streamingText && (
@@ -279,3 +251,47 @@ export function ChatPanel({ sidebarCollapsed, onExpandSidebar }: ChatPanelProps)
     </div>
   );
 }
+
+// Memoized message component — prevents re-rendering all messages during streaming
+const MemoizedMessage = memo(function MemoizedMessage({
+  msg,
+  onCodeClick,
+}: {
+  msg: Message;
+  onCodeClick: (code: string, language?: string) => void;
+}) {
+  const markdownComponents = useMemo(() => ({
+    code({ className, children, ...props }: any) {
+      const match = /language-(\w+)/.exec(className || '');
+      const codeStr = String(children).replace(/\n$/, '');
+      if (match) {
+        return (
+          <pre onClick={() => onCodeClick(codeStr, match[1])}>
+            <code className={className} {...props}>{children}</code>
+          </pre>
+        );
+      }
+      return <code className={className} {...props}>{children}</code>;
+    },
+    pre({ children }: any) {
+      return <>{children}</>;
+    },
+  }), [onCodeClick]);
+
+  return (
+    <div className={`${styles.message} ${styles[msg.role]}`}>
+      <div className={`${styles.avatar} ${msg.role === 'user' ? styles.userAvatar : styles.assistantAvatar}`}>
+        {msg.role === 'user' ? 'U' : 'C'}
+      </div>
+      <div className={`${styles.bubble} ${msg.role === 'user' ? styles.userBubble : styles.assistantBubble}`}>
+        {msg.role === 'user' ? (
+          msg.content
+        ) : (
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+            {msg.content}
+          </ReactMarkdown>
+        )}
+      </div>
+    </div>
+  );
+});

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
-import { Conversation, Message } from '../types';
+import type { Conversation, Message } from '../types';
 import { storage } from '../services/storage';
 
 interface ChatState {

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
-import { Connection } from '../types';
+import type { Connection } from '../types';
 import { storage } from '../services/storage';
 
 interface ConnectionContextType {
