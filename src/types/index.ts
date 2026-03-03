@@ -86,15 +86,6 @@ export interface CoworkStep {
   completedAt?: number;
 }
 
-export interface PermissionRequest {
-  id: string;
-  action: string;
-  description: string;
-  risk: 'low' | 'medium' | 'high';
-  onAllow: () => void;
-  onDeny: () => void;
-}
-
 export interface Skill {
   id: string;
   name: string;
@@ -126,15 +117,6 @@ export interface PodMember {
   joinedAt: number;
   isAiAgent?: boolean;
   agentType?: string;
-}
-
-export interface User {
-  id: string;
-  name: string;
-  email: string;
-  avatarUrl?: string;
-  isAuthenticated: boolean;
-  teams: string[];
 }
 
 export interface Connection {

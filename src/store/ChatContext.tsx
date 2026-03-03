@@ -167,7 +167,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const generateShareUrl = useCallback((id: string) => {
-    const url = `${window.location.origin}/shared/${id}`;
+    const base = import.meta.env.BASE_URL || '/';
+    const url = `${window.location.origin}${base}shared/${id}`;
     setState(prev => ({
       ...prev,
       conversations: prev.conversations.map(c =>

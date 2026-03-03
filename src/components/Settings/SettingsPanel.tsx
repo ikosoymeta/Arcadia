@@ -6,7 +6,6 @@ const MODELS = [
   { value: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4' },
   { value: 'claude-opus-4-20250514', label: 'Claude Opus 4' },
   { value: 'claude-haiku-35-20241022', label: 'Claude 3.5 Haiku' },
-  { value: 'claude-sonnet-4-20250514', label: 'Claude 3.5 Sonnet' },
 ];
 
 export function SettingsPanel() {

@@ -205,6 +205,18 @@
   white-space: nowrap;
 }
 
+.renameInput {
+  width: 100%;
+  padding: 4px 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+}
+
 .emptyState {
   padding: 24px 16px;
   text-align: center;
