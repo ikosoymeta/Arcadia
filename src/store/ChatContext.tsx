@@ -64,9 +64,17 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     streamingReasoning: '',
   }));
 
+  // Debounce conversation saves during streaming to avoid blocking the main thread.
+  // During streaming, appendStreamingText triggers rapid state updates which each
+  // trigger this effect. Debouncing batches these into a single write.
   useEffect(() => {
-    storage.saveConversations(state.conversations);
-  }, [state.conversations]);
+    if (state.isStreaming) {
+      storage.debouncedSaveConversations(state.conversations);
+    } else {
+      // When not streaming, save immediately to ensure data integrity
+      storage.saveConversations(state.conversations);
+    }
+  }, [state.conversations, state.isStreaming]);
 
   useEffect(() => {
     storage.saveFolders(state.folders);

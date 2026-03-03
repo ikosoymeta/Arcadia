@@ -1,32 +1,68 @@
 #!/usr/bin/env node
 /**
- * ArcadIA Bridge v2.1.0 — Local proxy connecting ArcadIA web app to Claude Code
+ * ArcadIA Bridge v3.0.0 — Local proxy connecting ArcadIA web app to Claude Code
  * 
  * Runs on localhost:8087 and forwards requests from the ArcadIA web app
  * to Claude Code CLI, which handles Meta internal authentication.
  * 
- * v2.1.0 improvements:
- * - Added /v1/validate endpoint for running lint/typecheck/test commands
- * - Added /v1/auto-fix endpoint for autonomous error correction
+ * v3.0.0 improvements:
+ * - Security: CORS restricted to localhost + GitHub Pages origin
+ * - Security: Random auth token generated on startup, validated on every request
+ * - Security: Command allowlist for /v1/validate endpoint
+ * - Structured messages: Preserves conversation context with role markers
+ * - Better prompt building: Includes system prompt, conversation history
  *
- * v2.0.0 improvements:
- * - SSE keepalive pings every 2s so the browser doesn't time out
- * - Progress status events sent to frontend during long waits
- * - Warm-up spawn on startup to pre-authenticate Claude Code
- * - Fixed res.on('close') for proper client disconnect detection
+ * v2.1.0: /v1/validate, /v1/auto-fix endpoints
+ * v2.0.0: SSE keepalive, warm-up, res.on('close') fix
  */
 
 const http = require('http');
+const crypto = require('crypto');
 const { spawn, execSync } = require('child_process');
 const os = require('os');
 
 const PORT = 8087;
 const HOST = '127.0.0.1';
-const VERSION = '2.1.0';
-const TIMEOUT_MS = 180000; // 3 minute timeout (increased for slow first requests)
-const KEEPALIVE_INTERVAL_MS = 2000; // Send SSE comment every 2s to keep connection alive
+const VERSION = '3.0.0';
+const TIMEOUT_MS = 180000; // 3 minute timeout
+const KEEPALIVE_INTERVAL_MS = 2000; // SSE keepalive every 2s
 
-// ─── Detect Claude Code path ────────────────────────────────────────────────
+// ─── Security: Auth token ──────────────────────────────────────────────────
+const AUTH_TOKEN = crypto.randomBytes(24).toString('hex');
+
+// ─── Security: Allowed CORS origins ────────────────────────────────────────
+const ALLOWED_ORIGINS = [
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'http://localhost:5175',
+  'http://localhost:3000',
+  'http://127.0.0.1:5173',
+  'http://127.0.0.1:5174',
+  'http://127.0.0.1:5175',
+  'http://127.0.0.1:3000',
+  'https://ikosoymeta.github.io',
+  'null', // For file:// origins
+];
+
+// ─── Security: Command allowlist for /v1/validate ──────────────────────────
+const ALLOWED_COMMAND_PREFIXES = [
+  'yarn lint', 'yarn typecheck', 'yarn test', 'yarn build', 'yarn check',
+  'npm run lint', 'npm run typecheck', 'npm run test', 'npm run build', 'npm run check',
+  'npx tsc', 'npx eslint', 'npx jest', 'npx vitest', 'npx prettier',
+  'arc lint', 'arc unit', 'arc diff',
+  'flow', 'flow check',
+  'python -m pytest', 'python -m mypy', 'python -m flake8', 'python -m black',
+  'cargo test', 'cargo check', 'cargo clippy', 'cargo build',
+  'go test', 'go vet', 'go build',
+  'make lint', 'make test', 'make check', 'make build',
+];
+
+function isCommandAllowed(cmd) {
+  const trimmed = cmd.trim();
+  return ALLOWED_COMMAND_PREFIXES.some(prefix => trimmed.startsWith(prefix));
+}
+
+// ─── Detect Claude Code path ───────────────────────────────────────────────
 let CLAUDE_PATH = 'claude';
 try {
   const which = execSync('which claude 2>/dev/null || where claude 2>/dev/null', { encoding: 'utf-8', shell: true }).trim();
@@ -38,7 +74,7 @@ try {
   console.log('  Using default "claude" command from PATH');
 }
 
-// ─── Verify Claude Code works ───────────────────────────────────────────────
+// ─── Verify Claude Code works ──────────────────────────────────────────────
 let claudeVersion = 'unknown';
 try {
   claudeVersion = execSync(`"${CLAUDE_PATH}" --version 2>&1`, { encoding: 'utf-8', shell: true, timeout: 10000 }).trim();
@@ -47,7 +83,7 @@ try {
   console.warn(`  ⚠ Could not get Claude Code version: ${e.message}`);
 }
 
-// ─── Warm-up: pre-spawn claude to trigger auth/plugin loading ───────────────
+// ─── Warm-up: pre-spawn claude to trigger auth/plugin loading ──────────────
 let warmedUp = false;
 let warmupTime = 0;
 
@@ -72,23 +108,49 @@ function warmUp() {
   });
 }
 
-// ─── Request tracking ───────────────────────────────────────────────────────
+// ─── Request tracking ──────────────────────────────────────────────────────
 let totalRequests = 0;
 let activeRequests = 0;
 let avgResponseTime = 0;
 
-// ─── CORS Headers ────────────────────────────────────────────────────────────
-function setCorsHeaders(res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+// ─── CORS Headers (restricted) ─────────────────────────────────────────────
+function setCorsHeaders(res, req) {
+  const origin = req ? (req.headers.origin || '') : '';
+  // Check if origin is in our allowlist
+  if (ALLOWED_ORIGINS.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  } else if (!origin) {
+    // No origin header (same-origin or non-browser request) — allow
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  } else {
+    // Unknown origin — still set the header to the first allowed origin
+    // The browser will reject the response if it doesn't match
+    res.setHeader('Access-Control-Allow-Origin', ALLOWED_ORIGINS[ALLOWED_ORIGINS.length - 2]); // GitHub Pages
+  }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-api-key, anthropic-version, anthropic-dangerous-direct-browser-access');
-  res.setHeader('Access-Control-Expose-Headers', '*');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-api-key, x-bridge-token, anthropic-version, anthropic-dangerous-direct-browser-access');
+  res.setHeader('Access-Control-Expose-Headers', 'x-bridge-version');
   res.setHeader('Access-Control-Max-Age', '86400');
+  res.setHeader('Vary', 'Origin');
+  res.setHeader('x-bridge-version', VERSION);
 }
 
-// ─── Health check endpoint ───────────────────────────────────────────────────
-function handleHealthCheck(res) {
-  setCorsHeaders(res);
+// ─── Auth middleware ────────────────────────────────────────────────────────
+function isAuthenticated(req) {
+  // Health check is always public (needed for setup flow)
+  if (req.url === '/' || req.url === '/health') return true;
+  
+  // Check for auth token in header or query param
+  const headerToken = req.headers['x-bridge-token'];
+  const url = new URL(req.url, `http://${HOST}:${PORT}`);
+  const queryToken = url.searchParams.get('token');
+  
+  return headerToken === AUTH_TOKEN || queryToken === AUTH_TOKEN;
+}
+
+// ─── Health check endpoint ─────────────────────────────────────────────────
+function handleHealthCheck(res, req) {
+  setCorsHeaders(res, req);
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({
     status: 'ok',
@@ -100,10 +162,13 @@ function handleHealthCheck(res) {
     claude_version: claudeVersion,
     warmed_up: warmedUp,
     warmup_time_ms: warmupTime,
+    auth_required: true,
     capabilities: {
       validate: true,
       auto_fix: true,
       streaming: true,
+      structured_messages: true,
+      context_management: true,
     },
     stats: {
       total_requests: totalRequests,
@@ -114,37 +179,86 @@ function handleHealthCheck(res) {
   }));
 }
 
-// ─── Build prompt text from messages array ──────────────────────────────────
+// ─── Build structured prompt from messages array ───────────────────────────
+// Preserves conversation structure with clear role markers and handles
+// multi-turn context properly for the claude -p CLI interface.
 function buildPrompt(messages, systemPrompt) {
   let parts = [];
 
+  // Include system prompt with clear delimiter
   if (systemPrompt) {
-    parts.push(`[System Instructions: ${systemPrompt}]`);
+    parts.push(`<system>\n${systemPrompt}\n</system>`);
   }
 
+  // For multi-turn conversations, include full history with role markers
   if (messages.length > 1) {
-    const history = messages.slice(0, -1);
-    for (const m of history) {
+    parts.push('<conversation>');
+    for (const m of messages) {
       const role = m.role === 'user' ? 'Human' : 'Assistant';
       const text = extractText(m.content);
-      if (text) parts.push(`${role}: ${text}`);
+      if (text) {
+        parts.push(`<${role.toLowerCase()}>\n${text}\n</${role.toLowerCase()}>`);
+      }
     }
-  }
-
-  const lastUserMsg = messages.filter(m => m.role === 'user').pop();
-  if (!lastUserMsg) return null;
-
-  const userText = extractText(lastUserMsg.content);
-  if (messages.length > 1) {
-    parts.push(`Human: ${userText}`);
+    parts.push('</conversation>');
+    parts.push('\nPlease respond to the latest human message above, taking the full conversation context into account.');
   } else {
-    parts.push(userText);
+    // Single message — just send it directly
+    const lastUserMsg = messages.filter(m => m.role === 'user').pop();
+    if (!lastUserMsg) return null;
+    parts.push(extractText(lastUserMsg.content));
   }
 
   return parts.join('\n\n');
 }
 
-// ─── Extract text from message content (string or array) ────────────────────
+// ─── Context window management ─────────────────────────────────────────────
+// Trims messages to fit within a reasonable context window for the CLI.
+// Claude Code has its own context management, but we should avoid sending
+// excessively long histories that slow down the CLI.
+const MAX_PROMPT_CHARS = 100000; // ~25K tokens
+
+function trimMessages(messages) {
+  // Always keep the last user message
+  if (messages.length <= 2) return messages;
+
+  // Estimate total size
+  let totalChars = 0;
+  for (const m of messages) {
+    totalChars += extractText(m.content).length;
+  }
+
+  // If within limits, keep everything
+  if (totalChars <= MAX_PROMPT_CHARS) return messages;
+
+  // Keep system-critical messages and trim from the beginning
+  const lastMsg = messages[messages.length - 1];
+  const trimmed = [messages[0]]; // Keep first message for context
+  let currentChars = extractText(messages[0].content).length + extractText(lastMsg.content).length;
+
+  // Add messages from the end (most recent) until we hit the limit
+  const middleMessages = messages.slice(1, -1).reverse();
+  const keptMiddle = [];
+  for (const m of middleMessages) {
+    const msgChars = extractText(m.content).length;
+    if (currentChars + msgChars > MAX_PROMPT_CHARS) break;
+    keptMiddle.unshift(m);
+    currentChars += msgChars;
+  }
+
+  // If we trimmed messages, add a note
+  const trimmedCount = messages.length - keptMiddle.length - 2;
+  if (trimmedCount > 0) {
+    trimmed.push({
+      role: 'assistant',
+      content: `[${trimmedCount} earlier messages trimmed for context window. Conversation continues below.]`,
+    });
+  }
+
+  return [...trimmed, ...keptMiddle, lastMsg];
+}
+
+// ─── Extract text from message content (string or array) ──────────────────
 function extractText(content) {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
@@ -156,7 +270,7 @@ function extractText(content) {
   return '';
 }
 
-// ─── Strip Claude Code header lines ─────────────────────────────────────────
+// ─── Strip Claude Code header lines ────────────────────────────────────────
 function stripHeader(text) {
   const lines = text.split('\n');
   let headerEnd = 0;
@@ -183,9 +297,9 @@ function stripHeader(text) {
   return text;
 }
 
-// ─── Send message via Claude Code CLI ────────────────────────────────────────
+// ─── Send message via Claude Code CLI ──────────────────────────────────────
 function handleMessages(req, res, body) {
-  setCorsHeaders(res);
+  setCorsHeaders(res, req);
 
   let payload;
   try {
@@ -202,7 +316,9 @@ function handleMessages(req, res, body) {
   const systemPrompt = payload.system || '';
   const stream = payload.stream === true;
 
-  const fullPrompt = buildPrompt(messages, systemPrompt);
+  // Apply context window management
+  const trimmedMessages = trimMessages(messages);
+  const fullPrompt = buildPrompt(trimmedMessages, systemPrompt);
   if (!fullPrompt) {
     res.writeHead(400, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'No user message found' }));
@@ -213,7 +329,10 @@ function handleMessages(req, res, body) {
   activeRequests++;
   const reqNum = totalRequests;
 
-  console.log(`[${new Date().toISOString()}] → #${reqNum} Request: model=${model}, tokens=${maxTokens}, stream=${stream}`);
+  const trimNote = trimmedMessages.length < messages.length 
+    ? ` (trimmed ${messages.length - trimmedMessages.length} old messages)` 
+    : '';
+  console.log(`[${new Date().toISOString()}] → #${reqNum} Request: model=${model}, tokens=${maxTokens}, stream=${stream}${trimNote}`);
   console.log(`[${new Date().toISOString()}]   Prompt: ${fullPrompt.slice(0, 120)}${fullPrompt.length > 120 ? '...' : ''}`);
 
   // Spawn claude directly and write prompt to stdin
@@ -263,12 +382,12 @@ function handleMessages(req, res, body) {
   }
 
   if (stream) {
-    // ─── Streaming mode (SSE) ──────────────────────────────────────────
+    // ─── Streaming mode (SSE) ────────────────────────────────────────
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       'Connection': 'keep-alive',
-      'X-Accel-Buffering': 'no', // Disable nginx buffering if behind proxy
+      'X-Accel-Buffering': 'no',
     });
 
     // Send message_start event
@@ -295,15 +414,11 @@ function handleMessages(req, res, body) {
 
     let totalChars = 0;
 
-    // ─── SSE Keepalive: send comment pings every 2s ──────────────────
-    // This prevents the browser/proxy from timing out the connection
-    // while waiting for Claude Code to load and respond.
+    // ─── SSE Keepalive ───────────────────────────────────────────────
     const keepalive = setInterval(() => {
       if (!responseFinished && !killed) {
         try {
           const elapsed = ((Date.now() - startTime) / 1000).toFixed(0);
-          // SSE comments (lines starting with :) are ignored by EventSource
-          // but keep the connection alive
           res.write(`: keepalive ${elapsed}s\n\n`);
         } catch (e) {
           // Connection may have closed
@@ -416,7 +531,7 @@ function handleMessages(req, res, body) {
       // Update stats
       avgResponseTime = avgResponseTime === 0 
         ? elapsed 
-        : (avgResponseTime * 0.8 + elapsed * 0.2); // Exponential moving average
+        : (avgResponseTime * 0.8 + elapsed * 0.2);
 
       cleanup();
 
@@ -442,9 +557,7 @@ function handleMessages(req, res, body) {
       } catch (e) { /* connection closed */ }
     });
 
-    // Handle client disconnect — use res.on('close') instead of req.on('close')
-    // req.on('close') fires when the request body stream ends (immediately after body is read),
-    // but res.on('close') fires when the response connection is actually closed by the client.
+    // Handle client disconnect
     res.on('close', () => {
       if (!responseFinished && !killed) {
         killed = true;
@@ -455,8 +568,8 @@ function handleMessages(req, res, body) {
     });
 
   } else {
-    // ─── Non-streaming mode ────────────────────────────────────────────
-    const keepalive = null; // No keepalive needed for non-streaming
+    // ─── Non-streaming mode ──────────────────────────────────────────
+    const keepalive = null;
 
     claude.stdout.on('data', (data) => {
       output += data.toString();
@@ -523,10 +636,10 @@ function handleMessages(req, res, body) {
 
 // ─── Validation endpoint: run lint/typecheck/test commands ─────────────────
 
-const VALIDATE_TIMEOUT_MS = 60000; // 1 minute timeout for validation commands
+const VALIDATE_TIMEOUT_MS = 60000;
 
 function handleValidate(req, res, body) {
-  setCorsHeaders(res);
+  setCorsHeaders(res, req);
 
   let payload;
   try {
@@ -546,15 +659,25 @@ function handleValidate(req, res, body) {
     return;
   }
 
+  // Validate commands against allowlist
+  const blockedCommands = commands.filter(cmd => !isCommandAllowed(cmd));
+  if (blockedCommands.length > 0) {
+    res.writeHead(403, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ 
+      error: `Blocked commands: ${blockedCommands.join(', ')}. Only lint/typecheck/test/build commands are allowed.`,
+      allowed_prefixes: ALLOWED_COMMAND_PREFIXES,
+    }));
+    console.log(`[${new Date().toISOString()}] 🚫 Blocked commands: ${blockedCommands.join(', ')}`);
+    return;
+  }
+
   console.log(`[${new Date().toISOString()}] 🔍 Validate: ${commands.length} commands in ${cwd}`);
 
-  // Run commands sequentially, collect results
   const results = [];
   let commandIndex = 0;
 
   function runNext() {
     if (commandIndex >= commands.length) {
-      // All done — send results
       const allPassed = results.every(r => r.passed);
       const summary = {
         passed: allPassed,
@@ -603,7 +726,7 @@ function handleValidate(req, res, body) {
         command: cmd,
         passed: passed,
         exit_code: code,
-        stdout: stdout.slice(-5000), // Last 5KB
+        stdout: stdout.slice(-5000),
         stderr: stderr.slice(-5000),
         duration_ms: elapsed,
       });
@@ -632,10 +755,10 @@ function handleValidate(req, res, body) {
   runNext();
 }
 
-// ─── Auto-fix endpoint: send errors to Claude for fixing ───────────────────
+// ─── Auto-fix endpoint: send errors to Claude for fixing ──────────────────
 
 function handleAutoFix(req, res, body) {
-  setCorsHeaders(res);
+  setCorsHeaders(res, req);
 
   let payload;
   try {
@@ -649,7 +772,6 @@ function handleAutoFix(req, res, body) {
   const errors = payload.errors || '';
   const originalPrompt = payload.original_prompt || '';
   const code = payload.code || '';
-  const maxRetries = payload.max_retries || 3;
 
   if (!errors) {
     res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -657,7 +779,6 @@ function handleAutoFix(req, res, body) {
     return;
   }
 
-  // Build a fix prompt that includes the original context and errors
   const fixPrompt = [
     'The following code was generated but failed validation. Please fix the errors.',
     '',
@@ -677,7 +798,6 @@ function handleAutoFix(req, res, body) {
 
   console.log(`[${new Date().toISOString()}] 🔧 Auto-fix: ${errors.slice(0, 100)}...`);
 
-  // Reuse the messages handler with a synthetic request
   const syntheticBody = JSON.stringify({
     model: payload.model || 'claude-sonnet-4-20250514',
     max_tokens: payload.max_tokens || 8192,
@@ -688,17 +808,28 @@ function handleAutoFix(req, res, body) {
   handleMessages(req, res, syntheticBody);
 }
 
-// ─── HTTP Server ─────────────────────────────────────────────────────────────
+// ─── HTTP Server ───────────────────────────────────────────────────────────
 const server = http.createServer((req, res) => {
   if (req.method === 'OPTIONS') {
-    setCorsHeaders(res);
+    setCorsHeaders(res, req);
     res.writeHead(204);
     res.end();
     return;
   }
 
   if (req.method === 'GET' && (req.url === '/' || req.url === '/health')) {
-    handleHealthCheck(res);
+    handleHealthCheck(res, req);
+    return;
+  }
+
+  // Auth check for all other endpoints
+  if (!isAuthenticated(req)) {
+    setCorsHeaders(res, req);
+    res.writeHead(401, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ 
+      error: 'Unauthorized. Include x-bridge-token header with the token shown in the bridge startup banner.',
+      hint: 'The token is displayed when you start the bridge. Copy it from the terminal.',
+    }));
     return;
   }
 
@@ -723,7 +854,7 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  setCorsHeaders(res);
+  setCorsHeaders(res, req);
   res.writeHead(404, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ error: 'Not found. Use POST /v1/messages' }));
 });
@@ -741,6 +872,10 @@ server.listen(PORT, HOST, () => {
   console.log('  ║   Open ArcadIA: https://ikosoymeta.github.io/Arcadia/    ║');
   console.log('  ║                                                          ║');
   console.log('  ╚══════════════════════════════════════════════════════════╝');
+  console.log('');
+  console.log(`  🔑 Auth Token: ${AUTH_TOKEN}`);
+  console.log('  ↑ Copy this token — ArcadIA will ask for it on first connect.');
+  console.log('  The token changes each time the bridge restarts.');
   console.log('');
 
   // Start warm-up after server is listening
