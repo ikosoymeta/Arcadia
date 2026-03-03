@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * ArcadIA Bridge v1.2.0 — Local proxy connecting ArcadIA web app to Claude Code
+ * ArcadIA Bridge v1.3.0 — Local proxy connecting ArcadIA web app to Claude Code
  * 
  * Runs on localhost:8087 and forwards requests from the ArcadIA web app
  * to Claude Code CLI, which handles Meta internal authentication.
  * 
- * Uses `claude -p "prompt"` with shell:true to ensure proper PATH resolution.
+ * Spawns `claude -p` and writes the prompt to stdin to avoid shell escaping issues.
  */
 
 const http = require('http');
@@ -14,7 +14,7 @@ const os = require('os');
 
 const PORT = 8087;
 const HOST = '127.0.0.1';
-const VERSION = '1.2.0';
+const VERSION = '1.3.0';
 const TIMEOUT_MS = 120000; // 2 minute timeout per request
 
 // ─── Detect Claude Code path ────────────────────────────────────────────────
@@ -162,31 +162,26 @@ function handleMessages(req, res, body) {
   console.log(`[${new Date().toISOString()}] → Request: model=${model}, tokens=${maxTokens}, stream=${stream}`);
   console.log(`[${new Date().toISOString()}]   Prompt: ${fullPrompt.slice(0, 120)}${fullPrompt.length > 120 ? '...' : ''}`);
 
-  // Write prompt to a temp file to avoid shell escaping issues
-  const fs = require('fs');
-  const path = require('path');
-  const tmpFile = path.join(os.tmpdir(), `arcadia-prompt-${Date.now()}.txt`);
-  
+  // Spawn claude directly and write prompt to stdin
+  // This avoids all shell escaping issues and pipe/SIGTERM problems
+  console.log(`[${new Date().toISOString()}]   Command: claude -p (prompt via stdin)`);
+
+  const claude = spawn(CLAUDE_PATH, ['-p'], {
+    env: { ...process.env },
+    stdio: ['pipe', 'pipe', 'pipe'],
+    shell: true,
+  });
+
+  // Write the prompt to stdin and close it
   try {
-    fs.writeFileSync(tmpFile, fullPrompt, 'utf-8');
+    claude.stdin.write(fullPrompt);
+    claude.stdin.end();
   } catch (e) {
-    console.error(`[${new Date().toISOString()}] ✗ Failed to write temp file: ${e.message}`);
+    console.error(`[${new Date().toISOString()}] ✗ Failed to write to stdin: ${e.message}`);
     res.writeHead(500, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Failed to prepare prompt' }));
+    res.end(JSON.stringify({ error: 'Failed to send prompt to Claude Code' }));
     return;
   }
-
-  // Use shell:true and pipe the prompt via stdin with cat
-  // This avoids all shell escaping issues with -p flag
-  const shellCmd = `cat "${tmpFile}" | "${CLAUDE_PATH}" -p --output-format text`;
-  
-  console.log(`[${new Date().toISOString()}]   Command: cat <tmpfile> | claude -p --output-format text`);
-
-  const claude = spawn('sh', ['-c', shellCmd], {
-    env: { ...process.env },
-    stdio: ['ignore', 'pipe', 'pipe'],
-    shell: false,
-  });
 
   let output = '';
   let errorOutput = '';
@@ -204,10 +199,9 @@ function handleMessages(req, res, body) {
     }
   }, TIMEOUT_MS);
 
-  // Clean up temp file when done
+  // Clean up on done
   function cleanup() {
     clearTimeout(timeout);
-    try { fs.unlinkSync(tmpFile); } catch {}
   }
 
   if (stream) {
