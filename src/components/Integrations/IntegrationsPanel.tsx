@@ -1,9 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import type { ToolDefinition } from '../../types';
 
 // ─── Tool Definitions for Claude API ─────────────────────────────────────────
-// These are passed to Claude as `tools` in the API request.
-// Claude will call these tools during conversations when relevant.
 
 export const GITHUB_TOOLS: ToolDefinition[] = [
   {
@@ -225,6 +223,34 @@ export function getEnabledTools(config: IntegrationConfig): ToolDefinition[] {
   return tools;
 }
 
+// ─── Status types ───────────────────────────────────────────────────────────
+
+type IntegrationStatus = 'not_configured' | 'needs_setup' | 'ready' | 'checking' | 'error';
+
+interface StatusInfo {
+  status: IntegrationStatus;
+  label: string;
+  color: string;
+  bgColor: string;
+  icon: string;
+}
+
+function getStatusInfo(status: IntegrationStatus): StatusInfo {
+  switch (status) {
+    case 'ready':
+      return { status, label: 'Ready', color: '#22c55e', bgColor: '#22c55e18', icon: '●' };
+    case 'needs_setup':
+      return { status, label: 'Needs Setup', color: '#f59e0b', bgColor: '#f59e0b18', icon: '◐' };
+    case 'checking':
+      return { status, label: 'Checking...', color: '#6366f1', bgColor: '#6366f118', icon: '◌' };
+    case 'error':
+      return { status, label: 'Error', color: '#ef4444', bgColor: '#ef444418', icon: '●' };
+    case 'not_configured':
+    default:
+      return { status, label: 'Off', color: 'var(--text-tertiary)', bgColor: 'var(--bg-tertiary)', icon: '○' };
+  }
+}
+
 // ─── Shared Styles ──────────────────────────────────────────────────────────
 
 const styles = {
@@ -315,6 +341,16 @@ const styles = {
     fontSize: '12px', color: 'var(--text-secondary)', fontStyle: 'italic' as const,
     lineHeight: '1.5',
   } as React.CSSProperties,
+  statusBadge: (si: StatusInfo) => ({
+    fontSize: '11px', padding: '3px 10px', borderRadius: '20px',
+    background: si.bgColor, color: si.color, fontWeight: 600,
+    display: 'inline-flex', alignItems: 'center', gap: '5px',
+    border: `1px solid ${si.color}30`,
+  } as React.CSSProperties),
+  requirementRow: {
+    display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px',
+    fontSize: '12px', color: 'var(--text-secondary)',
+  } as React.CSSProperties,
 };
 
 // ─── IntegrationsPanel Component ─────────────────────────────────────────────
@@ -325,10 +361,75 @@ export function IntegrationsPanel() {
   const [showGithubToken, setShowGithubToken] = useState(false);
   const [saved, setSaved] = useState(false);
   const [expandedGuide, setExpandedGuide] = useState<string | null>(null);
+  const [bridgeConnected, setBridgeConnected] = useState(false);
+  const [githubTokenValid, setGithubTokenValid] = useState<boolean | null>(null);
+  const [checkingGithub, setCheckingGithub] = useState(false);
 
   useEffect(() => {
     saveIntegrations(config);
   }, [config]);
+
+  // Check bridge connectivity on mount
+  useEffect(() => {
+    const checkBridge = async () => {
+      try {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 3000);
+        const res = await fetch('http://127.0.0.1:8087/health', { signal: ctrl.signal });
+        clearTimeout(timer);
+        setBridgeConnected(res.ok);
+      } catch {
+        setBridgeConnected(false);
+      }
+    };
+    checkBridge();
+    const interval = setInterval(checkBridge, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Validate GitHub token when it changes
+  const validateGithubToken = useCallback(async (token: string) => {
+    if (!token || !token.startsWith('ghp_')) {
+      setGithubTokenValid(null);
+      return;
+    }
+    setCheckingGithub(true);
+    try {
+      const res = await fetch('https://api.github.com/user', {
+        headers: { Authorization: `token ${token}` },
+      });
+      setGithubTokenValid(res.ok);
+    } catch {
+      setGithubTokenValid(false);
+    }
+    setCheckingGithub(false);
+  }, []);
+
+  // Determine actual status for each integration
+  const getIntegrationStatus = useCallback((id: string): IntegrationStatus => {
+    const enabled = (config.enabledTools ?? []).includes(id);
+    if (!enabled) return 'not_configured';
+
+    switch (id) {
+      case 'github':
+        if (!config.github?.token) return 'needs_setup';
+        if (githubTokenValid === false) return 'error';
+        if (githubTokenValid === true) return 'ready';
+        return 'needs_setup';
+      case 'gdrive':
+        if (config.gdrive?.connected) return 'ready';
+        return 'needs_setup';
+      case 'web':
+      case 'code':
+        // These work through Claude Code which runs via the bridge
+        return bridgeConnected ? 'ready' : 'needs_setup';
+      case 'memory':
+        // Memory is stored locally, always ready when enabled
+        return 'ready';
+      default:
+        return 'ready';
+    }
+  }, [config, bridgeConnected, githubTokenValid]);
 
   const toggleTool = (group: string) => {
     setConfig(prev => {
@@ -342,7 +443,7 @@ export function IntegrationsPanel() {
 
   const isEnabled = (group: string) => (config.enabledTools ?? []).includes(group);
 
-  const handleSaveGitHub = () => {
+  const handleSaveGitHub = async () => {
     if (!githubToken.trim()) return;
     setConfig(prev => ({
       ...prev,
@@ -350,72 +451,89 @@ export function IntegrationsPanel() {
     }));
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
+    await validateGithubToken(githubToken.trim());
   };
 
   const toggleGuide = (id: string) => {
     setExpandedGuide(prev => prev === id ? null : id);
   };
 
-  // ─── Integration definitions with detailed setup guides ─────────────────
+  // ─── Integration definitions ─────────────────────────────────────────────
 
   const integrations = [
     {
       id: 'github',
       icon: '🐙',
       name: 'GitHub',
-      desc: 'Read repos, files, issues, and PRs. Create issues. Search code across repositories.',
+      shortDesc: 'Browse repos, read code, create issues, and review pull requests.',
+      longDesc: 'Connect your GitHub account to let Claude browse your repositories, read files, create issues, list pull requests, and search code — all through natural conversation. You just need to provide a personal access token (a special password for apps).',
+      whatYouCanDo: [
+        '"List my GitHub repos" — see all your projects',
+        '"Show the README from my-app" — read any file',
+        '"Create an issue: fix login bug" — file issues by chatting',
+        '"Show open PRs in my-project" — review pull requests',
+      ],
       tools: GITHUB_TOOLS,
       color: '#6366f1',
-      difficulty: 'Easy',
-      setupTime: '2 min',
-      requiresToken: true,
+      requiresSetup: true,
+      requirements: [
+        { label: 'GitHub account', met: true },
+        { label: 'Personal access token', met: !!config.github?.token },
+      ],
       setup: (
         <div style={styles.setupBox}>
           <div style={styles.setupTitle}>
             <span>🔧</span> Setup Guide
             <span style={styles.badge('#6366f120', '#6366f1')}>2 min setup</span>
-            {config.github?.token && <span style={styles.badge('#22c55e20', '#22c55e')}>Connected</span>}
+            {config.github?.token && githubTokenValid === true && <span style={styles.badge('#22c55e20', '#22c55e')}>Token verified</span>}
+            {config.github?.token && githubTokenValid === false && <span style={styles.badge('#ef444420', '#ef4444')}>Token invalid</span>}
           </div>
 
-          {/* Step-by-step guide */}
-          <div style={styles.stepRow}>
-            <span style={styles.stepNumber('#6366f1')}>1</span>
-            <div style={styles.stepText}>
-              <strong>Create a Personal Access Token</strong> on GitHub.{' '}
-              <a
-                href="https://github.com/settings/tokens/new?scopes=repo&description=ArcadIA%20Editor%20-%20Claude%20Integration"
-                target="_blank"
-                rel="noreferrer"
-                style={styles.link('#6366f1')}
-              >
-                Click here to open the token creation page
-              </a>
+          <div style={styles.infoBox('#6366f1')}>
+            <strong>What is a personal access token?</strong> It's like a special password that lets ArcadIA access your GitHub on your behalf. It stays on your computer and is never sent anywhere except directly to GitHub.
+          </div>
+
+          <div style={{ marginTop: '12px' }}>
+            <div style={styles.stepRow}>
+              <span style={styles.stepNumber('#6366f1')}>1</span>
+              <div style={styles.stepText}>
+                <strong>Open GitHub's token page</strong> — {' '}
+                <a
+                  href="https://github.com/settings/tokens/new?scopes=repo&description=ArcadIA%20Editor%20-%20Claude%20Integration"
+                  target="_blank"
+                  rel="noreferrer"
+                  style={styles.link('#6366f1')}
+                >
+                  Click here to go there now
+                </a>
+                {' '}(opens in a new tab, you may need to log in)
+              </div>
             </div>
-          </div>
 
-          <div style={styles.stepRow}>
-            <span style={styles.stepNumber('#6366f1')}>2</span>
-            <div style={styles.stepText}>
-              On the GitHub page, you'll see the token settings pre-filled:
-              <ul style={{ margin: '6px 0 0 0', paddingLeft: '16px', fontSize: '12px' }}>
-                <li><strong>Note:</strong> "ArcadIA Editor" (pre-filled)</li>
-                <li><strong>Expiration:</strong> Choose 90 days or "No expiration"</li>
-                <li><strong>Scopes:</strong> <code style={{ background: 'var(--bg-tertiary)', padding: '1px 4px', borderRadius: '3px' }}>repo</code> should be checked (pre-selected)</li>
-              </ul>
+            <div style={styles.stepRow}>
+              <span style={styles.stepNumber('#6366f1')}>2</span>
+              <div style={styles.stepText}>
+                On that page, you'll see some settings. The important ones are already filled in for you:
+                <ul style={{ margin: '6px 0 0 0', paddingLeft: '16px', fontSize: '12px' }}>
+                  <li><strong>Note:</strong> "ArcadIA Editor" (already filled)</li>
+                  <li><strong>Expiration:</strong> Pick "90 days" (you can always make a new one later)</li>
+                  <li><strong>Scopes:</strong> Make sure <code style={{ background: 'var(--bg-tertiary)', padding: '1px 4px', borderRadius: '3px' }}>repo</code> is checked (it should be)</li>
+                </ul>
+              </div>
             </div>
-          </div>
 
-          <div style={styles.stepRow}>
-            <span style={styles.stepNumber('#6366f1')}>3</span>
-            <div style={styles.stepText}>
-              Click <strong>"Generate token"</strong> at the bottom of the page. Copy the token that starts with <code style={{ background: 'var(--bg-tertiary)', padding: '1px 4px', borderRadius: '3px' }}>ghp_</code>
+            <div style={styles.stepRow}>
+              <span style={styles.stepNumber('#6366f1')}>3</span>
+              <div style={styles.stepText}>
+                Scroll down and click the green <strong>"Generate token"</strong> button. You'll see a long code starting with <code style={{ background: 'var(--bg-tertiary)', padding: '1px 4px', borderRadius: '3px' }}>ghp_</code> — <strong>copy it</strong> (you won't be able to see it again!)
+              </div>
             </div>
-          </div>
 
-          <div style={styles.stepRow}>
-            <span style={styles.stepNumber('#6366f1')}>4</span>
-            <div style={styles.stepText}>
-              <strong>Paste your token below</strong> and click Save:
+            <div style={styles.stepRow}>
+              <span style={styles.stepNumber('#6366f1')}>4</span>
+              <div style={styles.stepText}>
+                <strong>Paste it below</strong> and click Save. We'll verify it works right away:
+              </div>
             </div>
           </div>
 
@@ -427,7 +545,10 @@ export function IntegrationsPanel() {
                 value={githubToken}
                 onChange={e => setGithubToken(e.target.value)}
                 placeholder="ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-                style={styles.input}
+                style={{
+                  ...styles.input,
+                  borderColor: githubTokenValid === true ? '#22c55e' : githubTokenValid === false ? '#ef4444' : 'var(--border)',
+                }}
                 onKeyDown={e => { if (e.key === 'Enter') handleSaveGitHub(); }}
               />
               <button
@@ -438,21 +559,27 @@ export function IntegrationsPanel() {
             </div>
             <button
               onClick={handleSaveGitHub}
-              disabled={!githubToken.trim()}
+              disabled={!githubToken.trim() || checkingGithub}
               style={{
-                ...styles.btn(saved ? '#22c55e' : githubToken.trim() ? '#6366f1' : '#6366f166'),
-                cursor: githubToken.trim() ? 'pointer' : 'not-allowed',
+                ...styles.btn(saved ? '#22c55e' : checkingGithub ? '#6366f188' : githubToken.trim() ? '#6366f1' : '#6366f166'),
+                cursor: githubToken.trim() && !checkingGithub ? 'pointer' : 'not-allowed',
               }}
-            >{saved ? '✓ Saved!' : 'Save'}</button>
+            >{checkingGithub ? 'Verifying...' : saved ? '✓ Saved!' : 'Save & Verify'}</button>
           </div>
+
+          {githubTokenValid === false && config.github?.token && (
+            <div style={{ marginLeft: '32px', marginTop: '8px', fontSize: '12px', color: '#ef4444', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              ✗ This token doesn't seem to work. Please check that you copied it correctly, or generate a new one.
+            </div>
+          )}
+          {githubTokenValid === true && (
+            <div style={{ marginLeft: '32px', marginTop: '8px', fontSize: '12px', color: '#22c55e', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              ✓ Token verified! GitHub integration is ready to use.
+            </div>
+          )}
 
           <div style={{ marginLeft: '32px', marginTop: '8px', fontSize: '11px', color: 'var(--text-tertiary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            🔒 Your token is stored locally in your browser only. It never leaves your machine.
-          </div>
-
-          {/* Example prompts */}
-          <div style={styles.examplePrompt}>
-            <strong>Try saying:</strong> "List my GitHub repos" or "Show open PRs in owner/repo" or "Create an issue for the login bug in my-app"
+            🔒 Your token is stored only in this browser. It never leaves your machine except to authenticate with GitHub.
           </div>
         </div>
       ),
@@ -461,12 +588,20 @@ export function IntegrationsPanel() {
       id: 'gdrive',
       icon: '📁',
       name: 'Google Drive',
-      desc: 'List, read, and create Google Docs and Drive files directly from conversations.',
+      shortDesc: 'Browse, read, and create documents in your Google Drive.',
+      longDesc: 'Connect your Google account to let Claude list your Drive files, read Google Docs, and create new documents — all from the chat. Your files stay private and Claude only accesses what you ask about.',
+      whatYouCanDo: [
+        '"List my recent Drive files" — browse your documents',
+        '"Read my Q1 Report doc" — open and read any file',
+        '"Create a doc titled Meeting Notes" — make new documents',
+      ],
       tools: GOOGLE_DRIVE_TOOLS,
       color: '#22c55e',
-      difficulty: 'Easy',
-      setupTime: '1 min',
-      requiresToken: false,
+      requiresSetup: true,
+      requirements: [
+        { label: 'Google account', met: true },
+        { label: 'OAuth connection', met: !!config.gdrive?.connected },
+      ],
       setup: (
         <div style={styles.setupBox}>
           <div style={styles.setupTitle}>
@@ -475,24 +610,23 @@ export function IntegrationsPanel() {
             {config.gdrive?.connected && <span style={styles.badge('#22c55e20', '#22c55e')}>Connected</span>}
           </div>
 
-          <div style={styles.stepRow}>
-            <span style={styles.stepNumber('#22c55e')}>1</span>
-            <div style={styles.stepText}>
-              <strong>Click the button below</strong> to connect your Google account. A popup will open asking you to sign in and grant access.
-            </div>
+          <div style={styles.infoBox('#22c55e')}>
+            <strong>How does this work?</strong> You'll sign in with your Google account in a popup window. ArcadIA can then access your Drive files on your behalf. You can revoke access anytime from your Google account settings.
           </div>
 
-          <div style={styles.stepRow}>
-            <span style={styles.stepNumber('#22c55e')}>2</span>
-            <div style={styles.stepText}>
-              <strong>Select your Google account</strong> and click "Allow" to grant ArcadIA read/write access to your Drive files.
+          <div style={{ marginTop: '12px' }}>
+            <div style={styles.stepRow}>
+              <span style={styles.stepNumber('#22c55e')}>1</span>
+              <div style={styles.stepText}>
+                <strong>Click "Connect Google Account"</strong> below. A popup will open.
+              </div>
             </div>
-          </div>
 
-          <div style={styles.stepRow}>
-            <span style={styles.stepNumber('#22c55e')}>3</span>
-            <div style={styles.stepText}>
-              That's it! The popup will close automatically and you'll see a green "Connected" badge above.
+            <div style={styles.stepRow}>
+              <span style={styles.stepNumber('#22c55e')}>2</span>
+              <div style={styles.stepText}>
+                <strong>Sign in</strong> with your Google account and click "Allow" to grant access. The popup will close automatically.
+              </div>
             </div>
           </div>
 
@@ -501,7 +635,7 @@ export function IntegrationsPanel() {
               onClick={() => {
                 const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
                 if (!clientId) {
-                  alert('Google OAuth is not configured yet.\n\nTo enable this:\n1. Go to https://console.cloud.google.com/apis/credentials\n2. Create an OAuth 2.0 Client ID\n3. Add VITE_GOOGLE_CLIENT_ID to your .env file\n\nContact your admin for help.');
+                  alert('Google OAuth is not configured yet.\n\nThis feature requires a Google Cloud OAuth Client ID.\nContact your admin or check the setup documentation for details.');
                   return;
                 }
                 const params = new URLSearchParams({
@@ -523,12 +657,8 @@ export function IntegrationsPanel() {
             )}
           </div>
 
-          <div style={styles.infoBox('#22c55e')}>
-            <strong>What permissions are granted?</strong> ArcadIA can only access files you explicitly open or create through conversations. It cannot access your entire Drive.
-          </div>
-
-          <div style={styles.examplePrompt}>
-            <strong>Try saying:</strong> "List my recent Google Drive files" or "Create a Google Doc titled Q1 Report with this content..."
+          <div style={{ ...styles.infoBox('#22c55e'), marginTop: '12px' }}>
+            <strong>Privacy:</strong> ArcadIA can only access files you explicitly ask about in conversations. It cannot browse your entire Drive on its own.
           </div>
         </div>
       ),
@@ -537,105 +667,64 @@ export function IntegrationsPanel() {
       id: 'web',
       icon: '🌐',
       name: 'Web Search & Fetch',
-      desc: 'Search the web for current information, news, and research. Fetch and read any URL.',
+      shortDesc: 'Search the internet and read web pages for up-to-date information.',
+      longDesc: 'Let Claude search the web when you ask about current events, recent news, or anything that needs fresh information. Claude can also read the contents of any URL you share. All searches go through the bridge running on your machine.',
+      whatYouCanDo: [
+        '"What\'s the latest news about React 19?" — search for current info',
+        '"Read this article: https://..." — fetch and summarize any URL',
+        '"Compare pricing of AWS vs GCP" — research across the web',
+      ],
       tools: WEB_TOOLS,
       color: '#f59e0b',
-      difficulty: 'None',
-      setupTime: 'Instant',
-      requiresToken: false,
-      setup: (
-        <div style={styles.setupBox}>
-          <div style={styles.setupTitle}>
-            <span>✨</span> No Setup Required
-            <span style={styles.badge('#f59e0b20', '#f59e0b')}>Ready to use</span>
-          </div>
-
-          <div style={styles.stepRow}>
-            <span style={styles.stepNumber('#f59e0b')}>✓</span>
-            <div style={styles.stepText}>
-              <strong>Just enable the toggle above</strong> and Claude will automatically search the web when your question needs current information.
-            </div>
-          </div>
-
-          <div style={styles.infoBox('#f59e0b')}>
-            <strong>How it works:</strong> When you ask about current events, prices, or anything that needs up-to-date info, Claude will search the web and include the results in its response. Web search goes through the ArcadIA bridge on your machine, so no data leaves your network except the search query itself.
-          </div>
-
-          <div style={styles.examplePrompt}>
-            <strong>Try saying:</strong> "What's the latest news about React 19?" or "Fetch the content from https://example.com/api-docs"
-          </div>
-        </div>
-      ),
+      requiresSetup: false,
+      requirements: [
+        { label: 'ArcadIA Bridge running', met: bridgeConnected },
+      ],
+      setup: null,
     },
     {
       id: 'code',
       icon: '⚡',
       name: 'Code Execution',
-      desc: 'Run Python, JavaScript, and shell commands. See live output and results.',
+      shortDesc: 'Run Python, JavaScript, and shell commands with live results.',
+      longDesc: 'Claude can write and run code for you — great for data analysis, calculations, testing scripts, or automating tasks. Code runs locally through Claude Code on your machine, so your data stays completely private.',
+      whatYouCanDo: [
+        '"Calculate compound interest on $10,000 at 5%" — quick math',
+        '"Write a Python script to sort this data" — data processing',
+        '"Check if port 3000 is in use" — system commands',
+        '"Test this regex pattern" — quick experiments',
+      ],
       tools: CODE_TOOLS,
       color: '#8b5cf6',
-      difficulty: 'None',
-      setupTime: 'Instant',
-      requiresToken: false,
-      setup: (
-        <div style={styles.setupBox}>
-          <div style={styles.setupTitle}>
-            <span>✨</span> No Setup Required
-            <span style={styles.badge('#8b5cf620', '#8b5cf6')}>Ready to use</span>
-          </div>
-
-          <div style={styles.stepRow}>
-            <span style={styles.stepNumber('#8b5cf6')}>✓</span>
-            <div style={styles.stepText}>
-              <strong>Just enable the toggle above.</strong> Claude will execute code in a sandboxed environment when needed — great for data analysis, calculations, and testing.
-            </div>
-          </div>
-
-          <div style={styles.infoBox('#8b5cf6')}>
-            <strong>Supported languages:</strong> Python 3, JavaScript (Node.js), and Bash shell commands. Code runs locally through Claude Code on your machine, so your data stays private.
-          </div>
-
-          <div style={styles.examplePrompt}>
-            <strong>Try saying:</strong> "Run a Python script to analyze this CSV data" or "Write and test a sorting algorithm" or "Check if port 3000 is in use"
-          </div>
-        </div>
-      ),
+      requiresSetup: false,
+      requirements: [
+        { label: 'ArcadIA Bridge running', met: bridgeConnected },
+      ],
+      setup: null,
     },
     {
       id: 'memory',
       icon: '🧠',
       name: 'Long-term Memory',
-      desc: 'Claude remembers important information across conversations for personalized assistance.',
+      shortDesc: 'Claude remembers your preferences and context across conversations.',
+      longDesc: 'Tell Claude to remember things — your tech stack, coding style, project details, or any preferences. This information is saved locally in your browser and recalled automatically in future conversations to give you more personalized help.',
+      whatYouCanDo: [
+        '"Remember that I use TypeScript and React" — save preferences',
+        '"My API endpoint is api.example.com" — store project details',
+        '"What do you remember about me?" — recall saved info',
+        '"Forget my API key" — delete specific memories',
+      ],
       tools: MEMORY_TOOLS,
       color: '#ec4899',
-      difficulty: 'None',
-      setupTime: 'Instant',
-      requiresToken: false,
-      setup: (
-        <div style={styles.setupBox}>
-          <div style={styles.setupTitle}>
-            <span>✨</span> No Setup Required
-            <span style={styles.badge('#ec489920', '#ec4899')}>Ready to use</span>
-          </div>
-
-          <div style={styles.stepRow}>
-            <span style={styles.stepNumber('#ec4899')}>✓</span>
-            <div style={styles.stepText}>
-              <strong>Just enable the toggle above.</strong> Claude will automatically save important information when you ask it to remember something, and recall it in future conversations.
-            </div>
-          </div>
-
-          <div style={styles.infoBox('#ec4899')}>
-            <strong>What gets saved?</strong> Only things you explicitly ask Claude to remember. Memories are stored locally in your browser and are never sent to any server. You can ask Claude to "forget" something at any time.
-          </div>
-
-          <div style={styles.examplePrompt}>
-            <strong>Try saying:</strong> "Remember that my project uses React 18 with TypeScript" or "What do you remember about my preferences?" or "Forget my API key"
-          </div>
-        </div>
-      ),
+      requiresSetup: false,
+      requirements: [],
+      setup: null,
     },
   ];
+
+  // Count truly ready integrations
+  const readyCount = integrations.filter(i => getIntegrationStatus(i.id) === 'ready').length;
+  const enabledCount = (config.enabledTools ?? []).length;
 
   return (
     <div style={styles.container}>
@@ -645,7 +734,7 @@ export function IntegrationsPanel() {
           🔌 Integrations
         </h2>
         <p style={{ fontSize: '14px', color: 'var(--text-secondary)', lineHeight: '1.6', margin: 0 }}>
-          Connect external tools and services to supercharge Claude. Enable a tool, follow the setup steps, and start using it in your conversations.
+          Connect external tools to give Claude superpowers. Enable an integration, complete any required setup, and start using it by simply asking Claude in your conversations.
         </p>
       </div>
 
@@ -658,8 +747,8 @@ export function IntegrationsPanel() {
           border: '1px solid var(--border)', fontSize: '12px', color: 'var(--text-secondary)',
           display: 'flex', alignItems: 'center', gap: '6px',
         }}>
-          <span style={{ color: '#22c55e', fontSize: '14px' }}>●</span>
-          <strong>{(config.enabledTools ?? []).length}</strong> integrations active
+          <span style={{ color: readyCount > 0 ? '#22c55e' : 'var(--text-tertiary)', fontSize: '14px' }}>●</span>
+          <strong>{readyCount}</strong> of <strong>{enabledCount}</strong> integrations ready
         </div>
         <div style={{
           padding: '8px 14px', borderRadius: '8px', background: 'var(--bg-secondary)',
@@ -668,13 +757,38 @@ export function IntegrationsPanel() {
         }}>
           🔧 <strong>{getEnabledTools(config).length}</strong> tools available to Claude
         </div>
+        <div style={{
+          padding: '8px 14px', borderRadius: '8px', background: 'var(--bg-secondary)',
+          border: `1px solid ${bridgeConnected ? '#22c55e30' : '#ef444430'}`, fontSize: '12px',
+          color: bridgeConnected ? '#22c55e' : '#ef4444',
+          display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600,
+        }}>
+          <span style={{ fontSize: '14px' }}>{bridgeConnected ? '●' : '○'}</span>
+          Bridge {bridgeConnected ? 'Connected' : 'Not Connected'}
+        </div>
       </div>
+
+      {/* Bridge warning if not connected */}
+      {!bridgeConnected && (
+        <div style={{
+          marginBottom: '16px', padding: '12px 16px', borderRadius: '10px',
+          background: '#ef444410', border: '1px solid #ef444430',
+          fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.6',
+        }}>
+          <strong style={{ color: '#ef4444' }}>Bridge not detected.</strong> Some integrations (Web Search, Code Execution) require the ArcadIA Bridge to be running on your machine. Start it with:
+          <code style={{ display: 'block', marginTop: '8px', padding: '8px 12px', background: 'var(--bg-primary)', borderRadius: '6px', fontSize: '12px', fontFamily: 'monospace', color: 'var(--text-primary)' }}>
+            cd ~/Arcadia && node bridge/arcadia-bridge.js
+          </code>
+        </div>
+      )}
 
       {/* Integration cards */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
         {integrations.map(integration => {
           const enabled = isEnabled(integration.id);
           const guideOpen = expandedGuide === integration.id;
+          const status = getIntegrationStatus(integration.id);
+          const statusInfo = getStatusInfo(status);
 
           return (
             <div key={integration.id} style={styles.card(integration.color, enabled)}>
@@ -687,14 +801,16 @@ export function IntegrationsPanel() {
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                       <div style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: '16px' }}>{integration.name}</div>
-                      {integration.requiresToken && !enabled && (
-                        <span style={styles.badge('#f59e0b18', '#f59e0b')}>Requires token</span>
+                      {enabled && (
+                        <span style={styles.statusBadge(statusInfo)}>
+                          {statusInfo.icon} {statusInfo.label}
+                        </span>
                       )}
-                      {!integration.requiresToken && !enabled && (
+                      {!enabled && integration.requiresSetup && (
+                        <span style={styles.badge('#f59e0b18', '#f59e0b')}>Requires setup</span>
+                      )}
+                      {!enabled && !integration.requiresSetup && (
                         <span style={styles.badge('#22c55e18', '#22c55e')}>No setup needed</span>
-                      )}
-                      {enabled && config.github?.token && integration.id === 'github' && (
-                        <span style={styles.badge('#22c55e18', '#22c55e')}>Connected</span>
                       )}
                     </div>
                     <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
@@ -707,49 +823,67 @@ export function IntegrationsPanel() {
                     </label>
                   </div>
 
-                  {/* Description */}
-                  <div style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.5' }}>{integration.desc}</div>
+                  {/* Description — show short when collapsed, long when expanded */}
+                  <div style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.5' }}>
+                    {enabled ? integration.longDesc : integration.shortDesc}
+                  </div>
+
+                  {/* Requirements checklist when enabled */}
+                  {enabled && integration.requirements.length > 0 && (
+                    <div style={{ marginTop: '10px', padding: '8px 12px', borderRadius: '8px', background: 'var(--bg-primary)', border: '1px solid var(--border)' }}>
+                      <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-tertiary)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Requirements</div>
+                      {integration.requirements.map((req, i) => (
+                        <div key={i} style={styles.requirementRow}>
+                          <span style={{ color: req.met ? '#22c55e' : '#f59e0b', fontSize: '14px' }}>
+                            {req.met ? '✓' : '○'}
+                          </span>
+                          <span style={{ color: req.met ? '#22c55e' : 'var(--text-secondary)', fontWeight: req.met ? 600 : 400 }}>
+                            {req.label}
+                          </span>
+                          {!req.met && <span style={{ fontSize: '11px', color: '#f59e0b', fontWeight: 600 }}>— see setup guide below</span>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* What you can do */}
+                  {enabled && integration.whatYouCanDo && (
+                    <div style={{ marginTop: '10px' }}>
+                      <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-tertiary)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>What you can say</div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                        {integration.whatYouCanDo.map((example, i) => (
+                          <div key={i} style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: '1.5' }}>
+                            💬 <em>{example}</em>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Tool pills */}
                   <div style={{ marginTop: '8px', display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
                     {integration.tools.map(t => (
                       <span key={t.name} style={styles.toolPill(integration.color, enabled)}>{t.name}</span>
                     ))}
-                    {enabled && (
+                    {enabled && integration.setup && (
                       <button
                         onClick={() => toggleGuide(integration.id)}
                         style={{
                           fontSize: '11px', padding: '2px 10px', borderRadius: '20px',
-                          background: 'transparent', color: integration.color,
-                          border: `1px dashed ${integration.color}50`, cursor: 'pointer',
+                          background: status === 'needs_setup' ? integration.color + '20' : 'transparent',
+                          color: integration.color,
+                          border: `1px ${status === 'needs_setup' ? 'solid' : 'dashed'} ${integration.color}50`, cursor: 'pointer',
                           fontWeight: 600,
+                          animation: status === 'needs_setup' && !guideOpen ? 'pulse 2s infinite' : 'none',
                         }}
                       >
-                        {guideOpen ? 'Hide guide ▲' : 'Setup guide ▼'}
+                        {guideOpen ? 'Hide guide ▲' : status === 'needs_setup' ? 'Complete setup ▼' : 'Setup guide ▼'}
                       </button>
                     )}
                   </div>
 
-                  {/* Setup section — shown when enabled AND guide is expanded, or always for items needing setup */}
-                  {enabled && (guideOpen || (integration.requiresToken && !config.github?.token && integration.id === 'github')) && integration.setup}
-
-                  {/* Auto-expand setup for GitHub if no token yet */}
-                  {enabled && !guideOpen && integration.id === 'github' && config.github?.token && (
-                    <div style={{ ...styles.examplePrompt, marginTop: '10px' }}>
-                      <strong>Try saying:</strong> "List my GitHub repos" or "Show open PRs in owner/repo"
-                    </div>
-                  )}
-
-                  {/* Quick example for non-token integrations when enabled */}
-                  {enabled && !guideOpen && !integration.requiresToken && (
-                    <div style={{ ...styles.examplePrompt, marginTop: '10px' }}>
-                      <strong>Try saying:</strong>{' '}
-                      {integration.id === 'web' && '"What\'s the latest news about React 19?"'}
-                      {integration.id === 'code' && '"Run a Python script to calculate fibonacci numbers"'}
-                      {integration.id === 'memory' && '"Remember that my project uses TypeScript"'}
-                      {integration.id === 'gdrive' && '"List my recent Google Drive files"'}
-                    </div>
-                  )}
+                  {/* Setup section */}
+                  {enabled && integration.setup && (guideOpen || (status === 'needs_setup' && integration.requiresSetup)) && integration.setup}
                 </div>
               </div>
             </div>
@@ -795,13 +929,13 @@ export function IntegrationsPanel() {
         </div>
         <div style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.7' }}>
           <div style={{ marginBottom: '8px' }}>
-            <strong>1. Enable</strong> — Toggle on the integrations you want. Some need a quick setup (like pasting a token), others work instantly.
+            <strong>1. Enable</strong> — Toggle on the integrations you want. Some need a quick setup (like pasting a token), others work right away.
           </div>
           <div style={{ marginBottom: '8px' }}>
-            <strong>2. Chat naturally</strong> — Just ask Claude what you need. For example, "List my GitHub repos" or "Search the web for React best practices."
+            <strong>2. Chat naturally</strong> — Just ask Claude what you need in plain English. No special commands or syntax required.
           </div>
           <div>
-            <strong>3. Claude handles the rest</strong> — Claude automatically detects which tool to use, calls it, and incorporates the results into its response. No commands or syntax to learn.
+            <strong>3. Claude handles the rest</strong> — Claude figures out which tool to use, runs it, and gives you the results in its response. It's like having a smart assistant that can actually do things.
           </div>
         </div>
       </div>

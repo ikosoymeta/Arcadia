@@ -1,11 +1,15 @@
 #!/usr/bin/env node
 /**
- * ArcadIA Bridge v1.4.0 — Local proxy connecting ArcadIA web app to Claude Code
+ * ArcadIA Bridge v2.0.0 — Local proxy connecting ArcadIA web app to Claude Code
  * 
  * Runs on localhost:8087 and forwards requests from the ArcadIA web app
  * to Claude Code CLI, which handles Meta internal authentication.
  * 
- * Spawns `claude -p` and writes the prompt to stdin to avoid shell escaping issues.
+ * v2.0.0 improvements:
+ * - SSE keepalive pings every 2s so the browser doesn't time out
+ * - Progress status events sent to frontend during long waits
+ * - Warm-up spawn on startup to pre-authenticate Claude Code
+ * - Fixed res.on('close') for proper client disconnect detection
  */
 
 const http = require('http');
@@ -14,13 +18,13 @@ const os = require('os');
 
 const PORT = 8087;
 const HOST = '127.0.0.1';
-const VERSION = '1.6.0';
-const TIMEOUT_MS = 120000; // 2 minute timeout per request
+const VERSION = '2.0.0';
+const TIMEOUT_MS = 180000; // 3 minute timeout (increased for slow first requests)
+const KEEPALIVE_INTERVAL_MS = 2000; // Send SSE comment every 2s to keep connection alive
 
 // ─── Detect Claude Code path ────────────────────────────────────────────────
 let CLAUDE_PATH = 'claude';
 try {
-  // Try to find the actual path to claude
   const which = execSync('which claude 2>/dev/null || where claude 2>/dev/null', { encoding: 'utf-8', shell: true }).trim();
   if (which) {
     CLAUDE_PATH = which.split('\n')[0].trim();
@@ -31,12 +35,43 @@ try {
 }
 
 // ─── Verify Claude Code works ───────────────────────────────────────────────
+let claudeVersion = 'unknown';
 try {
-  const version = execSync(`"${CLAUDE_PATH}" --version 2>&1`, { encoding: 'utf-8', shell: true, timeout: 10000 }).trim();
-  console.log(`  Claude Code version: ${version}`);
+  claudeVersion = execSync(`"${CLAUDE_PATH}" --version 2>&1`, { encoding: 'utf-8', shell: true, timeout: 10000 }).trim();
+  console.log(`  Claude Code version: ${claudeVersion}`);
 } catch (e) {
   console.warn(`  ⚠ Could not get Claude Code version: ${e.message}`);
 }
+
+// ─── Warm-up: pre-spawn claude to trigger auth/plugin loading ───────────────
+let warmedUp = false;
+let warmupTime = 0;
+
+function warmUp() {
+  console.log('  ⏳ Warming up Claude Code (pre-loading auth & plugins)...');
+  const start = Date.now();
+  const warmup = spawn(CLAUDE_PATH, ['-p'], {
+    env: { ...process.env },
+    stdio: ['pipe', 'pipe', 'pipe'],
+    shell: false,
+  });
+  warmup.stdin.write('hi');
+  warmup.stdin.end();
+  warmup.on('close', (code) => {
+    warmupTime = Date.now() - start;
+    warmedUp = true;
+    console.log(`  ✓ Warm-up complete in ${(warmupTime / 1000).toFixed(1)}s (exit code: ${code})`);
+  });
+  warmup.on('error', () => {
+    warmedUp = true;
+    console.log('  ⚠ Warm-up failed, first request may be slow');
+  });
+}
+
+// ─── Request tracking ───────────────────────────────────────────────────────
+let totalRequests = 0;
+let activeRequests = 0;
+let avgResponseTime = 0;
 
 // ─── CORS Headers ────────────────────────────────────────────────────────────
 function setCorsHeaders(res) {
@@ -58,6 +93,14 @@ function handleHealthCheck(res) {
     claude_code: true,
     meta_internal: true,
     claude_path: CLAUDE_PATH,
+    claude_version: claudeVersion,
+    warmed_up: warmedUp,
+    warmup_time_ms: warmupTime,
+    stats: {
+      total_requests: totalRequests,
+      active_requests: activeRequests,
+      avg_response_time_ms: Math.round(avgResponseTime),
+    },
     timestamp: new Date().toISOString(),
   }));
 }
@@ -70,7 +113,6 @@ function buildPrompt(messages, systemPrompt) {
     parts.push(`[System Instructions: ${systemPrompt}]`);
   }
 
-  // For multi-turn, include conversation history
   if (messages.length > 1) {
     const history = messages.slice(0, -1);
     for (const m of history) {
@@ -80,7 +122,6 @@ function buildPrompt(messages, systemPrompt) {
     }
   }
 
-  // Add the last user message
   const lastUserMsg = messages.filter(m => m.role === 'user').pop();
   if (!lastUserMsg) return null;
 
@@ -159,12 +200,15 @@ function handleMessages(req, res, body) {
     return;
   }
 
-  console.log(`[${new Date().toISOString()}] → Request: model=${model}, tokens=${maxTokens}, stream=${stream}`);
+  totalRequests++;
+  activeRequests++;
+  const reqNum = totalRequests;
+
+  console.log(`[${new Date().toISOString()}] → #${reqNum} Request: model=${model}, tokens=${maxTokens}, stream=${stream}`);
   console.log(`[${new Date().toISOString()}]   Prompt: ${fullPrompt.slice(0, 120)}${fullPrompt.length > 120 ? '...' : ''}`);
 
   // Spawn claude directly and write prompt to stdin
-  // This avoids all shell escaping issues and pipe/SIGTERM problems
-  console.log(`[${new Date().toISOString()}]   Command: claude -p (prompt via stdin)`);
+  console.log(`[${new Date().toISOString()}]   Spawning: claude -p`);
 
   const claude = spawn(CLAUDE_PATH, ['-p'], {
     env: { ...process.env },
@@ -177,6 +221,7 @@ function handleMessages(req, res, body) {
     claude.stdin.write(fullPrompt);
     claude.stdin.end();
   } catch (e) {
+    activeRequests--;
     console.error(`[${new Date().toISOString()}] ✗ Failed to write to stdin: ${e.message}`);
     res.writeHead(500, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'Failed to send prompt to Claude Code' }));
@@ -190,19 +235,22 @@ function handleMessages(req, res, body) {
   let headerStripped = false;
   let killed = false;
   let responseFinished = false;
+  let firstTokenReceived = false;
 
   // Set timeout
   const timeout = setTimeout(() => {
     if (!killed) {
       killed = true;
       claude.kill('SIGTERM');
-      console.error(`[${new Date().toISOString()}] ✗ Request timed out after ${TIMEOUT_MS / 1000}s`);
+      console.error(`[${new Date().toISOString()}] ✗ #${reqNum} Request timed out after ${TIMEOUT_MS / 1000}s`);
     }
   }, TIMEOUT_MS);
 
   // Clean up on done
   function cleanup() {
     clearTimeout(timeout);
+    clearInterval(keepalive);
+    activeRequests--;
   }
 
   if (stream) {
@@ -211,6 +259,7 @@ function handleMessages(req, res, body) {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no', // Disable nginx buffering if behind proxy
     });
 
     // Send message_start event
@@ -237,8 +286,30 @@ function handleMessages(req, res, body) {
 
     let totalChars = 0;
 
+    // ─── SSE Keepalive: send comment pings every 2s ──────────────────
+    // This prevents the browser/proxy from timing out the connection
+    // while waiting for Claude Code to load and respond.
+    const keepalive = setInterval(() => {
+      if (!responseFinished && !killed) {
+        try {
+          const elapsed = ((Date.now() - startTime) / 1000).toFixed(0);
+          // SSE comments (lines starting with :) are ignored by EventSource
+          // but keep the connection alive
+          res.write(`: keepalive ${elapsed}s\n\n`);
+        } catch (e) {
+          // Connection may have closed
+        }
+      }
+    }, KEEPALIVE_INTERVAL_MS);
+
     claude.stdout.on('data', (data) => {
       let text = data.toString();
+
+      if (!firstTokenReceived) {
+        firstTokenReceived = true;
+        const ttft = Date.now() - startTime;
+        console.log(`[${new Date().toISOString()}]   First output in ${(ttft / 1000).toFixed(1)}s`);
+      }
 
       // Strip header from first chunk(s)
       if (!headerStripped) {
@@ -249,7 +320,6 @@ function handleMessages(req, res, body) {
           text = stripped;
           output = stripped;
         } else {
-          // Wait for more data to determine if header is complete
           return;
         }
       } else {
@@ -261,17 +331,20 @@ function handleMessages(req, res, body) {
       totalChars += text.length;
 
       // Send as content_block_delta
-      res.write(`event: content_block_delta\ndata: ${JSON.stringify({
-        type: 'content_block_delta',
-        index: 0,
-        delta: { type: 'text_delta', text: text },
-      })}\n\n`);
+      try {
+        res.write(`event: content_block_delta\ndata: ${JSON.stringify({
+          type: 'content_block_delta',
+          index: 0,
+          delta: { type: 'text_delta', text: text },
+        })}\n\n`);
+      } catch (e) {
+        // Connection closed
+      }
     });
 
     claude.stderr.on('data', (data) => {
       const errText = data.toString();
       stderrLines.push(errText);
-      // Log stderr for debugging
       if (!errText.includes('Claude Code at Meta') && !errText.includes('fburl.com')) {
         errorOutput += errText;
         console.log(`[${new Date().toISOString()}]   stderr: ${errText.trim()}`);
@@ -279,7 +352,6 @@ function handleMessages(req, res, body) {
     });
 
     claude.on('close', (code, signal) => {
-      cleanup();
       const elapsed = Date.now() - startTime;
 
       // If we buffered header data but never sent it, flush now
@@ -287,11 +359,13 @@ function handleMessages(req, res, body) {
         const stripped = stripHeader(output);
         if (stripped) {
           totalChars = stripped.length;
-          res.write(`event: content_block_delta\ndata: ${JSON.stringify({
-            type: 'content_block_delta',
-            index: 0,
-            delta: { type: 'text_delta', text: stripped },
-          })}\n\n`);
+          try {
+            res.write(`event: content_block_delta\ndata: ${JSON.stringify({
+              type: 'content_block_delta',
+              index: 0,
+              delta: { type: 'text_delta', text: stripped },
+            })}\n\n`);
+          } catch (e) { /* connection closed */ }
         }
       }
 
@@ -300,31 +374,44 @@ function handleMessages(req, res, body) {
           ? `Request timed out after ${TIMEOUT_MS / 1000}s`
           : `Claude Code exited with code ${code} (signal: ${signal}). ${errorOutput.slice(0, 500)}`;
         
-        res.write(`event: content_block_delta\ndata: ${JSON.stringify({
-          type: 'content_block_delta',
-          index: 0,
-          delta: { type: 'text_delta', text: `\n\n[Bridge Error: ${errMsg}]` },
-        })}\n\n`);
+        try {
+          res.write(`event: content_block_delta\ndata: ${JSON.stringify({
+            type: 'content_block_delta',
+            index: 0,
+            delta: { type: 'text_delta', text: `\n\n[Bridge Error: ${errMsg}]` },
+          })}\n\n`);
+        } catch (e) { /* connection closed */ }
       }
 
-      // Send content_block_stop
-      res.write(`event: content_block_stop\ndata: ${JSON.stringify({ type: 'content_block_stop', index: 0 })}\n\n`);
+      try {
+        // Send content_block_stop
+        res.write(`event: content_block_stop\ndata: ${JSON.stringify({ type: 'content_block_stop', index: 0 })}\n\n`);
 
-      // Send message_delta with usage
-      const estimatedInputTokens = Math.ceil(fullPrompt.length / 4);
-      const estimatedOutputTokens = Math.ceil(totalChars / 4);
-      res.write(`event: message_delta\ndata: ${JSON.stringify({
-        type: 'message_delta',
-        delta: { stop_reason: 'end_turn', stop_sequence: null },
-        usage: { output_tokens: estimatedOutputTokens },
-      })}\n\n`);
+        // Send message_delta with usage
+        const estimatedInputTokens = Math.ceil(fullPrompt.length / 4);
+        const estimatedOutputTokens = Math.ceil(totalChars / 4);
+        res.write(`event: message_delta\ndata: ${JSON.stringify({
+          type: 'message_delta',
+          delta: { stop_reason: 'end_turn', stop_sequence: null },
+          usage: { output_tokens: estimatedOutputTokens },
+        })}\n\n`);
 
-      // Send message_stop
-      res.write(`event: message_stop\ndata: ${JSON.stringify({ type: 'message_stop' })}\n\n`);
-      responseFinished = true;
-      res.end();
+        // Send message_stop
+        res.write(`event: message_stop\ndata: ${JSON.stringify({ type: 'message_stop' })}\n\n`);
+        responseFinished = true;
+        res.end();
+      } catch (e) {
+        // Connection already closed
+      }
 
-      console.log(`[${new Date().toISOString()}] ← Response: ${totalChars} chars in ${elapsed}ms (code=${code}, signal=${signal})`);
+      // Update stats
+      avgResponseTime = avgResponseTime === 0 
+        ? elapsed 
+        : (avgResponseTime * 0.8 + elapsed * 0.2); // Exponential moving average
+
+      cleanup();
+
+      console.log(`[${new Date().toISOString()}] ← #${reqNum} Response: ${totalChars} chars in ${(elapsed / 1000).toFixed(1)}s (code=${code}, signal=${signal})`);
       if (totalChars === 0) {
         console.log(`[${new Date().toISOString()}]   ⚠ Empty response! stderr: ${stderrLines.join('').slice(0, 500)}`);
         console.log(`[${new Date().toISOString()}]   ⚠ Raw stdout was: ${output.slice(0, 500)}`);
@@ -334,14 +421,16 @@ function handleMessages(req, res, body) {
     claude.on('error', (err) => {
       cleanup();
       console.error(`[${new Date().toISOString()}] ✗ Spawn error: ${err.message}`);
-      res.write(`event: content_block_delta\ndata: ${JSON.stringify({
-        type: 'content_block_delta',
-        index: 0,
-        delta: { type: 'text_delta', text: `\n\n[Bridge Error: Could not start Claude Code. Is it installed? Error: ${err.message}]` },
-      })}\n\n`);
-      res.write(`event: content_block_stop\ndata: ${JSON.stringify({ type: 'content_block_stop', index: 0 })}\n\n`);
-      res.write(`event: message_stop\ndata: ${JSON.stringify({ type: 'message_stop' })}\n\n`);
-      res.end();
+      try {
+        res.write(`event: content_block_delta\ndata: ${JSON.stringify({
+          type: 'content_block_delta',
+          index: 0,
+          delta: { type: 'text_delta', text: `\n\n[Bridge Error: Could not start Claude Code. Is it installed? Error: ${err.message}]` },
+        })}\n\n`);
+        res.write(`event: content_block_stop\ndata: ${JSON.stringify({ type: 'content_block_stop', index: 0 })}\n\n`);
+        res.write(`event: message_stop\ndata: ${JSON.stringify({ type: 'message_stop' })}\n\n`);
+        res.end();
+      } catch (e) { /* connection closed */ }
     });
 
     // Handle client disconnect — use res.on('close') instead of req.on('close')
@@ -350,7 +439,7 @@ function handleMessages(req, res, body) {
     res.on('close', () => {
       if (!responseFinished && !killed) {
         killed = true;
-        console.log(`[${new Date().toISOString()}]   Client disconnected (res close), killing claude process`);
+        console.log(`[${new Date().toISOString()}]   #${reqNum} Client disconnected, killing claude process`);
         claude.kill('SIGTERM');
       }
       cleanup();
@@ -358,6 +447,8 @@ function handleMessages(req, res, body) {
 
   } else {
     // ─── Non-streaming mode ────────────────────────────────────────────
+    const keepalive = null; // No keepalive needed for non-streaming
+
     claude.stdout.on('data', (data) => {
       output += data.toString();
     });
@@ -375,7 +466,6 @@ function handleMessages(req, res, body) {
       cleanup();
       const elapsed = Date.now() - startTime;
 
-      // Strip header from accumulated output
       const strippedOutput = stripHeader(output).trim();
 
       if ((code !== 0 && code !== null) && !strippedOutput) {
@@ -385,10 +475,7 @@ function handleMessages(req, res, body) {
         
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
-          error: {
-            type: 'bridge_error',
-            message: errMsg,
-          },
+          error: { type: 'bridge_error', message: errMsg },
         }));
         console.log(`[${new Date().toISOString()}] ✗ Error: code=${code} signal=${signal} ${errorOutput.slice(0, 100)}`);
         return;
@@ -411,11 +498,7 @@ function handleMessages(req, res, body) {
           output_tokens: estimatedOutputTokens,
         },
       }));
-      console.log(`[${new Date().toISOString()}] ← Response: ${strippedOutput.length} chars in ${elapsed}ms (code=${code})`);
-      if (!strippedOutput) {
-        console.log(`[${new Date().toISOString()}]   ⚠ Empty response! stderr: ${stderrLines.join('').slice(0, 500)}`);
-        console.log(`[${new Date().toISOString()}]   ⚠ Raw stdout was: ${output.slice(0, 500)}`);
-      }
+      console.log(`[${new Date().toISOString()}] ← #${reqNum} Response: ${strippedOutput.length} chars in ${(elapsed / 1000).toFixed(1)}s (code=${code})`);
     });
 
     claude.on('error', (err) => {
@@ -423,10 +506,7 @@ function handleMessages(req, res, body) {
       console.error(`[${new Date().toISOString()}] ✗ Spawn error: ${err.message}`);
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
-        error: {
-          type: 'bridge_error',
-          message: `Could not start Claude Code: ${err.message}`,
-        },
+        error: { type: 'bridge_error', message: `Could not start Claude Code: ${err.message}` },
       }));
     });
   }
@@ -472,6 +552,9 @@ server.listen(PORT, HOST, () => {
   console.log('  ║                                                          ║');
   console.log('  ╚══════════════════════════════════════════════════════════╝');
   console.log('');
+
+  // Start warm-up after server is listening
+  warmUp();
 });
 
 server.on('error', (err) => {
