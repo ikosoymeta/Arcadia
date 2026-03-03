@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * ArcadIA Bridge v1.3.0 — Local proxy connecting ArcadIA web app to Claude Code
+ * ArcadIA Bridge v1.4.0 — Local proxy connecting ArcadIA web app to Claude Code
  * 
  * Runs on localhost:8087 and forwards requests from the ArcadIA web app
  * to Claude Code CLI, which handles Meta internal authentication.
@@ -14,7 +14,7 @@ const os = require('os');
 
 const PORT = 8087;
 const HOST = '127.0.0.1';
-const VERSION = '1.3.0';
+const VERSION = '1.4.0';
 const TIMEOUT_MS = 120000; // 2 minute timeout per request
 
 // ─── Detect Claude Code path ────────────────────────────────────────────────
@@ -169,7 +169,7 @@ function handleMessages(req, res, body) {
   const claude = spawn(CLAUDE_PATH, ['-p'], {
     env: { ...process.env },
     stdio: ['pipe', 'pipe', 'pipe'],
-    shell: true,
+    shell: false,
   });
 
   // Write the prompt to stdin and close it
