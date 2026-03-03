@@ -1,11 +1,13 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useConnection } from '../../store/ConnectionContext';
 import { useChat } from '../../store/ChatContext';
-import { testConnection } from '../../services/claude';
 
 interface OnboardingProps {
   onComplete: () => void;
 }
+
+const META_PROXY_URL = 'http://localhost:8087';
+const META_MODEL = 'claude-sonnet-4-20250514';
 
 const MODELS = [
   {
@@ -28,15 +30,62 @@ const MODELS = [
   },
 ];
 
+// ─── Detect Meta LDAR proxy ───────────────────────────────────────────────────
+// Sends a lightweight OPTIONS/HEAD probe to localhost:8087.
+// Returns true if the proxy is reachable (i.e. user is on Meta network).
+async function detectMetaProxy(): Promise<boolean> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 2000);
+    const res = await fetch(`${META_PROXY_URL}/v1/messages`, {
+      method: 'OPTIONS',
+      signal: controller.signal,
+    }).catch(() => null);
+    clearTimeout(timer);
+    // Any response (even 4xx/405) means the port is open and proxy is running
+    return res !== null;
+  } catch {
+    return false;
+  }
+}
+
 export function OnboardingWizard({ onComplete }: OnboardingProps) {
   const { addConnection } = useConnection();
   const { createConversation } = useChat();
-  const [step, setStep] = useState<'welcome' | 'apikey' | 'model' | 'connecting'>('welcome');
+
+  type Step = 'detecting' | 'meta_connected' | 'welcome' | 'apikey' | 'connecting';
+  const [step, setStep] = useState<Step>('detecting');
   const [apiKey, setApiKey] = useState('');
   const [model, setModel] = useState('claude-sonnet-4-20250514');
   const [showKey, setShowKey] = useState(false);
   const [error, setError] = useState('');
   const [keyValid, setKeyValid] = useState(false);
+
+  // ── On mount: probe for Meta proxy ───────────────────────────────────────
+  useEffect(() => {
+    detectMetaProxy().then(isMetaProxy => {
+      if (isMetaProxy) {
+        // Silently create a Meta proxy connection and complete onboarding
+        addConnection({
+          label: 'Meta Corporate (LDAR)',
+          apiKey: '',
+          model: META_MODEL,
+          maxTokens: 4096,
+          temperature: 0.7,
+          baseUrl: META_PROXY_URL,
+          status: 'connected',
+        });
+        localStorage.setItem('arcadia-onboarding-complete', 'true');
+        localStorage.setItem('arcadia-connection-type', 'meta-proxy');
+        createConversation(META_MODEL);
+        setStep('meta_connected');
+        // Auto-dismiss after 2s
+        setTimeout(() => onComplete(), 2000);
+      } else {
+        setStep('welcome');
+      }
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const validateKeyFormat = (key: string) => key.startsWith('sk-ant') && key.length > 20;
 
@@ -53,15 +102,41 @@ export function OnboardingWizard({ onComplete }: OnboardingProps) {
     }
     setStep('connecting');
     setError('');
+
+    // Test the connection with a minimal ping
     try {
-      const ok = await testConnection(apiKey.trim(), model);
-      if (!ok) {
-        setError('Could not connect. Double-check your API key and try again.');
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 10000);
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'anthropic-version': '2023-06-01',
+          'x-api-key': apiKey.trim(),
+          'anthropic-dangerous-direct-browser-access': 'true',
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: 16,
+          messages: [{ role: 'user', content: 'Say ok' }],
+        }),
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+
+      if (!res.ok && res.status !== 200) {
+        const body = await res.json().catch(() => ({}));
+        const msg = (body as { error?: { message?: string } }).error?.message ?? `HTTP ${res.status}`;
+        setError(`Connection failed: ${msg}`);
         setStep('apikey');
         return;
       }
-    } catch {
-      setError('Network error. Please check your internet connection.');
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        setError('Connection timed out. Check your internet connection.');
+      } else {
+        setError('Network error. Please check your internet connection.');
+      }
       setStep('apikey');
       return;
     }
@@ -74,30 +149,84 @@ export function OnboardingWizard({ onComplete }: OnboardingProps) {
       temperature: 0.7,
     });
     localStorage.setItem('arcadia-onboarding-complete', 'true');
+    localStorage.setItem('arcadia-connection-type', 'api-key');
     createConversation(model);
     onComplete();
   };
 
+  // ── Shared styles ─────────────────────────────────────────────────────────
   const overlay: React.CSSProperties = {
     position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     zIndex: 1000, padding: '16px',
   };
-
   const card: React.CSSProperties = {
     background: '#171717', borderRadius: '20px', border: '1px solid #2a2a2a',
     maxWidth: '420px', width: '100%', overflow: 'hidden',
     boxShadow: '0 24px 80px rgba(0,0,0,0.6)',
   };
-
-  const header: React.CSSProperties = {
-    padding: '32px 32px 0', textAlign: 'center',
-  };
-
+  const header: React.CSSProperties = { padding: '32px 32px 0', textAlign: 'center' };
   const body: React.CSSProperties = { padding: '24px 32px' };
   const footer: React.CSSProperties = { padding: '0 32px 32px' };
 
-  // ── WELCOME ──────────────────────────────────────────────────────────────
+  // ── DETECTING (probe in progress) ─────────────────────────────────────────
+  if (step === 'detecting') {
+    return (
+      <div style={overlay}>
+        <div style={{ ...card, textAlign: 'center', padding: '48px 32px' }}>
+          <div style={{ fontSize: '40px', marginBottom: '16px' }}>✦</div>
+          <div style={{ fontSize: '18px', fontWeight: 700, color: '#e5e5e5', marginBottom: '8px' }}>
+            Starting ArcadIA...
+          </div>
+          <div style={{ fontSize: '13px', color: '#a3a3a3' }}>
+            Detecting your connection
+          </div>
+          <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'center', gap: '6px' }}>
+            {[0, 1, 2].map(i => (
+              <div key={i} style={{
+                width: '8px', height: '8px', borderRadius: '50%', background: '#6366f1',
+                animation: `pulse 1.2s ease-in-out ${i * 0.2}s infinite`,
+              }} />
+            ))}
+          </div>
+          <style>{`
+            @keyframes pulse {
+              0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
+              40% { opacity: 1; transform: scale(1); }
+            }
+          `}</style>
+        </div>
+      </div>
+    );
+  }
+
+  // ── META CONNECTED (proxy detected, auto-connecting) ──────────────────────
+  if (step === 'meta_connected') {
+    return (
+      <div style={overlay}>
+        <div style={{ ...card, textAlign: 'center', padding: '48px 32px' }}>
+          <div style={{ fontSize: '48px', marginBottom: '16px' }}>🏢</div>
+          <div style={{ fontSize: '20px', fontWeight: 800, color: '#e5e5e5', marginBottom: '8px' }}>
+            Connected via Meta
+          </div>
+          <div style={{ fontSize: '13px', color: '#a3a3a3', lineHeight: '1.6', marginBottom: '20px' }}>
+            Corporate account detected.<br />
+            Connecting you automatically — no API key needed.
+          </div>
+          <div style={{
+            display: 'inline-flex', alignItems: 'center', gap: '8px',
+            background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.3)',
+            borderRadius: '8px', padding: '8px 16px',
+            fontSize: '13px', color: '#22c55e', fontWeight: 600,
+          }}>
+            ✓ Meta LDAR proxy active
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── WELCOME ───────────────────────────────────────────────────────────────
   if (step === 'welcome') {
     return (
       <div style={overlay}>
@@ -134,15 +263,12 @@ export function OnboardingWizard({ onComplete }: OnboardingProps) {
                 width: '100%', padding: '14px', borderRadius: '12px',
                 background: '#6366f1', border: 'none', color: '#fff',
                 fontSize: '15px', fontWeight: 700, cursor: 'pointer',
-                transition: 'opacity 0.15s',
               }}
-              onMouseOver={e => (e.currentTarget.style.opacity = '0.9')}
-              onMouseOut={e => (e.currentTarget.style.opacity = '1')}
             >
-              Get Started — it's free to try →
+              Get Started — Connect with API Key →
             </button>
             <div style={{ textAlign: 'center', marginTop: '12px', fontSize: '12px', color: '#525252' }}>
-              You'll need a free Anthropic account. Takes 2 minutes.
+              Meta employee? Make sure you're connected to the Meta network.
             </div>
           </div>
         </div>
@@ -195,6 +321,26 @@ export function OnboardingWizard({ onComplete }: OnboardingProps) {
               ))}
             </div>
 
+            {/* Model picker */}
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#a3a3a3', marginBottom: '8px' }}>
+                Choose model
+              </label>
+              <select
+                value={model}
+                onChange={e => setModel(e.target.value)}
+                style={{
+                  width: '100%', padding: '10px 14px', borderRadius: '10px',
+                  border: '1.5px solid #2a2a2a', background: '#0f0f0f',
+                  color: '#e5e5e5', fontSize: '13px', outline: 'none', boxSizing: 'border-box',
+                }}
+              >
+                {MODELS.map(m => (
+                  <option key={m.value} value={m.value}>{m.label} — {m.desc}</option>
+                ))}
+              </select>
+            </div>
+
             {/* Key input */}
             <div style={{ marginBottom: '8px' }}>
               <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#a3a3a3', marginBottom: '8px' }}>
@@ -228,18 +374,13 @@ export function OnboardingWizard({ onComplete }: OnboardingProps) {
                 </button>
               </div>
               {keyValid && !error && (
-                <div style={{ fontSize: '12px', color: '#22c55e', marginTop: '6px' }}>
-                  ✓ Key format looks good
-                </div>
+                <div style={{ fontSize: '12px', color: '#22c55e', marginTop: '6px' }}>✓ Key format looks good</div>
               )}
               {error && (
-                <div style={{ fontSize: '12px', color: '#ef4444', marginTop: '6px' }}>
-                  ⚠ {error}
-                </div>
+                <div style={{ fontSize: '12px', color: '#ef4444', marginTop: '6px' }}>⚠ {error}</div>
               )}
             </div>
-
-            <div style={{ fontSize: '11px', color: '#525252', marginBottom: '4px' }}>
+            <div style={{ fontSize: '11px', color: '#525252' }}>
               🔒 Your key is stored only in your browser — never sent to our servers.
             </div>
           </div>
@@ -274,75 +415,31 @@ export function OnboardingWizard({ onComplete }: OnboardingProps) {
     );
   }
 
-  // ── MODEL PICKER ──────────────────────────────────────────────────────────
-  if (step === 'model') {
-    return (
-      <div style={overlay}>
-        <div style={card}>
-          <div style={header}>
-            <div style={{ fontSize: '36px', marginBottom: '12px' }}>🧠</div>
-            <div style={{ fontSize: '22px', fontWeight: 800, color: '#e5e5e5', marginBottom: '8px' }}>
-              Choose your Claude
-            </div>
-            <div style={{ fontSize: '13px', color: '#a3a3a3', lineHeight: '1.6' }}>
-              Pick the version that fits your needs. You can change this later.
-            </div>
-          </div>
-          <div style={body}>
-            {MODELS.map(m => (
-              <div
-                key={m.value}
-                onClick={() => setModel(m.value)}
-                style={{
-                  padding: '16px', borderRadius: '12px', marginBottom: '10px',
-                  border: `2px solid ${model === m.value ? '#6366f1' : '#2a2a2a'}`,
-                  background: model === m.value ? 'rgba(99,102,241,0.08)' : '#1a1a1a',
-                  cursor: 'pointer', transition: 'all 0.15s',
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                  <div style={{ fontSize: '14px', fontWeight: 700, color: '#e5e5e5' }}>{m.label}</div>
-                  <div style={{ fontSize: '11px', color: '#6366f1', fontWeight: 600 }}>{m.badge}</div>
-                </div>
-                <div style={{ fontSize: '13px', color: '#a3a3a3' }}>{m.desc}</div>
-              </div>
-            ))}
-          </div>
-          <div style={footer}>
-            <button
-              onClick={handleConnect}
-              style={{
-                width: '100%', padding: '14px', borderRadius: '12px',
-                background: '#6366f1', border: 'none', color: '#fff',
-                fontSize: '15px', fontWeight: 700, cursor: 'pointer',
-              }}
-            >
-              Start Chatting →
-            </button>
-            <div style={{ textAlign: 'center', marginTop: '12px' }}>
-              <button onClick={() => setStep('apikey')}
-                style={{ background: 'none', border: 'none', color: '#525252', fontSize: '12px', cursor: 'pointer' }}>
-                ← Back
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   // ── CONNECTING ────────────────────────────────────────────────────────────
   return (
     <div style={overlay}>
       <div style={{ ...card, textAlign: 'center', padding: '48px 32px' }}>
-        <div style={{ fontSize: '48px', marginBottom: '16px', animation: 'spin 1s linear infinite' }}>⟳</div>
-        <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+        <div style={{ fontSize: '40px', marginBottom: '16px' }}>✦</div>
         <div style={{ fontSize: '18px', fontWeight: 700, color: '#e5e5e5', marginBottom: '8px' }}>
           Connecting to Claude...
         </div>
         <div style={{ fontSize: '13px', color: '#a3a3a3' }}>
-          Testing your connection. This takes just a second.
+          Testing your API key. This takes just a second.
         </div>
+        <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'center', gap: '6px' }}>
+          {[0, 1, 2].map(i => (
+            <div key={i} style={{
+              width: '8px', height: '8px', borderRadius: '50%', background: '#6366f1',
+              animation: `pulse 1.2s ease-in-out ${i * 0.2}s infinite`,
+            }} />
+          ))}
+        </div>
+        <style>{`
+          @keyframes pulse {
+            0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
+            40% { opacity: 1; transform: scale(1); }
+          }
+        `}</style>
       </div>
     </div>
   );

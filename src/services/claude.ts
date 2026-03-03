@@ -52,10 +52,13 @@ function buildHeaders(conn: Connection): Record<string, string> {
     'anthropic-version': '2023-06-01',
   };
   if (conn.baseUrl) {
-    // Proxy mode — no API key in headers
+    // Corporate proxy mode (e.g. Meta LDAR) — proxy handles auth, no API key needed
+    // Some proxies accept an optional key; include it only if provided
+    if (conn.apiKey) headers['x-api-key'] = conn.apiKey;
   } else if (import.meta.env.DEV) {
     // Dev proxy handles key injection
   } else {
+    // Direct Anthropic API — requires key + CORS header
     headers['x-api-key'] = conn.apiKey;
     headers['anthropic-dangerous-direct-browser-access'] = 'true';
   }

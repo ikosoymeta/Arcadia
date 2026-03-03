@@ -191,7 +191,7 @@ function ActivityFeed({ steps }: { steps: ActivityStep[] }) {
 // ─── Main SimpleView ──────────────────────────────────────────────────────────
 
 export function SimpleView() {
-  const { activeConnection } = useConnection();
+  const { activeConnection, isMetaProxy } = useConnection();
   const { getActiveConversation, addMessage, createConversation, isStreaming, setStreaming, streamingText, setStreamingText, appendStreamingText, streamingReasoning, setStreamingReasoning, appendStreamingReasoning } = useChat();
 
   const [input, setInput] = useState('');
@@ -378,6 +378,11 @@ export function SimpleView() {
                 }}>
                   Open Settings →
                 </button>
+              </div>
+            )}
+            {activeConnection && isMetaProxy && (
+              <div className={styles.metaProxyBadge}>
+                🏢 Connected via Meta corporate account
               </div>
             )}
             <div className={styles.suggestions}>
