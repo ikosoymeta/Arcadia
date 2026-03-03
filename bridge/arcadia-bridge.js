@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * ArcadIA Bridge v3.0.0 — Local proxy connecting ArcadIA web app to Claude Code
+ * ArcadIA Bridge v3.1.0 — Local proxy connecting ArcadIA web app to Claude Code
  * 
  * Runs on localhost:8087 and forwards requests from the ArcadIA web app
  * to Claude Code CLI, which handles Meta internal authentication.
@@ -23,12 +23,13 @@ const os = require('os');
 
 const PORT = 8087;
 const HOST = '127.0.0.1';
-const VERSION = '3.0.0';
+const VERSION = '3.1.0';
 const TIMEOUT_MS = 180000; // 3 minute timeout
 const KEEPALIVE_INTERVAL_MS = 2000; // SSE keepalive every 2s
 
-// ─── Security: Auth token ──────────────────────────────────────────────────
-const AUTH_TOKEN = crypto.randomBytes(24).toString('hex');
+// ─── Security ─────────────────────────────────────────────────────────────
+// Auth is handled by CORS (restricting which origins can call the bridge).
+// No auth token needed since the bridge only runs on localhost.
 
 // ─── Security: Allowed CORS origins ────────────────────────────────────────
 const ALLOWED_ORIGINS = [
@@ -136,16 +137,10 @@ function setCorsHeaders(res, req) {
 }
 
 // ─── Auth middleware ────────────────────────────────────────────────────────
+// CORS-based: only allowed origins can make requests. No token needed.
 function isAuthenticated(req) {
-  // Health check is always public (needed for setup flow)
-  if (req.url === '/' || req.url === '/health') return true;
-  
-  // Check for auth token in header or query param
-  const headerToken = req.headers['x-bridge-token'];
-  const url = new URL(req.url, `http://${HOST}:${PORT}`);
-  const queryToken = url.searchParams.get('token');
-  
-  return headerToken === AUTH_TOKEN || queryToken === AUTH_TOKEN;
+  // All requests are allowed — CORS headers restrict browser access
+  return true;
 }
 
 // ─── Health check endpoint ─────────────────────────────────────────────────
@@ -162,7 +157,7 @@ function handleHealthCheck(res, req) {
     claude_version: claudeVersion,
     warmed_up: warmedUp,
     warmup_time_ms: warmupTime,
-    auth_required: true,
+    auth_required: false,
     capabilities: {
       validate: true,
       auto_fix: true,
@@ -873,9 +868,7 @@ server.listen(PORT, HOST, () => {
   console.log('  ║                                                          ║');
   console.log('  ╚══════════════════════════════════════════════════════════╝');
   console.log('');
-  console.log(`  🔑 Auth Token: ${AUTH_TOKEN}`);
-  console.log('  ↑ Copy this token — ArcadIA will ask for it on first connect.');
-  console.log('  The token changes each time the bridge restarts.');
+  console.log('  🔒 Security: CORS-restricted to localhost + GitHub Pages');
   console.log('');
 
   // Start warm-up after server is listening

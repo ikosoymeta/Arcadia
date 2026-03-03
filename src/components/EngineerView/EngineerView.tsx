@@ -950,7 +950,7 @@ function ValidationPanel() {
       {/* Bridge status */}
       {bridgeOk === false && (
         <div className={styles.validateWarning}>
-          Bridge not detected or missing validation support. Start the bridge (v2.1.0+):
+          Bridge not detected or missing validation support. Start the bridge (v3.1.0+):
           <code>node bridge/arcadia-bridge.js</code>
         </div>
       )}

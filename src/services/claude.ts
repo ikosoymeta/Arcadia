@@ -341,13 +341,7 @@ export async function sendMessage(opts: SendMessageOptions): Promise<SendMessage
 
   addLog({ direction: 'request', data: body, model: connection.model, label: 'API Request' });
 
-  // Add bridge auth token if connecting to local bridge
-  if (isMetaLdar(connection)) {
-    const bridgeToken = localStorage.getItem('arcadia-bridge-token');
-    if (bridgeToken) {
-      headers['x-bridge-token'] = bridgeToken;
-    }
-  }
+  // No auth token needed — bridge uses CORS-based security
 
   // Retry with exponential backoff for 429/5xx errors
   const MAX_RETRIES = 3;
