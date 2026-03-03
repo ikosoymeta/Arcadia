@@ -172,7 +172,23 @@ export async function sendMessage(
     callbacks.onComplete(message);
   } catch (err: any) {
     if (err.name === 'AbortError') return;
-    callbacks.onError(err.message || 'Unknown error');
+    // Provide actionable error messages
+    if (err.message === 'Failed to fetch' || err.name === 'TypeError') {
+      if (baseUrl) {
+        callbacks.onError(
+          `Cannot reach ${baseUrl}. ` +
+          (baseUrl.includes('localhost:8087')
+            ? 'Make sure LDAR is running on your devserver, or switch to API Key mode in Settings.'
+            : 'Check that the proxy URL is correct in Settings.'),
+        );
+      } else if (!apiKey) {
+        callbacks.onError('No API key configured. Go to Settings to add one.');
+      } else {
+        callbacks.onError('Network error. Check your internet connection and try again.');
+      }
+    } else {
+      callbacks.onError(err.message || 'Unknown error');
+    }
   }
 }
 
@@ -279,7 +295,11 @@ export async function testConnection(apiKey: string, model: string, baseUrl?: st
     messages: [{ role: 'user', content: 'Say "connected" in one word.' }],
   };
 
-  const { url, init } = buildRequest(apiKey, payload, new AbortController().signal, baseUrl);
-  const response = await fetch(url, init);
-  return response.ok;
+  try {
+    const { url, init } = buildRequest(apiKey, payload, new AbortController().signal, baseUrl);
+    const response = await fetch(url, init);
+    return response.ok;
+  } catch {
+    return false;
+  }
 }
