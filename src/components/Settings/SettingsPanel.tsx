@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useConnection } from '../../store/ConnectionContext';
 import styles from './Settings.module.css';
 
@@ -14,7 +14,6 @@ export function SettingsPanel() {
     connections,
     activeConnection,
     addConnection,
-    updateConnection,
     deleteConnection,
     setActiveConnection,
     testConnection,

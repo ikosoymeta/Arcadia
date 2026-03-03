@@ -52,7 +52,6 @@ export function ChatPanel({ sidebarCollapsed, onExpandSidebar }: ChatPanelProps)
     setGlobalInstructions,
     createCoworkTask,
     updateCoworkTaskStatus,
-    updateCoworkStepStatus,
     getFolderInstructions,
   } = useChat();
   const { activeConnection } = useConnection();

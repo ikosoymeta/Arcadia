@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { useConnection } from '../../store/ConnectionContext';
 import { useChat } from '../../store/ChatContext';
 import { testConnection } from '../../services/claude';

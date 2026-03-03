@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef } from 'react';
 import { usePreview } from '../../store/PreviewContext';
 import type { FileNode, TerminalEntry } from '../../types';
 import styles from './CodeWorkspace.module.css';
@@ -128,7 +128,7 @@ export function CodeWorkspace() {
   const { artifacts } = usePreview();
   const [explorerCollapsed, setExplorerCollapsed] = useState(false);
   const [debugCollapsed, setDebugCollapsed] = useState(true);
-  const [terminalHeight, setTerminalHeight] = useState(200);
+  const [terminalHeight] = useState(200);
   const [terminalVisible, setTerminalVisible] = useState(true);
   const [activeFile, setActiveFile] = useState<string | null>(null);
   const [openFiles, setOpenFiles] = useState<string[]>([]);
@@ -138,7 +138,7 @@ export function CodeWorkspace() {
   ]);
   const [aiDockOpen, setAiDockOpen] = useState(false);
   const [watchExpressions, setWatchExpressions] = useState<string[]>(['state.count', 'props.data']);
-  const [breakpoints, setBreakpoints] = useState<{ file: string; line: number }[]>([
+  const [breakpoints] = useState<{ file: string; line: number }[]>([
     { file: 'src/App.tsx', line: 5 },
     { file: 'src/utils/helpers.ts', line: 3 },
   ]);

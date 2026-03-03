@@ -91,18 +91,17 @@ async function collectWebVitals(): Promise<WebVitalsResult> {
   const result: WebVitalsResult = {};
 
   try {
-    const { onLCP, onFID, onCLS, onTTFB, onINP } = await import('web-vitals');
+    const { onLCP, onCLS, onTTFB, onINP } = await import('web-vitals');
 
     await Promise.race([
       new Promise<void>((resolve) => {
         let collected = 0;
         const check = () => { collected++; if (collected >= 3) resolve(); };
 
-        onLCP((metric) => { result.lcp = metric.value; check(); });
-        onFID((metric) => { result.fid = metric.value; check(); });
-        onCLS((metric) => { result.cls = metric.value; check(); });
-        onTTFB((metric) => { result.ttfb = metric.value; check(); });
-        onINP((metric) => { result.inp = metric.value; check(); });
+        onLCP((metric: { value: number }) => { result.lcp = metric.value; check(); });
+        onCLS((metric: { value: number }) => { result.cls = metric.value; check(); });
+        onTTFB((metric: { value: number }) => { result.ttfb = metric.value; check(); });
+        onINP((metric: { value: number }) => { result.inp = metric.value; check(); });
       }),
       new Promise<void>((resolve) => setTimeout(resolve, 3000)),
     ]);

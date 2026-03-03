@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useConnection } from '../../store/ConnectionContext';
 import { runBenchmarkSuite, identifyWorstCases } from '../../services/benchmark';
 import type { BenchmarkSuite } from '../../types';
