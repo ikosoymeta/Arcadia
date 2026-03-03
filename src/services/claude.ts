@@ -12,6 +12,13 @@ let abortController: AbortController | null = null;
 const IS_DEV = import.meta.env.DEV;
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 
+// Detect if running on Meta internal infrastructure
+const IS_META_INTERNAL = typeof window !== 'undefined' && (
+  window.location.hostname.includes('.intern.facebook.com') ||
+  window.location.hostname.includes('.internalfb.com') ||
+  window.location.hostname.includes('.thefacebook.com')
+);
+
 export function abortStream(): void {
   if (abortController) {
     abortController.abort();
@@ -36,6 +43,22 @@ function buildRequest(
     const url = baseUrl.replace(/\/+$/, '');
     return {
       url: `${url}/v1/messages`,
+      init: {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify(payload),
+        signal,
+      },
+    };
+  }
+
+  // Meta internal deployment: use co-located proxy (no API key needed)
+  if (IS_META_INTERNAL) {
+    return {
+      url: '/v1/messages',
       init: {
         method: 'POST',
         headers: {
