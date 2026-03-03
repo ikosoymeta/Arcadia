@@ -14,7 +14,7 @@ const os = require('os');
 
 const PORT = 8087;
 const HOST = '127.0.0.1';
-const VERSION = '1.4.0';
+const VERSION = '1.5.0';
 const TIMEOUT_MS = 120000; // 2 minute timeout per request
 
 // ─── Detect Claude Code path ────────────────────────────────────────────────
@@ -189,6 +189,7 @@ function handleMessages(req, res, body) {
   const startTime = Date.now();
   let headerStripped = false;
   let killed = false;
+  let responseFinished = false;
 
   // Set timeout
   const timeout = setTimeout(() => {
@@ -320,6 +321,7 @@ function handleMessages(req, res, body) {
 
       // Send message_stop
       res.write(`event: message_stop\ndata: ${JSON.stringify({ type: 'message_stop' })}\n\n`);
+      responseFinished = true;
       res.end();
 
       console.log(`[${new Date().toISOString()}] ← Response: ${totalChars} chars in ${elapsed}ms (code=${code}, signal=${signal})`);
@@ -342,10 +344,13 @@ function handleMessages(req, res, body) {
       res.end();
     });
 
-    // Handle client disconnect
+    // Handle client disconnect — only kill claude if response hasn't finished yet
+    // The 'close' event fires when the request socket closes, which can happen
+    // right after the body is consumed. We must NOT kill claude in that case.
     req.on('close', () => {
-      if (!killed) {
+      if (!responseFinished && !killed) {
         killed = true;
+        console.log(`[${new Date().toISOString()}]   Client disconnected, killing claude process`);
         claude.kill('SIGTERM');
       }
       cleanup();
