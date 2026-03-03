@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import type { Connection } from '../types';
 import { storage } from '../services/storage';
+import { testConnection as testApiConnection } from '../services/claude';
 
 interface ConnectionContextType {
   connections: Connection[];
@@ -51,18 +52,7 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
     if (!conn) return false;
 
     try {
-      const response = await fetch('/api/claude', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: conn.model,
-          max_tokens: 10,
-          messages: [{ role: 'user', content: 'Hi' }],
-          apiKey: conn.apiKey,
-        }),
-      });
-
-      const success = response.ok;
+      const success = await testApiConnection(conn.apiKey, conn.model);
       updateConnection(id, { status: success ? 'connected' : 'error', lastUsed: Date.now() });
       return success;
     } catch {

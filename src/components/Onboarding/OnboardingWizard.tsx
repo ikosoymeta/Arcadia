@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { useConnection } from '../../store/ConnectionContext';
 import { useChat } from '../../store/ChatContext';
+import { testConnection } from '../../services/claude';
 import styles from './Onboarding.module.css';
 
 interface OnboardingProps {
@@ -35,21 +36,12 @@ export function OnboardingWizard({ onComplete }: OnboardingProps) {
     setApiKeyError('');
 
     try {
-      const response = await fetch('/api/claude', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model,
-          max_tokens: 10,
-          messages: [{ role: 'user', content: 'Say "connected" in one word.' }],
-          apiKey: apiKey.trim(),
-        }),
-      });
-      setTestState(response.ok ? 'success' : 'error');
-      if (!response.ok) setApiKeyError('Connection failed. Please check your API key.');
+      const ok = await testConnection(apiKey.trim(), model);
+      setTestState(ok ? 'success' : 'error');
+      if (!ok) setApiKeyError('Connection failed. Please check your API key.');
     } catch {
       setTestState('error');
-      setApiKeyError('Network error. Make sure the dev server is running.');
+      setApiKeyError('Network error. Please check your connection and try again.');
     }
   }, [apiKey, model]);
 

@@ -9,11 +9,53 @@ interface StreamCallbacks {
 
 let abortController: AbortController | null = null;
 
+const IS_DEV = import.meta.env.DEV;
+const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
+
 export function abortStream(): void {
   if (abortController) {
     abortController.abort();
     abortController = null;
   }
+}
+
+/**
+ * Build the fetch request depending on environment:
+ * - Development: use Vite proxy at /api/claude (avoids CORS, hides key from browser network tab)
+ * - Production (GitHub Pages): call Anthropic API directly with browser-access header
+ */
+function buildRequest(
+  apiKey: string,
+  payload: Record<string, unknown>,
+  signal: AbortSignal,
+): { url: string; init: RequestInit } {
+  if (IS_DEV) {
+    return {
+      url: '/api/claude',
+      init: {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...payload, apiKey }),
+        signal,
+      },
+    };
+  }
+
+  // Production: direct Anthropic API call
+  return {
+    url: ANTHROPIC_API_URL,
+    init: {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify(payload),
+      signal,
+    },
+  };
 }
 
 export async function sendMessage(
@@ -33,22 +75,17 @@ export async function sendMessage(
   let totalTokens = 0;
 
   try {
-    const response = await fetch('/api/claude', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: maxTokens,
-        temperature,
-        messages,
-        stream: true,
-        apiKey,
-        ...(systemPrompt ? { system: systemPrompt } : {}),
-      }),
-      signal: abortController.signal,
-    });
+    const payload: Record<string, unknown> = {
+      model,
+      max_tokens: maxTokens,
+      temperature,
+      messages,
+      stream: true,
+      ...(systemPrompt ? { system: systemPrompt } : {}),
+    };
+
+    const { url, init } = buildRequest(apiKey, payload, abortController.signal);
+    const response = await fetch(url, init);
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({ error: response.statusText }));
@@ -158,18 +195,16 @@ export async function sendBenchmarkMessage(
   let totalTokens = 0;
   let fullText = '';
 
-  const response = await fetch('/api/claude', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model,
-      max_tokens: 1024,
-      temperature: 0,
-      messages: [{ role: 'user', content: prompt }],
-      stream: true,
-      apiKey,
-    }),
-  });
+  const payload: Record<string, unknown> = {
+    model,
+    max_tokens: 1024,
+    temperature: 0,
+    messages: [{ role: 'user', content: prompt }],
+    stream: true,
+  };
+
+  const { url, init } = buildRequest(apiKey, payload, new AbortController().signal);
+  const response = await fetch(url, init);
 
   if (!response.ok) {
     throw new Error(`API error: ${response.status}`);
@@ -210,4 +245,20 @@ export async function sendBenchmarkMessage(
     totalTokens,
     response: fullText,
   };
+}
+
+/**
+ * Test an API connection. Used by onboarding and settings.
+ * Works in both dev (proxy) and production (direct) modes.
+ */
+export async function testConnection(apiKey: string, model: string): Promise<boolean> {
+  const payload: Record<string, unknown> = {
+    model,
+    max_tokens: 10,
+    messages: [{ role: 'user', content: 'Say "connected" in one word.' }],
+  };
+
+  const { url, init } = buildRequest(apiKey, payload, new AbortController().signal);
+  const response = await fetch(url, init);
+  return response.ok;
 }

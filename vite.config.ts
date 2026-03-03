@@ -83,6 +83,7 @@ function claudeProxyPlugin(): Plugin {
 
 export default defineConfig({
   plugins: [react(), claudeProxyPlugin()],
+  base: '/Arcadia/',
   server: {
     port: 5173,
   },
