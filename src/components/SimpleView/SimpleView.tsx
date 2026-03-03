@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm';
 import { useConnection } from '../../store/ConnectionContext';
 import { useChat } from '../../store/ChatContext';
 import { sendMessage } from '../../services/claude';
+import { trackMessage } from '../../services/analytics';
 import type { Message, Artifact, ImageAttachment, ToolUseBlock } from '../../types';
 import styles from './SimpleView.module.css';
 
@@ -493,6 +494,7 @@ export function SimpleView() {
     }
 
     addMessage(convId, userMsg);
+    trackMessage(userMsg, convId);
 
     // Build activity steps
     const steps: ActivityStep[] = [
@@ -552,6 +554,7 @@ export function SimpleView() {
       };
 
       addMessage(convId, assistantMsg);
+      trackMessage(assistantMsg, convId);
       setStep('artifacts', 'done', result.artifacts.length > 0
         ? `${result.artifacts.length} artifact${result.artifacts.length !== 1 ? 's' : ''} ready`
         : 'Done');

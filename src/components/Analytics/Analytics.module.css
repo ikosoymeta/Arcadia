@@ -1,0 +1,714 @@
+/* ─── Analytics Panel ──────────────────────────────────────────────────────── */
+
+.container {
+  height: 100%;
+  overflow-y: auto;
+  padding: 24px 32px 40px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+
+.title {
+  font-size: 22px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.titleIcon {
+  font-size: 24px;
+}
+
+.headerActions {
+  display: flex;
+  gap: 8px;
+}
+
+.exportBtn {
+  padding: 6px 14px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-weight: 500;
+}
+
+.exportBtn:hover {
+  background: var(--accent-dim);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* ─── Tab Navigation ──────────────────────────────────────────────────────── */
+
+.tabs {
+  display: flex;
+  gap: 2px;
+  background: var(--bg-secondary);
+  border-radius: 10px;
+  padding: 3px;
+  margin-bottom: 24px;
+  border: 1px solid var(--border);
+}
+
+.tab {
+  flex: 1;
+  padding: 8px 16px;
+  background: none;
+  border: none;
+  border-radius: 8px;
+  color: var(--text-tertiary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.tab:hover {
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.tabActive {
+  background: var(--accent) !important;
+  color: white !important;
+  font-weight: 600;
+}
+
+/* ─── Metric Cards Grid ───────────────────────────────────────────────────── */
+
+.metricsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.metricCard {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  transition: all 0.2s;
+}
+
+.metricCard:hover {
+  border-color: rgba(99, 102, 241, 0.3);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.metricLabel {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 8px;
+}
+
+.metricValue {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1;
+  margin-bottom: 4px;
+}
+
+.metricSub {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.metricTrend {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-top: 6px;
+}
+
+.trendUp {
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.1);
+}
+
+.trendDown {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.trendNeutral {
+  color: var(--text-tertiary);
+  background: var(--bg-tertiary);
+}
+
+/* ─── Chart Sections ──────────────────────────────────────────────────────── */
+
+.section {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.sectionTitle {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sectionIcon {
+  font-size: 16px;
+}
+
+.periodSelector {
+  display: flex;
+  gap: 2px;
+  background: var(--bg-tertiary);
+  border-radius: 6px;
+  padding: 2px;
+}
+
+.periodBtn {
+  padding: 4px 10px;
+  background: none;
+  border: none;
+  border-radius: 5px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.periodBtn:hover {
+  color: var(--text-secondary);
+}
+
+.periodBtnActive {
+  background: var(--accent);
+  color: white;
+}
+
+/* ─── Bar Chart ───────────────────────────────────────────────────────────── */
+
+.chartArea {
+  height: 200px;
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  padding: 0 4px;
+  position: relative;
+}
+
+.chartBar {
+  flex: 1;
+  min-width: 0;
+  border-radius: 3px 3px 0 0;
+  transition: all 0.3s ease;
+  cursor: pointer;
+  position: relative;
+}
+
+.chartBar:hover {
+  opacity: 0.85;
+  transform: scaleY(1.02);
+  transform-origin: bottom;
+}
+
+.chartBarInput {
+  background: var(--accent);
+}
+
+.chartBarOutput {
+  background: rgba(34, 197, 94, 0.7);
+}
+
+.chartBarTotal {
+  background: linear-gradient(to top, var(--accent), rgba(99, 102, 241, 0.6));
+}
+
+.chartBarRequests {
+  background: linear-gradient(to top, #f59e0b, rgba(245, 158, 11, 0.6));
+}
+
+.chartBarUsers {
+  background: linear-gradient(to top, #8b5cf6, rgba(139, 92, 246, 0.6));
+}
+
+.chartLabels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  padding: 0 4px;
+}
+
+.chartLabel {
+  font-size: 9px;
+  color: var(--text-tertiary);
+  text-align: center;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chartLegend {
+  display: flex;
+  gap: 16px;
+  margin-top: 12px;
+  justify-content: center;
+}
+
+.legendItem {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.legendDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+/* ─── Tooltip ─────────────────────────────────────────────────────────────── */
+
+.tooltip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 11px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  z-index: 100;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+}
+
+.tooltipDate {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.tooltipRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text-secondary);
+}
+
+.tooltipValue {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* ─── Request Types (Horizontal Bars) ─────────────────────────────────────── */
+
+.typesList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.typeRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.typeLabel {
+  width: 160px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.typeBarBg {
+  flex: 1;
+  height: 20px;
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+}
+
+.typeBarFill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.5s ease;
+  min-width: 2px;
+}
+
+.typeCount {
+  width: 50px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.typePercent {
+  width: 40px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  text-align: right;
+  flex-shrink: 0;
+}
+
+/* ─── Popular Prompts Table ───────────────────────────────────────────────── */
+
+.promptsTable {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.promptsTable th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.promptsTable td {
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.promptsTable tr:hover td {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.promptText {
+  max-width: 400px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.categoryBadge {
+  display: inline-block;
+  padding: 2px 8px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.promptCount {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+/* ─── Content Stats ───────────────────────────────────────────────────────── */
+
+.contentGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.contentCard {
+  background: var(--bg-tertiary);
+  border-radius: 10px;
+  padding: 16px;
+}
+
+.contentCardTitle {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 12px;
+}
+
+.artifactRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0;
+  font-size: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.artifactRow:last-child {
+  border-bottom: none;
+}
+
+.artifactType {
+  color: var(--text-secondary);
+}
+
+.artifactCount {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* ─── User Activity Cards ─────────────────────────────────────────────────── */
+
+.activityGrid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.activityCard {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  text-align: center;
+  transition: all 0.2s;
+}
+
+.activityCard:hover {
+  border-color: rgba(99, 102, 241, 0.3);
+}
+
+.activityPeriod {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 8px;
+}
+
+.activityValue {
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1;
+  margin-bottom: 4px;
+}
+
+.activityLabel {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+/* ─── Announcements ───────────────────────────────────────────────────────── */
+
+.announcementsList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.announcement {
+  display: flex;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  transition: all 0.15s;
+  position: relative;
+}
+
+.announcement:hover {
+  border-color: rgba(99, 102, 241, 0.2);
+}
+
+.announcementSeverityHigh {
+  border-left: 3px solid #f59e0b;
+}
+
+.announcementSeverityCritical {
+  border-left: 3px solid #ef4444;
+  background: rgba(239, 68, 68, 0.04);
+}
+
+.announcementSeverityMedium {
+  border-left: 3px solid var(--accent);
+}
+
+.announcementSeverityLow {
+  border-left: 3px solid var(--text-tertiary);
+}
+
+.announcementIcon {
+  font-size: 20px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.announcementBody {
+  flex: 1;
+  min-width: 0;
+}
+
+.announcementTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.announcementMessage {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.announcementMeta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.announcementTime {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.announcementAction {
+  padding: 4px 10px;
+  background: var(--accent-dim);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  border-radius: 6px;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.announcementAction:hover {
+  background: var(--accent);
+  color: white;
+}
+
+.dismissBtn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+
+.dismissBtn:hover {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+}
+
+/* ─── Empty State ─────────────────────────────────────────────────────────── */
+
+.emptyState {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--text-tertiary);
+}
+
+.emptyIcon {
+  font-size: 40px;
+  margin-bottom: 12px;
+}
+
+.emptyTitle {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.emptyDesc {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* ─── Responsive ──────────────────────────────────────────────────────────── */
+
+@media (max-width: 900px) {
+  .container {
+    padding: 16px;
+  }
+
+  .metricsGrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .activityGrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .contentGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .tabs {
+    overflow-x: auto;
+  }
+}
+
+@media (max-width: 600px) {
+  .metricsGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .activityGrid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .typeLabel {
+    width: 100px;
+  }
+}

@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm';
 import { useConnection } from '../../store/ConnectionContext';
 import { useChat } from '../../store/ChatContext';
 import { sendMessage, getApiLogs, clearApiLogs, subscribeToApiLogs } from '../../services/claude';
+import { trackMessage } from '../../services/analytics';
 import type { Message, ApiLogEntry, ImageAttachment, ToolDefinition, ToolUseBlock } from '../../types';
 import { CLAUDE_MODELS } from '../../types';
 import styles from './EngineerView.module.css';
@@ -373,6 +374,7 @@ function EngineerChat() {
     }
 
     addMessage(convId, userMsg);
+    trackMessage(userMsg, convId);
     setStreaming(true);
     setStreamingText('');
     setStreamingReasoning('');
@@ -412,6 +414,7 @@ function EngineerChat() {
       };
 
       addMessage(convId, assistantMsg);
+      trackMessage(assistantMsg, convId);
     } catch (err: unknown) {
       if (err instanceof Error && err.name !== 'AbortError') {
         setError(err.message);

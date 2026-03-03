@@ -7,6 +7,7 @@ import { SimpleView } from './components/SimpleView/SimpleView';
 import { EngineerView } from './components/EngineerView/EngineerView';
 import { ModeSwitcher } from './components/ModeSwitcher/ModeSwitcher';
 import type { ViewMode, InterfaceMode } from './types';
+import { trackSession, trackSessionDuration } from './services/analytics';
 import styles from './App.module.css';
 
 // Lazy-loaded panels for code splitting
@@ -18,6 +19,7 @@ const TeamPanel = lazy(() => import('./components/Team/TeamPanel').then(m => ({ 
 const HelpPanel = lazy(() => import('./components/Help/HelpPanel').then(m => ({ default: m.HelpPanel })));
 const IntegrationsPanel = lazy(() => import('./components/Integrations/IntegrationsPanel').then(m => ({ default: m.IntegrationsPanel })));
 const PreviewPanel = lazy(() => import('./components/Preview/PreviewPanel').then(m => ({ default: m.PreviewPanel })));
+const AnalyticsPanel = lazy(() => import('./components/Analytics/AnalyticsPanel').then(m => ({ default: m.AnalyticsPanel })));
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const PREVIEW_MIN = 200;
@@ -72,6 +74,18 @@ function App() {
   useEffect(() => {
     localStorage.setItem('arcadia-interface-mode', interfaceMode);
   }, [interfaceMode]);
+
+  // Track session on app load
+  useEffect(() => {
+    trackSession();
+    const startTime = Date.now();
+    const handleUnload = () => {
+      const minutes = Math.round((Date.now() - startTime) / 60000);
+      if (minutes > 0) trackSessionDuration(minutes);
+    };
+    window.addEventListener('beforeunload', handleUnload);
+    return () => window.removeEventListener('beforeunload', handleUnload);
+  }, []);
 
   // Listen for navigation events from child components
   useEffect(() => {
@@ -230,6 +244,11 @@ function App() {
               {viewMode === 'integrations' && (
                 <div className={styles.fullWidth}>
                   <Suspense fallback={<LoadingFallback />}><IntegrationsPanel /></Suspense>
+                </div>
+              )}
+              {viewMode === 'analytics' && (
+                <div className={styles.fullWidth}>
+                  <Suspense fallback={<LoadingFallback />}><AnalyticsPanel /></Suspense>
                 </div>
               )}
             </div>
