@@ -29,6 +29,8 @@
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--border);
+  contain: layout style;
+  will-change: contents;
 }
 
 .sidebarPanel > * {
@@ -45,6 +47,7 @@
   position: relative;
   overflow: hidden;
   height: 100vh;
+  contain: layout style;
 }
 
 /* ─── Preview Panel ────────────────────────────────────────────────────────── */
@@ -55,6 +58,7 @@
   display: flex;
   flex-direction: column;
   border-left: 1px solid var(--border);
+  contain: layout style;
 }
 
 .previewPanel > * {
@@ -168,6 +172,8 @@
   flex-shrink: 0;
   width: 100%;
   box-sizing: border-box;
+  height: 44px;
+  min-height: 44px;
 }
 
 .modeHint {
@@ -182,6 +188,7 @@
   min-width: 0;
   overflow: hidden;
   width: 100%;
+  contain: layout style;
 }
 
 .engineerLayout {
@@ -190,6 +197,7 @@
   min-width: 0;
   overflow: hidden;
   width: 100%;
+  contain: layout style;
 }
 
 .fullWidth {

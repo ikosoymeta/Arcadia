@@ -1,9 +1,10 @@
-.container {
+.simpleView {
   display: flex;
   flex-direction: column;
   height: 100%;
   position: relative;
   background: var(--bg-primary);
+  contain: layout style;
 }
 
 /* ─── Drop overlay ─────────────────────────────────────────────────────────── */
@@ -37,6 +38,8 @@
   flex: 1;
   overflow-y: auto;
   padding: 0 0 8px;
+  contain: style;
+  will-change: scroll-position;
 }
 
 .messageList {
@@ -815,6 +818,8 @@
   padding-top: 12px;
   width: 100%;
   box-sizing: border-box;
+  min-height: 80px;
+  contain: layout style;
 }
 
 .imagePreviews {

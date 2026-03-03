@@ -87,4 +87,33 @@ export default defineConfig({
   server: {
     port: 5173,
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          // Split react-markdown and its heavy dependency tree into a separate chunk
+          'markdown-renderer': [
+            'react-markdown',
+            'remark-gfm',
+            'remark-parse',
+            'remark-rehype',
+            'unified',
+          ],
+          // Split React core into its own chunk (cached across deploys)
+          'react-vendor': [
+            'react',
+            'react-dom',
+          ],
+        },
+      },
+    },
+    // Enable CSS code splitting
+    cssCodeSplit: true,
+    // Increase chunk size warning limit
+    chunkSizeWarningLimit: 300,
+    // Minification
+    minify: 'esbuild',
+    // Target modern browsers for smaller output
+    target: 'es2020',
+  },
 })

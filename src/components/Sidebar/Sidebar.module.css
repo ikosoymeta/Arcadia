@@ -8,6 +8,7 @@
   height: 100vh;
   overflow: hidden;
   transition: width 0.2s ease, min-width 0.2s ease;
+  contain: layout style;
 }
 
 .sidebar.collapsed {

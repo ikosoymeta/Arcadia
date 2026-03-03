@@ -1,19 +1,42 @@
 #!/usr/bin/env node
 /**
- * ArcadIA Bridge — Local proxy that connects ArcadIA web app to Claude Code
+ * ArcadIA Bridge v1.2.0 — Local proxy connecting ArcadIA web app to Claude Code
  * 
- * This bridge runs on localhost:8087 and forwards requests from the ArcadIA
- * web app to Claude Code CLI, which handles Meta internal authentication.
+ * Runs on localhost:8087 and forwards requests from the ArcadIA web app
+ * to Claude Code CLI, which handles Meta internal authentication.
  * 
- * Key: Uses `claude -p "prompt"` (not stdin pipe) because Meta's Claude Code
- * requires the -p flag for non-interactive mode.
+ * Uses `claude -p "prompt"` with shell:true to ensure proper PATH resolution.
  */
 
 const http = require('http');
-const { spawn } = require('child_process');
+const { spawn, execSync } = require('child_process');
+const os = require('os');
 
 const PORT = 8087;
 const HOST = '127.0.0.1';
+const VERSION = '1.2.0';
+const TIMEOUT_MS = 120000; // 2 minute timeout per request
+
+// ─── Detect Claude Code path ────────────────────────────────────────────────
+let CLAUDE_PATH = 'claude';
+try {
+  // Try to find the actual path to claude
+  const which = execSync('which claude 2>/dev/null || where claude 2>/dev/null', { encoding: 'utf-8', shell: true }).trim();
+  if (which) {
+    CLAUDE_PATH = which.split('\n')[0].trim();
+    console.log(`  Found Claude Code at: ${CLAUDE_PATH}`);
+  }
+} catch {
+  console.log('  Using default "claude" command from PATH');
+}
+
+// ─── Verify Claude Code works ───────────────────────────────────────────────
+try {
+  const version = execSync(`"${CLAUDE_PATH}" --version 2>&1`, { encoding: 'utf-8', shell: true, timeout: 10000 }).trim();
+  console.log(`  Claude Code version: ${version}`);
+} catch (e) {
+  console.warn(`  ⚠ Could not get Claude Code version: ${e.message}`);
+}
 
 // ─── CORS Headers ────────────────────────────────────────────────────────────
 function setCorsHeaders(res) {
@@ -31,9 +54,10 @@ function handleHealthCheck(res) {
   res.end(JSON.stringify({
     status: 'ok',
     bridge: 'arcadia-bridge',
-    version: '1.1.0',
+    version: VERSION,
     claude_code: true,
     meta_internal: true,
+    claude_path: CLAUDE_PATH,
     timestamp: new Date().toISOString(),
   }));
 }
@@ -82,6 +106,33 @@ function extractText(content) {
   return '';
 }
 
+// ─── Strip Claude Code header lines ─────────────────────────────────────────
+function stripHeader(text) {
+  const lines = text.split('\n');
+  let headerEnd = 0;
+  
+  for (let i = 0; i < Math.min(lines.length, 5); i++) {
+    const line = lines[i];
+    if (
+      line.includes('Claude Code at Meta') ||
+      line.includes('fburl.com') ||
+      line.includes('claude.ai') ||
+      line.includes('╭') || line.includes('╰') ||
+      line.includes('│') ||
+      (line.trim() === '' && i < 3 && headerEnd === i)
+    ) {
+      headerEnd = i + 1;
+    } else {
+      break;
+    }
+  }
+  
+  if (headerEnd > 0) {
+    return lines.slice(headerEnd).join('\n');
+  }
+  return text;
+}
+
 // ─── Send message via Claude Code CLI ────────────────────────────────────────
 function handleMessages(req, res, body) {
   setCorsHeaders(res);
@@ -108,27 +159,56 @@ function handleMessages(req, res, body) {
     return;
   }
 
-  // Use `claude -p "prompt"` — the ONLY way that works at Meta
-  // Do NOT use --print with stdin, it hangs/exits immediately
-  const args = ['-p', fullPrompt, '--output-format', 'text'];
-
-  // Note: --model and --max-tokens may not be supported by Meta's Claude Code
-  // Only add them if they're likely to work
-  // args.push('--model', model);
-
   console.log(`[${new Date().toISOString()}] → Request: model=${model}, tokens=${maxTokens}, stream=${stream}`);
   console.log(`[${new Date().toISOString()}]   Prompt: ${fullPrompt.slice(0, 120)}${fullPrompt.length > 120 ? '...' : ''}`);
 
-  const claude = spawn('claude', args, {
+  // Write prompt to a temp file to avoid shell escaping issues
+  const fs = require('fs');
+  const path = require('path');
+  const tmpFile = path.join(os.tmpdir(), `arcadia-prompt-${Date.now()}.txt`);
+  
+  try {
+    fs.writeFileSync(tmpFile, fullPrompt, 'utf-8');
+  } catch (e) {
+    console.error(`[${new Date().toISOString()}] ✗ Failed to write temp file: ${e.message}`);
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Failed to prepare prompt' }));
+    return;
+  }
+
+  // Use shell:true and pipe the prompt via stdin with cat
+  // This avoids all shell escaping issues with -p flag
+  const shellCmd = `cat "${tmpFile}" | "${CLAUDE_PATH}" -p --output-format text`;
+  
+  console.log(`[${new Date().toISOString()}]   Command: cat <tmpfile> | claude -p --output-format text`);
+
+  const claude = spawn('sh', ['-c', shellCmd], {
     env: { ...process.env },
-    stdio: ['ignore', 'pipe', 'pipe'],  // stdin=ignore (not needed with -p flag)
+    stdio: ['ignore', 'pipe', 'pipe'],
     shell: false,
   });
 
   let output = '';
   let errorOutput = '';
+  let stderrLines = [];
   const startTime = Date.now();
-  let firstChunk = true;
+  let headerStripped = false;
+  let killed = false;
+
+  // Set timeout
+  const timeout = setTimeout(() => {
+    if (!killed) {
+      killed = true;
+      claude.kill('SIGTERM');
+      console.error(`[${new Date().toISOString()}] ✗ Request timed out after ${TIMEOUT_MS / 1000}s`);
+    }
+  }, TIMEOUT_MS);
+
+  // Clean up temp file when done
+  function cleanup() {
+    clearTimeout(timeout);
+    try { fs.unlinkSync(tmpFile); } catch {}
+  }
 
   if (stream) {
     // ─── Streaming mode (SSE) ──────────────────────────────────────────
@@ -165,36 +245,25 @@ function handleMessages(req, res, body) {
     claude.stdout.on('data', (data) => {
       let text = data.toString();
 
-      // Skip the "Claude Code at Meta" header line on first chunk
-      if (firstChunk) {
-        firstChunk = false;
-        const lines = text.split('\n');
-        // Only remove header lines from the very beginning
-        let headerEnd = 0;
-        for (let i = 0; i < Math.min(lines.length, 5); i++) {
-          if (
-            lines[i].includes('Claude Code at Meta') ||
-            lines[i].includes('fburl.com') ||
-            lines[i].includes('claude.ai') ||
-            (lines[i].trim() === '' && i < 3)
-          ) {
-            headerEnd = i + 1;
-          } else {
-            break;
-          }
+      // Strip header from first chunk(s)
+      if (!headerStripped) {
+        output += text;
+        const stripped = stripHeader(output);
+        if (stripped !== output || output.split('\n').length > 5) {
+          headerStripped = true;
+          text = stripped;
+          output = stripped;
+        } else {
+          // Wait for more data to determine if header is complete
+          return;
         }
-        if (headerEnd > 0) {
-          lines.splice(0, headerEnd);
-        }
-        text = lines.join('\n');
-        // Even if text is empty after header removal, don't skip — 
-        // more data chunks will follow
+      } else {
+        output += text;
       }
 
-      if (!text) return; // Skip empty chunks
+      if (!text) return;
 
       totalChars += text.length;
-      output += text;
 
       // Send as content_block_delta
       res.write(`event: content_block_delta\ndata: ${JSON.stringify({
@@ -206,20 +275,40 @@ function handleMessages(req, res, body) {
 
     claude.stderr.on('data', (data) => {
       const errText = data.toString();
-      // Ignore the Meta header from stderr too
+      stderrLines.push(errText);
+      // Log stderr for debugging
       if (!errText.includes('Claude Code at Meta') && !errText.includes('fburl.com')) {
         errorOutput += errText;
+        console.log(`[${new Date().toISOString()}]   stderr: ${errText.trim()}`);
       }
     });
 
-    claude.on('close', (code) => {
+    claude.on('close', (code, signal) => {
+      cleanup();
       const elapsed = Date.now() - startTime;
 
-      if ((code !== 0 && code !== null) && !output) {
+      // If we buffered header data but never sent it, flush now
+      if (!headerStripped && output) {
+        const stripped = stripHeader(output);
+        if (stripped) {
+          totalChars = stripped.length;
+          res.write(`event: content_block_delta\ndata: ${JSON.stringify({
+            type: 'content_block_delta',
+            index: 0,
+            delta: { type: 'text_delta', text: stripped },
+          })}\n\n`);
+        }
+      }
+
+      if (totalChars === 0 && (code !== 0 || errorOutput)) {
+        const errMsg = killed
+          ? `Request timed out after ${TIMEOUT_MS / 1000}s`
+          : `Claude Code exited with code ${code} (signal: ${signal}). ${errorOutput.slice(0, 500)}`;
+        
         res.write(`event: content_block_delta\ndata: ${JSON.stringify({
           type: 'content_block_delta',
           index: 0,
-          delta: { type: 'text_delta', text: `\n\n[Bridge Error: Claude Code exited with code ${code}. ${errorOutput.slice(0, 200)}]` },
+          delta: { type: 'text_delta', text: `\n\n[Bridge Error: ${errMsg}]` },
         })}\n\n`);
       }
 
@@ -239,10 +328,15 @@ function handleMessages(req, res, body) {
       res.write(`event: message_stop\ndata: ${JSON.stringify({ type: 'message_stop' })}\n\n`);
       res.end();
 
-      console.log(`[${new Date().toISOString()}] ← Response: ${totalChars} chars in ${elapsed}ms (code=${code})`);
+      console.log(`[${new Date().toISOString()}] ← Response: ${totalChars} chars in ${elapsed}ms (code=${code}, signal=${signal})`);
+      if (totalChars === 0) {
+        console.log(`[${new Date().toISOString()}]   ⚠ Empty response! stderr: ${stderrLines.join('').slice(0, 500)}`);
+        console.log(`[${new Date().toISOString()}]   ⚠ Raw stdout was: ${output.slice(0, 500)}`);
+      }
     });
 
     claude.on('error', (err) => {
+      cleanup();
       console.error(`[${new Date().toISOString()}] ✗ Spawn error: ${err.message}`);
       res.write(`event: content_block_delta\ndata: ${JSON.stringify({
         type: 'content_block_delta',
@@ -256,72 +350,60 @@ function handleMessages(req, res, body) {
 
     // Handle client disconnect
     req.on('close', () => {
-      claude.kill('SIGTERM');
+      if (!killed) {
+        killed = true;
+        claude.kill('SIGTERM');
+      }
+      cleanup();
     });
 
   } else {
     // ─── Non-streaming mode ────────────────────────────────────────────
     claude.stdout.on('data', (data) => {
-      let text = data.toString();
-
-      // Skip header on first chunk
-      if (firstChunk) {
-        firstChunk = false;
-        const lines = text.split('\n');
-        let headerEnd = 0;
-        for (let i = 0; i < Math.min(lines.length, 5); i++) {
-          if (
-            lines[i].includes('Claude Code at Meta') ||
-            lines[i].includes('fburl.com') ||
-            lines[i].includes('claude.ai') ||
-            (lines[i].trim() === '' && i < 3)
-          ) {
-            headerEnd = i + 1;
-          } else {
-            break;
-          }
-        }
-        if (headerEnd > 0) {
-          lines.splice(0, headerEnd);
-        }
-        text = lines.join('\n');
-      }
-
-      output += text;
+      output += data.toString();
     });
 
     claude.stderr.on('data', (data) => {
       const errText = data.toString();
+      stderrLines.push(errText);
       if (!errText.includes('Claude Code at Meta') && !errText.includes('fburl.com')) {
         errorOutput += errText;
+        console.log(`[${new Date().toISOString()}]   stderr: ${errText.trim()}`);
       }
     });
 
-    claude.on('close', (code) => {
+    claude.on('close', (code, signal) => {
+      cleanup();
       const elapsed = Date.now() - startTime;
 
-      if ((code !== 0 && code !== null) && !output) {
+      // Strip header from accumulated output
+      const strippedOutput = stripHeader(output).trim();
+
+      if ((code !== 0 && code !== null) && !strippedOutput) {
+        const errMsg = killed
+          ? `Request timed out after ${TIMEOUT_MS / 1000}s`
+          : `Claude Code exited with code ${code} (signal: ${signal}): ${errorOutput.slice(0, 500)}`;
+        
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
           error: {
             type: 'bridge_error',
-            message: `Claude Code exited with code ${code}: ${errorOutput.slice(0, 500)}`,
+            message: errMsg,
           },
         }));
-        console.log(`[${new Date().toISOString()}] ✗ Error: code=${code} ${errorOutput.slice(0, 100)}`);
+        console.log(`[${new Date().toISOString()}] ✗ Error: code=${code} signal=${signal} ${errorOutput.slice(0, 100)}`);
         return;
       }
 
-      const trimmedOutput = output.trim();
       const estimatedInputTokens = Math.ceil(fullPrompt.length / 4);
-      const estimatedOutputTokens = Math.ceil(trimmedOutput.length / 4);
+      const estimatedOutputTokens = Math.ceil(strippedOutput.length / 4);
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
         id: `msg_${Date.now()}`,
         type: 'message',
         role: 'assistant',
-        content: [{ type: 'text', text: trimmedOutput }],
+        content: [{ type: 'text', text: strippedOutput || '[No response from Claude Code]' }],
         model: model,
         stop_reason: 'end_turn',
         stop_sequence: null,
@@ -330,10 +412,15 @@ function handleMessages(req, res, body) {
           output_tokens: estimatedOutputTokens,
         },
       }));
-      console.log(`[${new Date().toISOString()}] ← Response: ${trimmedOutput.length} chars in ${elapsed}ms`);
+      console.log(`[${new Date().toISOString()}] ← Response: ${strippedOutput.length} chars in ${elapsed}ms (code=${code})`);
+      if (!strippedOutput) {
+        console.log(`[${new Date().toISOString()}]   ⚠ Empty response! stderr: ${stderrLines.join('').slice(0, 500)}`);
+        console.log(`[${new Date().toISOString()}]   ⚠ Raw stdout was: ${output.slice(0, 500)}`);
+      }
     });
 
     claude.on('error', (err) => {
+      cleanup();
       console.error(`[${new Date().toISOString()}] ✗ Spawn error: ${err.message}`);
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
@@ -376,7 +463,7 @@ server.listen(PORT, HOST, () => {
   console.log('');
   console.log('  ╔══════════════════════════════════════════════════════════╗');
   console.log('  ║                                                          ║');
-  console.log('  ║   ⚡ ArcadIA Bridge v1.1.0                              ║');
+  console.log(`  ║   ⚡ ArcadIA Bridge v${VERSION}                              ║`);
   console.log('  ║                                                          ║');
   console.log(`  ║   Running on http://${HOST}:${PORT}                    ║`);
   console.log('  ║   Forwarding requests to Claude Code (via -p flag)       ║');
@@ -399,10 +486,10 @@ server.on('error', (err) => {
 
 process.on('SIGINT', () => {
   console.log('\n  Bridge stopped.\n');
-  server.close();
   process.exit(0);
 });
+
 process.on('SIGTERM', () => {
-  server.close();
+  console.log('\n  Bridge stopped.\n');
   process.exit(0);
 });

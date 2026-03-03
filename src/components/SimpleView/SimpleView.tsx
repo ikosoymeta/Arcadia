@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, memo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useConnection } from '../../store/ConnectionContext';
@@ -319,7 +319,7 @@ function ArtifactCard({ artifact }: { artifact: Artifact }) {
 
 // ─── Message Bubble ───────────────────────────────────────────────────────────
 
-function MessageBubble({ message }: { message: Message }) {
+const MessageBubble = memo(function MessageBubble({ message }: { message: Message }) {
   const isUser = message.role === 'user';
   const hasArtifacts = message.artifacts && message.artifacts.length > 0;
   const [showThinking, setShowThinking] = useState(false);
@@ -401,7 +401,7 @@ function MessageBubble({ message }: { message: Message }) {
       )}
     </div>
   );
-}
+});
 
 // ─── Activity Feed ────────────────────────────────────────────────────────────
 

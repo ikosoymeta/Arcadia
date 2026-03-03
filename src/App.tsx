@@ -3,8 +3,9 @@ import { ChatProvider } from './store/ChatContext';
 import { ConnectionProvider } from './store/ConnectionContext';
 import { PreviewProvider } from './store/PreviewContext';
 import { Sidebar } from './components/Sidebar/Sidebar';
-import { SimpleView } from './components/SimpleView/SimpleView';
-import { EngineerView } from './components/EngineerView/EngineerView';
+// Lazy-load chat views — only one is shown at a time
+const SimpleView = lazy(() => import('./components/SimpleView/SimpleView').then(m => ({ default: m.SimpleView })));
+const EngineerView = lazy(() => import('./components/EngineerView/EngineerView').then(m => ({ default: m.EngineerView })));
 import { ModeSwitcher } from './components/ModeSwitcher/ModeSwitcher';
 import type { ViewMode, InterfaceMode } from './types';
 import { trackSession, trackSessionDuration } from './services/analytics';
@@ -201,12 +202,16 @@ function App() {
               {/* Chat views */}
               {viewMode === 'chat' && interfaceMode === 'simple' && (
                 <div className={styles.chatLayout}>
-                  <SimpleView />
+                  <Suspense fallback={<LoadingFallback />}>
+                    <SimpleView />
+                  </Suspense>
                 </div>
               )}
               {viewMode === 'chat' && interfaceMode === 'engineer' && (
                 <div className={styles.engineerLayout}>
-                  <EngineerView />
+                  <Suspense fallback={<LoadingFallback />}>
+                    <EngineerView />
+                  </Suspense>
                 </div>
               )}
 
