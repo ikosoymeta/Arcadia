@@ -32,6 +32,7 @@ export async function runBenchmarkSuite(
   apiKey: string,
   model: string,
   onProgress: (completed: number, total: number, current: string) => void,
+  baseUrl?: string,
 ): Promise<BenchmarkSuite> {
   const results: BenchmarkResult[] = [];
   const total = BENCHMARK_PROMPTS.length;
@@ -42,7 +43,7 @@ export async function runBenchmarkSuite(
 
     try {
       const renderStart = performance.now();
-      const result = await sendBenchmarkMessage(bp.prompt, apiKey, model);
+      const result = await sendBenchmarkMessage(bp.prompt, apiKey, model, baseUrl);
       const renderTime = performance.now() - renderStart - result.totalTime;
 
       const br: BenchmarkResult = {

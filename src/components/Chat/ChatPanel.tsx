@@ -172,7 +172,8 @@ export function ChatPanel({ sidebarCollapsed, onExpandSidebar }: ChatPanelProps)
           }
         },
       },
-      systemPrompt || undefined
+      systemPrompt || undefined,
+      activeConnection.baseUrl,
     );
   };
 

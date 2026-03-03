@@ -52,7 +52,7 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
     if (!conn) return false;
 
     try {
-      const success = await testApiConnection(conn.apiKey, conn.model);
+      const success = await testApiConnection(conn.apiKey, conn.model, conn.baseUrl);
       updateConnection(id, { status: success ? 'connected' : 'error', lastUsed: Date.now() });
       return success;
     } catch {

@@ -20,15 +20,34 @@ export function abortStream(): void {
 }
 
 /**
- * Build the fetch request depending on environment:
- * - Development: use Vite proxy at /api/claude (avoids CORS, hides key from browser network tab)
- * - Production (GitHub Pages): call Anthropic API directly with browser-access header
+ * Build the fetch request depending on environment and connection config:
+ * - Custom baseUrl (Meta proxy): call baseUrl/v1/messages directly, no API key header
+ * - Development (no baseUrl): use Vite proxy at /api/claude
+ * - Production (no baseUrl): call Anthropic API directly with browser-access header
  */
 function buildRequest(
   apiKey: string,
   payload: Record<string, unknown>,
   signal: AbortSignal,
+  baseUrl?: string,
 ): { url: string; init: RequestInit } {
+  // Custom endpoint (e.g. Meta LDAR proxy at localhost:8087)
+  if (baseUrl) {
+    const url = baseUrl.replace(/\/+$/, '');
+    return {
+      url: `${url}/v1/messages`,
+      init: {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify(payload),
+        signal,
+      },
+    };
+  }
+
   if (IS_DEV) {
     return {
       url: '/api/claude',
@@ -65,7 +84,8 @@ export async function sendMessage(
   maxTokens: number,
   temperature: number,
   callbacks: StreamCallbacks,
-  systemPrompt?: string
+  systemPrompt?: string,
+  baseUrl?: string,
 ): Promise<void> {
   abortController = new AbortController();
 
@@ -84,7 +104,7 @@ export async function sendMessage(
       ...(systemPrompt ? { system: systemPrompt } : {}),
     };
 
-    const { url, init } = buildRequest(apiKey, payload, abortController.signal);
+    const { url, init } = buildRequest(apiKey, payload, abortController.signal, baseUrl);
     const response = await fetch(url, init);
 
     if (!response.ok) {
@@ -189,6 +209,7 @@ export async function sendBenchmarkMessage(
   prompt: string,
   apiKey: string,
   model: string,
+  baseUrl?: string,
 ): Promise<{ ttft: number; totalTime: number; tokensPerSecond: number; totalTokens: number; response: string }> {
   const startTime = performance.now();
   let firstTokenTime = 0;
@@ -203,7 +224,7 @@ export async function sendBenchmarkMessage(
     stream: true,
   };
 
-  const { url, init } = buildRequest(apiKey, payload, new AbortController().signal);
+  const { url, init } = buildRequest(apiKey, payload, new AbortController().signal, baseUrl);
   const response = await fetch(url, init);
 
   if (!response.ok) {
@@ -251,14 +272,14 @@ export async function sendBenchmarkMessage(
  * Test an API connection. Used by onboarding and settings.
  * Works in both dev (proxy) and production (direct) modes.
  */
-export async function testConnection(apiKey: string, model: string): Promise<boolean> {
+export async function testConnection(apiKey: string, model: string, baseUrl?: string): Promise<boolean> {
   const payload: Record<string, unknown> = {
     model,
     max_tokens: 10,
     messages: [{ role: 'user', content: 'Say "connected" in one word.' }],
   };
 
-  const { url, init } = buildRequest(apiKey, payload, new AbortController().signal);
+  const { url, init } = buildRequest(apiKey, payload, new AbortController().signal, baseUrl);
   const response = await fetch(url, init);
   return response.ok;
 }

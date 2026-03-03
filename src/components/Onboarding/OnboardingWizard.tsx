@@ -14,21 +14,37 @@ const MODELS = [
   { value: 'claude-haiku-35-20241022', name: 'Haiku 3.5', desc: 'Fastest responses, simple tasks', badge: 'fast', badgeClass: 'fast' },
 ];
 
+const DEFAULT_PROXY_URL = 'http://localhost:8087';
 const TOTAL_STEPS = 4;
+
+type ConnectionType = 'proxy' | 'apikey';
 
 export function OnboardingWizard({ onComplete }: OnboardingProps) {
   const [step, setStep] = useState(0);
-  const [connectionLabel, setConnectionLabel] = useState('My API Key');
+  const [connectionType, setConnectionType] = useState<ConnectionType>('proxy');
+  const [connectionLabel, setConnectionLabel] = useState('Meta Proxy');
   const [apiKey, setApiKey] = useState('');
+  const [baseUrl, setBaseUrl] = useState(DEFAULT_PROXY_URL);
   const [model, setModel] = useState('claude-sonnet-4-20250514');
   const [testState, setTestState] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
   const [apiKeyError, setApiKeyError] = useState('');
   const { addConnection } = useConnection();
   const { createConversation } = useChat();
 
+  const handleConnectionTypeChange = (type: ConnectionType) => {
+    setConnectionType(type);
+    setConnectionLabel(type === 'proxy' ? 'Meta Proxy' : 'My API Key');
+    setTestState('idle');
+    setApiKeyError('');
+  };
+
   const handleTestConnection = useCallback(async () => {
-    if (!apiKey.trim()) {
+    if (connectionType === 'apikey' && !apiKey.trim()) {
       setApiKeyError('Please enter your API key');
+      return;
+    }
+    if (connectionType === 'proxy' && !baseUrl.trim()) {
+      setApiKeyError('Please enter the proxy URL');
       return;
     }
 
@@ -36,31 +52,41 @@ export function OnboardingWizard({ onComplete }: OnboardingProps) {
     setApiKeyError('');
 
     try {
-      const ok = await testConnection(apiKey.trim(), model);
+      const ok = await testConnection(
+        connectionType === 'apikey' ? apiKey.trim() : '',
+        model,
+        connectionType === 'proxy' ? baseUrl.trim() : undefined,
+      );
       setTestState(ok ? 'success' : 'error');
-      if (!ok) setApiKeyError('Connection failed. Please check your API key.');
+      if (!ok) {
+        setApiKeyError(
+          connectionType === 'proxy'
+            ? 'Connection failed. Make sure LDAR is running (wait ~5-10 min after reboot).'
+            : 'Connection failed. Please check your API key.',
+        );
+      }
     } catch {
       setTestState('error');
-      setApiKeyError('Network error. Please check your connection and try again.');
+      setApiKeyError(
+        connectionType === 'proxy'
+          ? 'Cannot reach proxy. Ensure LDAR is running at ' + baseUrl
+          : 'Network error. Please check your connection and try again.',
+      );
     }
-  }, [apiKey, model]);
+  }, [apiKey, model, connectionType, baseUrl]);
 
   const handleFinish = () => {
-    // Save the connection
     addConnection({
-      label: connectionLabel || 'My API Key',
-      apiKey: apiKey.trim(),
+      label: connectionLabel || (connectionType === 'proxy' ? 'Meta Proxy' : 'My API Key'),
+      apiKey: connectionType === 'apikey' ? apiKey.trim() : '',
       model,
       maxTokens: 4096,
       temperature: 0.7,
+      baseUrl: connectionType === 'proxy' ? baseUrl.trim() : undefined,
     });
 
-    // Mark onboarding as complete
     localStorage.setItem('arcadia-onboarding-complete', 'true');
-
-    // Create first conversation
     createConversation(model);
-
     onComplete();
   };
 
@@ -70,7 +96,10 @@ export function OnboardingWizard({ onComplete }: OnboardingProps) {
   };
 
   const canProceed = () => {
-    if (step === 2) return apiKey.trim().length > 0;
+    if (step === 2) {
+      if (connectionType === 'proxy') return baseUrl.trim().length > 0;
+      return apiKey.trim().length > 0;
+    }
     return true;
   };
 
@@ -108,28 +137,28 @@ export function OnboardingWizard({ onComplete }: OnboardingProps) {
               </div>
               <div className={styles.featureList}>
                 <div className={styles.featureItem}>
-                  <span className={styles.featureIcon}>💬</span>
+                  <span className={styles.featureIcon}>&#x1F4AC;</span>
                   <div className={styles.featureText}>
                     <div className={styles.featureTitle}>Chat with Claude</div>
                     <div className={styles.featureDesc}>Natural conversation with real-time streaming responses</div>
                   </div>
                 </div>
                 <div className={styles.featureItem}>
-                  <span className={styles.featureIcon}>◎</span>
+                  <span className={styles.featureIcon}>&#x25CE;</span>
                   <div className={styles.featureText}>
                     <div className={styles.featureTitle}>Live Preview</div>
                     <div className={styles.featureDesc}>See code, HTML, and markdown rendered as Claude writes</div>
                   </div>
                 </div>
                 <div className={styles.featureItem}>
-                  <span className={styles.featureIcon}>⌨</span>
+                  <span className={styles.featureIcon}>&#x2328;</span>
                   <div className={styles.featureText}>
                     <div className={styles.featureTitle}>Code Workspace</div>
                     <div className={styles.featureDesc}>VS Code-like editor with terminal, debugger, and file explorer</div>
                   </div>
                 </div>
                 <div className={styles.featureItem}>
-                  <span className={styles.featureIcon}>👥</span>
+                  <span className={styles.featureIcon}>&#x1F465;</span>
                   <div className={styles.featureText}>
                     <div className={styles.featureTitle}>Team Collaboration</div>
                     <div className={styles.featureDesc}>Share conversations, build skill libraries, work with AI agents</div>
@@ -142,7 +171,7 @@ export function OnboardingWizard({ onComplete }: OnboardingProps) {
           {/* Step 1: Choose Model */}
           {step === 1 && (
             <>
-              <div className={styles.stepIcon}>🤖</div>
+              <div className={styles.stepIcon}>&#x1F916;</div>
               <div className={styles.stepTitle}>Choose Your Model</div>
               <div className={styles.stepSubtitle}>
                 Pick a Claude model. You can change this later for each conversation.
@@ -165,14 +194,33 @@ export function OnboardingWizard({ onComplete }: OnboardingProps) {
             </>
           )}
 
-          {/* Step 2: API Key */}
+          {/* Step 2: Connection Setup */}
           {step === 2 && (
             <>
-              <div className={styles.stepIcon}>🔑</div>
-              <div className={styles.stepTitle}>Connect Your API Key</div>
+              <div className={styles.stepIcon}>&#x1F50C;</div>
+              <div className={styles.stepTitle}>Connect to Claude</div>
               <div className={styles.stepSubtitle}>
-                Enter your Anthropic API key to start chatting with Claude.
-                Your key is stored only in your browser — never sent to any server except Anthropic.
+                Choose how to connect. Meta employees can use the internal LDAR proxy — no API key needed.
+              </div>
+
+              {/* Connection type toggle */}
+              <div className={styles.modelGrid}>
+                <div
+                  className={`${styles.modelCard} ${connectionType === 'proxy' ? styles.selected : ''}`}
+                  onClick={() => handleConnectionTypeChange('proxy')}
+                >
+                  <div className={styles.modelName}>Meta Proxy</div>
+                  <div className={styles.modelDesc}>Uses LDAR on your devserver. No API key required.</div>
+                  <span className={`${styles.modelBadge} ${styles.recommended}`}>recommended</span>
+                </div>
+                <div
+                  className={`${styles.modelCard} ${connectionType === 'apikey' ? styles.selected : ''}`}
+                  onClick={() => handleConnectionTypeChange('apikey')}
+                >
+                  <div className={styles.modelName}>API Key</div>
+                  <div className={styles.modelDesc}>Use your own Anthropic API key directly.</div>
+                  <span className={`${styles.modelBadge} ${styles.fast}`}>external</span>
+                </div>
               </div>
 
               <div className={styles.field}>
@@ -181,25 +229,41 @@ export function OnboardingWizard({ onComplete }: OnboardingProps) {
                   className={styles.input}
                   value={connectionLabel}
                   onChange={e => setConnectionLabel(e.target.value)}
-                  placeholder="My API Key"
+                  placeholder={connectionType === 'proxy' ? 'Meta Proxy' : 'My API Key'}
                 />
               </div>
 
-              <div className={styles.field}>
-                <label className={styles.label}>API Key</label>
-                <input
-                  className={styles.input}
-                  type="password"
-                  value={apiKey}
-                  onChange={e => { setApiKey(e.target.value); setTestState('idle'); setApiKeyError(''); }}
-                  placeholder="sk-ant-api03-..."
-                  autoFocus
-                />
-                {apiKeyError && <div className={styles.inputError}>{apiKeyError}</div>}
-                <div className={styles.inputHint}>
-                  Get your key from console.anthropic.com → API Keys
+              {connectionType === 'proxy' ? (
+                <div className={styles.field}>
+                  <label className={styles.label}>Proxy URL</label>
+                  <input
+                    className={styles.input}
+                    value={baseUrl}
+                    onChange={e => { setBaseUrl(e.target.value); setTestState('idle'); setApiKeyError(''); }}
+                    placeholder="http://localhost:8087"
+                  />
+                  <div className={styles.inputHint}>
+                    LDAR auto-starts on devservers. Wait ~5-10 min after reboot for it to be ready.
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div className={styles.field}>
+                  <label className={styles.label}>API Key</label>
+                  <input
+                    className={styles.input}
+                    type="password"
+                    value={apiKey}
+                    onChange={e => { setApiKey(e.target.value); setTestState('idle'); setApiKeyError(''); }}
+                    placeholder="sk-ant-api03-..."
+                    autoFocus
+                  />
+                  <div className={styles.inputHint}>
+                    Get your key from console.anthropic.com
+                  </div>
+                </div>
+              )}
+
+              {apiKeyError && <div className={styles.inputError}>{apiKeyError}</div>}
 
               {testState === 'testing' && (
                 <div className={`${styles.testStatus} ${styles.testing}`}>
@@ -210,13 +274,13 @@ export function OnboardingWizard({ onComplete }: OnboardingProps) {
 
               {testState === 'success' && (
                 <div className={`${styles.testStatus} ${styles.success}`}>
-                  ✓ Connected successfully! Your API key works.
+                  &#x2713; Connected successfully!
                 </div>
               )}
 
               {testState === 'error' && (
                 <div className={`${styles.testStatus} ${styles.error}`}>
-                  ✗ {apiKeyError || 'Connection failed'}
+                  &#x2717; {apiKeyError || 'Connection failed'}
                 </div>
               )}
             </>
@@ -225,14 +289,14 @@ export function OnboardingWizard({ onComplete }: OnboardingProps) {
           {/* Step 3: Ready to go */}
           {step === 3 && (
             <>
-              <div className={styles.stepIcon}>🚀</div>
+              <div className={styles.stepIcon}>&#x1F680;</div>
               <div className={styles.stepTitle}>You're All Set!</div>
               <div className={styles.stepSubtitle}>
-                Here's how to make the most of ArcadIA. Click any tip below when you're ready.
+                Here's how to make the most of ArcadIA.
               </div>
 
               <div className={styles.tipCard}>
-                <div className={styles.tipIcon}>💬</div>
+                <div className={styles.tipIcon}>&#x1F4AC;</div>
                 <div className={styles.tipText}>
                   <div className={styles.tipTitle}>Start a conversation</div>
                   <div className={styles.tipDesc}>Click "+ New Chat" or use a quick action on the welcome screen</div>
@@ -240,7 +304,7 @@ export function OnboardingWizard({ onComplete }: OnboardingProps) {
               </div>
 
               <div className={styles.tipCard}>
-                <div className={styles.tipIcon}>📁</div>
+                <div className={styles.tipIcon}>&#x1F4C1;</div>
                 <div className={styles.tipText}>
                   <div className={styles.tipTitle}>Organize with folders</div>
                   <div className={styles.tipDesc}>Create folders in the sidebar to group related conversations</div>
@@ -248,7 +312,7 @@ export function OnboardingWizard({ onComplete }: OnboardingProps) {
               </div>
 
               <div className={styles.tipCard}>
-                <div className={styles.tipIcon}>📌</div>
+                <div className={styles.tipIcon}>&#x1F4CC;</div>
                 <div className={styles.tipText}>
                   <div className={styles.tipTitle}>Pin important chats</div>
                   <div className={styles.tipDesc}>Right-click a conversation to pin, rename, share, or change visibility</div>
@@ -256,7 +320,7 @@ export function OnboardingWizard({ onComplete }: OnboardingProps) {
               </div>
 
               <div className={styles.tipCard}>
-                <div className={styles.tipIcon}>⚡</div>
+                <div className={styles.tipIcon}>&#x26A1;</div>
                 <div className={styles.tipText}>
                   <div className={styles.tipTitle}>Build reusable skills</div>
                   <div className={styles.tipDesc}>Save your best prompts as skills for quick reuse across projects</div>

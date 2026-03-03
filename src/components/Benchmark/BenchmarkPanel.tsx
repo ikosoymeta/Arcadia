@@ -23,6 +23,7 @@ export function BenchmarkPanel() {
         activeConnection.apiKey,
         activeConnection.model,
         (completed, total, current) => setProgress({ completed, total, current }),
+        activeConnection.baseUrl,
       );
       setLatestSuite(suite);
       const all = storage.getBenchmarks();

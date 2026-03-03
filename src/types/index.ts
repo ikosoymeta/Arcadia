@@ -129,6 +129,7 @@ export interface Connection {
   isActive: boolean;
   status: 'connected' | 'disconnected' | 'error';
   lastUsed?: number;
+  baseUrl?: string;
 }
 
 export interface BenchmarkResult {
