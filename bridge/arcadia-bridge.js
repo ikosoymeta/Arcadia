@@ -5,16 +5,8 @@
  * This bridge runs on localhost:8087 and forwards requests from the ArcadIA
  * web app to Claude Code CLI, which handles Meta internal authentication.
  * 
- * Usage:
- *   node arcadia-bridge.js
- *   # or
- *   npx arcadia-bridge
- * 
- * The bridge:
- *   1. Listens on localhost:8087
- *   2. Receives Anthropic API-compatible requests from the browser
- *   3. Pipes them through `claude` CLI (which handles Meta auth)
- *   4. Returns responses with CORS headers for browser compatibility
+ * Key: Uses `claude -p "prompt"` (not stdin pipe) because Meta's Claude Code
+ * requires the -p flag for non-interactive mode.
  */
 
 const http = require('http');
@@ -39,11 +31,55 @@ function handleHealthCheck(res) {
   res.end(JSON.stringify({
     status: 'ok',
     bridge: 'arcadia-bridge',
-    version: '1.0.0',
+    version: '1.1.0',
     claude_code: true,
     meta_internal: true,
     timestamp: new Date().toISOString(),
   }));
+}
+
+// ─── Build prompt text from messages array ──────────────────────────────────
+function buildPrompt(messages, systemPrompt) {
+  let parts = [];
+
+  if (systemPrompt) {
+    parts.push(`[System Instructions: ${systemPrompt}]`);
+  }
+
+  // For multi-turn, include conversation history
+  if (messages.length > 1) {
+    const history = messages.slice(0, -1);
+    for (const m of history) {
+      const role = m.role === 'user' ? 'Human' : 'Assistant';
+      const text = extractText(m.content);
+      if (text) parts.push(`${role}: ${text}`);
+    }
+  }
+
+  // Add the last user message
+  const lastUserMsg = messages.filter(m => m.role === 'user').pop();
+  if (!lastUserMsg) return null;
+
+  const userText = extractText(lastUserMsg.content);
+  if (messages.length > 1) {
+    parts.push(`Human: ${userText}`);
+  } else {
+    parts.push(userText);
+  }
+
+  return parts.join('\n\n');
+}
+
+// ─── Extract text from message content (string or array) ────────────────────
+function extractText(content) {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .filter(c => c.type === 'text')
+      .map(c => c.text)
+      .join('\n');
+  }
+  return '';
 }
 
 // ─── Send message via Claude Code CLI ────────────────────────────────────────
@@ -65,68 +101,34 @@ function handleMessages(req, res, body) {
   const systemPrompt = payload.system || '';
   const stream = payload.stream === true;
 
-  // Build the prompt from messages
-  let prompt = '';
-  if (systemPrompt) {
-    prompt += `[System: ${systemPrompt}]\n\n`;
-  }
-  // Get the last user message for Claude CLI
-  const lastUserMsg = messages.filter(m => m.role === 'user').pop();
-  if (!lastUserMsg) {
+  const fullPrompt = buildPrompt(messages, systemPrompt);
+  if (!fullPrompt) {
     res.writeHead(400, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'No user message found' }));
     return;
   }
 
-  // Extract text content (handle both string and array content)
-  let userText = '';
-  if (typeof lastUserMsg.content === 'string') {
-    userText = lastUserMsg.content;
-  } else if (Array.isArray(lastUserMsg.content)) {
-    userText = lastUserMsg.content
-      .filter(c => c.type === 'text')
-      .map(c => c.text)
-      .join('\n');
-  }
+  // Use `claude -p "prompt"` — the ONLY way that works at Meta
+  // Do NOT use --print with stdin, it hangs/exits immediately
+  const args = ['-p', fullPrompt, '--output-format', 'text'];
 
-  // Build conversation context for multi-turn
-  let contextPrefix = '';
-  if (messages.length > 1) {
-    const history = messages.slice(0, -1);
-    contextPrefix = history.map(m => {
-      const role = m.role === 'user' ? 'Human' : 'Assistant';
-      const text = typeof m.content === 'string' ? m.content :
-        Array.isArray(m.content) ? m.content.filter(c => c.type === 'text').map(c => c.text).join('\n') : '';
-      return `${role}: ${text}`;
-    }).join('\n\n') + '\n\nHuman: ';
-  }
-
-  const fullPrompt = contextPrefix + userText;
-
-  // Spawn claude CLI with --print flag (outputs response only, no interactive UI)
-  const args = ['--print', '--model', model];
-  if (maxTokens) {
-    args.push('--max-tokens', String(maxTokens));
-  }
-  if (systemPrompt) {
-    args.push('--system-prompt', systemPrompt);
-  }
+  // Note: --model and --max-tokens may not be supported by Meta's Claude Code
+  // Only add them if they're likely to work
+  // args.push('--model', model);
 
   console.log(`[${new Date().toISOString()}] → Request: model=${model}, tokens=${maxTokens}, stream=${stream}`);
-  console.log(`[${new Date().toISOString()}]   Prompt: ${userText.slice(0, 100)}${userText.length > 100 ? '...' : ''}`);
+  console.log(`[${new Date().toISOString()}]   Prompt: ${fullPrompt.slice(0, 120)}${fullPrompt.length > 120 ? '...' : ''}`);
 
   const claude = spawn('claude', args, {
     env: { ...process.env },
-    stdio: ['pipe', 'pipe', 'pipe'],
+    stdio: ['ignore', 'pipe', 'pipe'],  // stdin=ignore (not needed with -p flag)
+    shell: false,
   });
-
-  // Send the prompt via stdin
-  claude.stdin.write(fullPrompt);
-  claude.stdin.end();
 
   let output = '';
   let errorOutput = '';
   const startTime = Date.now();
+  let firstChunk = true;
 
   if (stream) {
     // ─── Streaming mode (SSE) ──────────────────────────────────────────
@@ -137,10 +139,11 @@ function handleMessages(req, res, body) {
     });
 
     // Send message_start event
-    const msgStartEvent = {
+    const msgId = `msg_${Date.now()}`;
+    res.write(`event: message_start\ndata: ${JSON.stringify({
       type: 'message_start',
       message: {
-        id: `msg_${Date.now()}`,
+        id: msgId,
         type: 'message',
         role: 'assistant',
         content: [],
@@ -148,49 +151,70 @@ function handleMessages(req, res, body) {
         stop_reason: null,
         usage: { input_tokens: 0, output_tokens: 0 },
       },
-    };
-    res.write(`event: message_start\ndata: ${JSON.stringify(msgStartEvent)}\n\n`);
+    })}\n\n`);
 
     // Send content_block_start
-    res.write(`event: content_block_start\ndata: ${JSON.stringify({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } })}\n\n`);
+    res.write(`event: content_block_start\ndata: ${JSON.stringify({
+      type: 'content_block_start',
+      index: 0,
+      content_block: { type: 'text', text: '' },
+    })}\n\n`);
 
-    let chunkBuffer = '';
     let totalChars = 0;
 
     claude.stdout.on('data', (data) => {
-      const text = data.toString();
-      chunkBuffer += text;
-      totalChars += text.length;
+      let text = data.toString();
 
-      // Send as content_block_delta events
-      const delta = {
+      // Skip the "Claude Code at Meta" header line on first chunk
+      if (firstChunk) {
+        firstChunk = false;
+        const lines = text.split('\n');
+        // Remove header lines (e.g. "Claude Code at Meta (https://...)")
+        while (lines.length > 0 && (
+          lines[0].includes('Claude Code at Meta') ||
+          lines[0].includes('fburl.com') ||
+          lines[0].trim() === ''
+        )) {
+          lines.shift();
+        }
+        text = lines.join('\n');
+        if (!text) return; // All was header, skip
+      }
+
+      totalChars += text.length;
+      output += text;
+
+      // Send as content_block_delta
+      res.write(`event: content_block_delta\ndata: ${JSON.stringify({
         type: 'content_block_delta',
         index: 0,
         delta: { type: 'text_delta', text: text },
-      };
-      res.write(`event: content_block_delta\ndata: ${JSON.stringify(delta)}\n\n`);
+      })}\n\n`);
     });
 
     claude.stderr.on('data', (data) => {
-      errorOutput += data.toString();
+      const errText = data.toString();
+      // Ignore the Meta header from stderr too
+      if (!errText.includes('Claude Code at Meta') && !errText.includes('fburl.com')) {
+        errorOutput += errText;
+      }
     });
 
     claude.on('close', (code) => {
       const elapsed = Date.now() - startTime;
-      if (code !== 0 && !chunkBuffer) {
-        // Error — send as a delta so the user sees it
-        const errDelta = {
+
+      if ((code !== 0 && code !== null) && !output) {
+        res.write(`event: content_block_delta\ndata: ${JSON.stringify({
           type: 'content_block_delta',
           index: 0,
           delta: { type: 'text_delta', text: `\n\n[Bridge Error: Claude Code exited with code ${code}. ${errorOutput.slice(0, 200)}]` },
-        };
-        res.write(`event: content_block_delta\ndata: ${JSON.stringify(errDelta)}\n\n`);
+        })}\n\n`);
       }
 
       // Send content_block_stop
       res.write(`event: content_block_stop\ndata: ${JSON.stringify({ type: 'content_block_stop', index: 0 })}\n\n`);
 
-      // Send message_delta with stop reason and usage
+      // Send message_delta with usage
       const estimatedInputTokens = Math.ceil(fullPrompt.length / 4);
       const estimatedOutputTokens = Math.ceil(totalChars / 4);
       res.write(`event: message_delta\ndata: ${JSON.stringify({
@@ -206,6 +230,18 @@ function handleMessages(req, res, body) {
       console.log(`[${new Date().toISOString()}] ← Response: ${totalChars} chars in ${elapsed}ms (code=${code})`);
     });
 
+    claude.on('error', (err) => {
+      console.error(`[${new Date().toISOString()}] ✗ Spawn error: ${err.message}`);
+      res.write(`event: content_block_delta\ndata: ${JSON.stringify({
+        type: 'content_block_delta',
+        index: 0,
+        delta: { type: 'text_delta', text: `\n\n[Bridge Error: Could not start Claude Code. Is it installed? Error: ${err.message}]` },
+      })}\n\n`);
+      res.write(`event: content_block_stop\ndata: ${JSON.stringify({ type: 'content_block_stop', index: 0 })}\n\n`);
+      res.write(`event: message_stop\ndata: ${JSON.stringify({ type: 'message_stop' })}\n\n`);
+      res.end();
+    });
+
     // Handle client disconnect
     req.on('close', () => {
       claude.kill('SIGTERM');
@@ -214,17 +250,36 @@ function handleMessages(req, res, body) {
   } else {
     // ─── Non-streaming mode ────────────────────────────────────────────
     claude.stdout.on('data', (data) => {
-      output += data.toString();
+      let text = data.toString();
+
+      // Skip header on first chunk
+      if (firstChunk) {
+        firstChunk = false;
+        const lines = text.split('\n');
+        while (lines.length > 0 && (
+          lines[0].includes('Claude Code at Meta') ||
+          lines[0].includes('fburl.com') ||
+          lines[0].trim() === ''
+        )) {
+          lines.shift();
+        }
+        text = lines.join('\n');
+      }
+
+      output += text;
     });
 
     claude.stderr.on('data', (data) => {
-      errorOutput += data.toString();
+      const errText = data.toString();
+      if (!errText.includes('Claude Code at Meta') && !errText.includes('fburl.com')) {
+        errorOutput += errText;
+      }
     });
 
     claude.on('close', (code) => {
       const elapsed = Date.now() - startTime;
 
-      if (code !== 0 && !output) {
+      if ((code !== 0 && code !== null) && !output) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
           error: {
@@ -236,14 +291,16 @@ function handleMessages(req, res, body) {
         return;
       }
 
+      const trimmedOutput = output.trim();
       const estimatedInputTokens = Math.ceil(fullPrompt.length / 4);
-      const estimatedOutputTokens = Math.ceil(output.length / 4);
+      const estimatedOutputTokens = Math.ceil(trimmedOutput.length / 4);
 
-      const response = {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
         id: `msg_${Date.now()}`,
         type: 'message',
         role: 'assistant',
-        content: [{ type: 'text', text: output.trim() }],
+        content: [{ type: 'text', text: trimmedOutput }],
         model: model,
         stop_reason: 'end_turn',
         stop_sequence: null,
@@ -251,18 +308,25 @@ function handleMessages(req, res, body) {
           input_tokens: estimatedInputTokens,
           output_tokens: estimatedOutputTokens,
         },
-      };
+      }));
+      console.log(`[${new Date().toISOString()}] ← Response: ${trimmedOutput.length} chars in ${elapsed}ms`);
+    });
 
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(response));
-      console.log(`[${new Date().toISOString()}] ← Response: ${output.length} chars in ${elapsed}ms`);
+    claude.on('error', (err) => {
+      console.error(`[${new Date().toISOString()}] ✗ Spawn error: ${err.message}`);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        error: {
+          type: 'bridge_error',
+          message: `Could not start Claude Code: ${err.message}`,
+        },
+      }));
     });
   }
 }
 
 // ─── HTTP Server ─────────────────────────────────────────────────────────────
 const server = http.createServer((req, res) => {
-  // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     setCorsHeaders(res);
     res.writeHead(204);
@@ -270,13 +334,11 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // Health check
   if (req.method === 'GET' && (req.url === '/' || req.url === '/health')) {
     handleHealthCheck(res);
     return;
   }
 
-  // Messages endpoint (Anthropic API compatible)
   if (req.method === 'POST' && req.url === '/v1/messages') {
     let body = '';
     req.on('data', chunk => { body += chunk; });
@@ -284,7 +346,6 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // 404
   setCorsHeaders(res);
   res.writeHead(404, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ error: 'Not found. Use POST /v1/messages' }));
@@ -294,16 +355,13 @@ server.listen(PORT, HOST, () => {
   console.log('');
   console.log('  ╔══════════════════════════════════════════════════════════╗');
   console.log('  ║                                                          ║');
-  console.log('  ║   ⚡ ArcadIA Bridge v1.0.0                              ║');
+  console.log('  ║   ⚡ ArcadIA Bridge v1.1.0                              ║');
   console.log('  ║                                                          ║');
   console.log(`  ║   Running on http://${HOST}:${PORT}                    ║`);
-  console.log('  ║   Forwarding requests to Claude Code CLI                 ║');
+  console.log('  ║   Forwarding requests to Claude Code (via -p flag)       ║');
   console.log('  ║   Auth: Meta internal (via meta@Meta plugin)             ║');
   console.log('  ║                                                          ║');
   console.log('  ║   Open ArcadIA: https://ikosoymeta.github.io/Arcadia/    ║');
-  console.log('  ║   The app will auto-connect to this bridge.              ║');
-  console.log('  ║                                                          ║');
-  console.log('  ║   Press Ctrl+C to stop                                   ║');
   console.log('  ║                                                          ║');
   console.log('  ╚══════════════════════════════════════════════════════════╝');
   console.log('');
@@ -318,7 +376,6 @@ server.on('error', (err) => {
   process.exit(1);
 });
 
-// Graceful shutdown
 process.on('SIGINT', () => {
   console.log('\n  Bridge stopped.\n');
   server.close();
