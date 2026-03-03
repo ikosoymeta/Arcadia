@@ -1,0 +1,76 @@
+import{b as V,r as c,j as e,R}from"./index-KjACqlrH.js";const O="_workspace_17m7f_1",z="_toolbar_17m7f_9",L="_toolBtn_17m7f_19",M="_active_17m7f_35",G="_toolSep_17m7f_40",U="_toolTitle_17m7f_47",Q="_body_17m7f_54",q="_explorer_17m7f_61",J="_collapsed_17m7f_71",X="_explorerHeader_17m7f_77",Y="_explorerTree_17m7f_90",Z="_treeItem_17m7f_96",ee="_treeIcon_17m7f_121",te="_treeName_17m7f_129",se="_editorArea_17m7f_137",ne="_editorTabs_17m7f_144",ae="_editorTab_17m7f_144",le="_tabClose_17m7f_176",ie="_editorContent_17m7f_193",re="_lineNumbers_17m7f_202",ce="_codeContent_17m7f_214",oe="_emptyEditor_17m7f_223",de="_shortcutGrid_17m7f_234",me="_shortcutKey_17m7f_241",ue="_shortcutDesc_17m7f_250",pe="_terminal_17m7f_255",he="_terminalHeader_17m7f_263",xe="_terminalTitle_17m7f_272",_e="_terminalTabs_17m7f_279",ge="_terminalTabBtn_17m7f_285",je="_terminalToggle_17m7f_300",fe="_terminalBody_17m7f_309",be="_terminalEntry_17m7f_319",Ne="_terminalPrompt_17m7f_323",ye="_terminalCmd_17m7f_327",ve="_terminalOutput_17m7f_331",Te="_error_17m7f_336",ke="_terminalInputLine_17m7f_340",Se="_terminalInput_17m7f_340",De="_resizeHandle_17m7f_358",Ie="_debugPanel_17m7f_370",Ce="_debugSection_17m7f_386",Ee="_debugSectionTitle_17m7f_390",Ae="_debugItem_17m7f_402",Be="_debugKey_17m7f_416",we="_debugValue_17m7f_421",$e="_watchInput_17m7f_427",Fe="_breakpointDot_17m7f_439",Ke="_aiDock_17m7f_448",Pe="_aiDockHeader_17m7f_464",He="_aiDockTitle_17m7f_472",We="_aiDockBody_17m7f_478",Ve="_aiDockInput_17m7f_487",Re="_aiDockTextarea_17m7f_494",Oe="_aiDockSend_17m7f_508",t={workspace:O,toolbar:z,toolBtn:L,active:M,toolSep:G,toolTitle:U,body:Q,explorer:q,collapsed:J,explorerHeader:X,explorerTree:Y,treeItem:Z,treeIcon:ee,treeName:te,editorArea:se,editorTabs:ne,editorTab:ae,tabClose:le,editorContent:ie,lineNumbers:re,codeContent:ce,emptyEditor:oe,shortcutGrid:de,shortcutKey:me,shortcutDesc:ue,terminal:pe,terminalHeader:he,terminalTitle:xe,terminalTabs:_e,terminalTabBtn:ge,terminalToggle:je,terminalBody:fe,terminalEntry:be,terminalPrompt:Ne,terminalCmd:ye,terminalOutput:ve,error:Te,terminalInputLine:ke,terminalInput:Se,resizeHandle:De,debugPanel:Ie,debugSection:Ce,debugSectionTitle:Ee,debugItem:Ae,debugKey:Be,debugValue:we,watchInput:$e,breakpointDot:Fe,aiDock:Ke,aiDockHeader:Pe,aiDockTitle:He,aiDockBody:We,aiDockInput:Ve,aiDockTextarea:Re,aiDockSend:Oe};function ze(i){const p=[];for(const d of i){const m=d.name.split("/");let o=p;for(let u=0;u<m.length;u++){const x=m[u],_=u===m.length-1,a=o.find(r=>r.name===x);if(a&&!_)o=a.children||[];else if(_)o.push({name:x,path:d.name,type:"file",content:d.content,language:d.language});else{const r={name:x,path:m.slice(0,u+1).join("/"),type:"directory",children:[]};o.push(r),o=r.children}}}return p}const Le=[{name:"src/index.tsx",content:`import React from 'react';
+import ReactDOM from 'react-dom/client';
+import App from './App';
+
+ReactDOM.createRoot(
+  document.getElementById('root')!
+).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);`,language:"typescript"},{name:"src/App.tsx",content:`import React, { useState } from 'react';
+
+export default function App() {
+  const [count, setCount] = useState(0);
+
+  return (
+    <div className="app">
+      <h1>Hello World</h1>
+      <p>Count: {count}</p>
+      <button onClick={() => setCount(c => c + 1)}>
+        Increment
+      </button>
+    </div>
+  );
+}`,language:"typescript"},{name:"src/utils/helpers.ts",content:`export function formatDate(date: Date): string {
+  return date.toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  });
+}
+
+export function debounce<T extends (...args: any[]) => void>(
+  fn: T,
+  delay: number
+): T {
+  let timer: ReturnType<typeof setTimeout>;
+  return ((...args: any[]) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), delay);
+  }) as T;
+}`,language:"typescript"},{name:"package.json",content:`{
+  "name": "my-project",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "test": "vitest"
+  }
+}`,language:"json"},{name:"README.md",content:`# My Project
+
+A sample project demonstrating the Code Workspace.
+
+## Features
+- File explorer with tree view
+- Integrated terminal
+- Debug panel with variables & breakpoints
+- AI assistant dock
+
+## Getting Started
+\`\`\`bash
+npm install
+npm run dev
+\`\`\``,language:"markdown"}];function Qe({onNavigateHome:i}){const{artifacts:p}=V(),[d,m]=c.useState(!1),[o,u]=c.useState(!0),[x]=c.useState(200),[_,a]=c.useState(!0),[r,h]=c.useState(null),[f,k]=c.useState([]),[y,v]=c.useState(""),[A,S]=c.useState([{id:"1",command:'echo "Welcome to Claude Editor Terminal"',output:"Welcome to Claude Editor Terminal",timestamp:Date.now(),status:"success"}]),[D,I]=c.useState(!1),[B,w]=c.useState(["state.count","props.data"]),[$]=c.useState([{file:"src/App.tsx",line:5},{file:"src/utils/helpers.ts",line:3}]),b=c.useRef(null),N=[...Le,...p.filter(s=>s.type==="code").map((s,n)=>({name:s.filename||`artifacts/${s.language||"code"}_${n+1}.${Ge(s.language)}`,content:s.content,language:s.language||"text"}))],F=ze(N),K=s=>N.find(n=>n.name===s),C=s=>{h(s),f.includes(s)||k(n=>[...n,s])},P=(s,n)=>{if(n.stopPropagation(),k(l=>l.filter(g=>g!==s)),r===s){const l=f.filter(g=>g!==s);h(l.length>0?l[l.length-1]:null)}},H=s=>{if(s.key!=="Enter"||!y.trim())return;const n=y.trim();let l="",g="success";if(n==="ls")l=N.map(j=>j.name).join(`
+`);else if(n==="pwd")l="/workspace/my-project";else if(n.startsWith("cat ")){const j=N.find(W=>W.name===n.slice(4).trim());l=j?j.content:`cat: ${n.slice(4)}: No such file or directory`,j||(g="error")}else if(n==="help")l="Available commands: ls, pwd, cat <file>, clear, help, npm run dev, git status";else if(n==="clear"){S([]),v("");return}else n==="npm run dev"?l=`  VITE v5.0.0  ready in 156 ms
+
+  -> Local:   http://localhost:5173/
+  -> Network: http://192.168.1.100:5173/`:n==="git status"?l=`On branch main
+nothing to commit, working tree clean`:n==="npm test"?l=` PASS  src/App.test.tsx
+  App
+    ✓ renders heading (23ms)
+    ✓ increments counter (45ms)
+
+Test Suites: 1 passed, 1 total
+Tests:       2 passed, 2 total`:(l=`zsh: command not found: ${n.split(" ")[0]}`,g="error");S(j=>[...j,{id:crypto.randomUUID(),command:n,output:l,timestamp:Date.now(),status:g}]),v(""),setTimeout(()=>{b.current&&(b.current.scrollTop=b.current.scrollHeight)},50)},T=r?K(r):null;return e.jsxs("div",{className:t.workspace,children:[e.jsxs("div",{className:t.toolbar,children:[e.jsx("button",{className:`${t.toolBtn} ${d?"":t.active}`,onClick:()=>m(s=>!s),title:"Toggle Explorer",children:"☰ Explorer"}),e.jsx("button",{className:`${t.toolBtn} ${_?t.active:""}`,onClick:()=>a(s=>!s),title:"Toggle Terminal",children:"⌘ Terminal"}),e.jsx("button",{className:`${t.toolBtn} ${o?"":t.active}`,onClick:()=>u(s=>!s),title:"Toggle Debug",children:"⚡ Debug"}),e.jsx("div",{className:t.toolSep}),e.jsx("button",{className:`${t.toolBtn} ${D?t.active:""}`,onClick:()=>I(s=>!s),title:"AI Assistant",children:"✦ AI Assist"}),e.jsx("div",{className:t.toolTitle,children:"Claude Code Workspace"}),i&&e.jsx("button",{className:t.toolBtn,onClick:i,title:"Back to Chat",children:"← Home"}),e.jsx("button",{className:t.toolBtn,title:"Split Editor",children:"⫽"}),e.jsx("button",{className:t.toolBtn,title:"Search",children:"🔍"}),e.jsx("button",{className:t.toolBtn,title:"Git",children:"⎇"})]}),e.jsxs("div",{className:t.body,children:[e.jsxs("div",{className:`${t.explorer} ${d?t.collapsed:""}`,children:[e.jsxs("div",{className:t.explorerHeader,children:[e.jsx("span",{children:"Explorer"}),e.jsx("button",{className:t.toolBtn,style:{padding:"2px 6px",fontSize:"14px"},children:"+"})]}),e.jsx("div",{className:t.explorerTree,children:e.jsx(E,{nodes:F,activeFile:r,onSelect:C,depth:0})})]}),e.jsxs("div",{className:t.editorArea,children:[f.length>0&&e.jsx("div",{className:t.editorTabs,children:f.map(s=>{const n=s.split("/").pop()||s;return e.jsxs("button",{className:`${t.editorTab} ${s===r?t.active:""}`,onClick:()=>h(s),children:[n,e.jsx("span",{className:t.tabClose,onClick:l=>P(s,l),children:"×"})]},s)})}),T?e.jsxs("div",{className:t.editorContent,children:[e.jsx("div",{className:t.lineNumbers,children:T.content.split(`
+`).map((s,n)=>e.jsx("div",{children:n+1},n))}),e.jsx("div",{className:t.codeContent,children:T.content})]}):e.jsxs("div",{className:t.emptyEditor,children:[e.jsx("div",{style:{fontSize:"32px",opacity:.3},children:"⌨"}),e.jsx("div",{style:{fontWeight:600,color:"var(--text-secondary)"},children:"Claude Code Workspace"}),e.jsx("div",{children:"Open a file from the explorer or use keyboard shortcuts"}),e.jsxs("div",{className:t.shortcutGrid,children:[e.jsx("span",{className:t.shortcutKey,children:"⌘P"}),e.jsx("span",{className:t.shortcutDesc,children:"Quick Open File"}),e.jsx("span",{className:t.shortcutKey,children:"⌘⇧P"}),e.jsx("span",{className:t.shortcutDesc,children:"Command Palette"}),e.jsx("span",{className:t.shortcutKey,children:"⌘B"}),e.jsx("span",{className:t.shortcutDesc,children:"Toggle Sidebar"}),e.jsx("span",{className:t.shortcutKey,children:"⌘`"}),e.jsx("span",{className:t.shortcutDesc,children:"Toggle Terminal"}),e.jsx("span",{className:t.shortcutKey,children:"⌘⇧E"}),e.jsx("span",{className:t.shortcutDesc,children:"Focus Explorer"}),e.jsx("span",{className:t.shortcutKey,children:"⌘I"}),e.jsx("span",{className:t.shortcutDesc,children:"AI Assistant"})]})]}),_&&e.jsxs("div",{className:t.terminal,style:{height:x},children:[e.jsx("div",{className:t.resizeHandle}),e.jsxs("div",{className:t.terminalHeader,children:[e.jsx("span",{className:t.terminalTitle,children:"Terminal"}),e.jsxs("div",{className:t.terminalTabs,children:[e.jsx("button",{className:`${t.terminalTabBtn} ${t.active}`,children:"zsh"}),e.jsx("button",{className:t.terminalTabBtn,children:"+"})]}),e.jsx("button",{className:t.terminalToggle,onClick:()=>a(!1),children:"×"})]}),e.jsxs("div",{className:t.terminalBody,ref:b,children:[A.map(s=>e.jsxs("div",{className:t.terminalEntry,children:[e.jsxs("div",{children:[e.jsx("span",{className:t.terminalPrompt,children:"~/project $ "}),e.jsx("span",{className:t.terminalCmd,children:s.command})]}),e.jsx("div",{className:`${t.terminalOutput} ${s.status==="error"?t.error:""}`,children:s.output})]},s.id)),e.jsxs("div",{className:t.terminalInputLine,children:[e.jsx("span",{className:t.terminalPrompt,children:"~/project $ "}),e.jsx("input",{className:t.terminalInput,value:y,onChange:s=>v(s.target.value),onKeyDown:H,autoFocus:!0})]})]})]})]}),e.jsxs("div",{className:`${t.debugPanel} ${o?t.collapsed:""}`,children:[e.jsxs("div",{className:t.debugSection,children:[e.jsx("div",{className:t.debugSectionTitle,children:"Variables"}),e.jsxs("div",{className:t.debugItem,children:[e.jsx("span",{className:t.debugKey,children:"count"}),e.jsx("span",{className:t.debugValue,children:"0"})]}),e.jsxs("div",{className:t.debugItem,children:[e.jsx("span",{className:t.debugKey,children:"isLoading"}),e.jsx("span",{className:t.debugValue,children:"false"})]}),e.jsxs("div",{className:t.debugItem,children:[e.jsx("span",{className:t.debugKey,children:"data"}),e.jsx("span",{className:t.debugValue,children:"{ items: [...] }"})]})]}),e.jsxs("div",{className:t.debugSection,children:[e.jsxs("div",{className:t.debugSectionTitle,children:["Watch",e.jsx("button",{className:t.toolBtn,style:{padding:"1px 6px",fontSize:"12px"},children:"+"})]}),B.map((s,n)=>e.jsxs("div",{className:t.debugItem,children:[e.jsx("span",{className:t.debugValue,children:s}),e.jsx("span",{style:{color:"var(--text-tertiary)",fontSize:"11px"},children:"= undefined"})]},n)),e.jsx("input",{className:t.watchInput,placeholder:"Add watch expression...",onKeyDown:s=>{s.key==="Enter"&&s.target.value&&(w(n=>[...n,s.target.value]),s.target.value="")}})]}),e.jsxs("div",{className:t.debugSection,children:[e.jsx("div",{className:t.debugSectionTitle,children:"Breakpoints"}),$.map((s,n)=>e.jsxs("div",{className:t.debugItem,style:{cursor:"pointer"},onClick:()=>C(s.file),children:[e.jsx("span",{className:t.breakpointDot}),e.jsxs("span",{className:t.debugValue,children:[s.file,":",s.line]})]},n))]}),e.jsxs("div",{className:t.debugSection,children:[e.jsx("div",{className:t.debugSectionTitle,children:"Call Stack"}),e.jsx("div",{className:t.debugItem,children:e.jsx("span",{className:t.debugValue,style:{color:"var(--text-tertiary)"},children:"No active debug session"})})]}),e.jsxs("div",{className:t.debugSection,children:[e.jsxs("div",{className:t.debugSectionTitle,children:["Performance",e.jsx("button",{className:t.toolBtn,style:{padding:"1px 6px",fontSize:"12px"},children:"▶"})]}),e.jsxs("div",{className:t.debugItem,children:[e.jsx("span",{className:t.debugKey,children:"Render"}),e.jsx("span",{className:t.debugValue,children:"2.3ms"})]}),e.jsxs("div",{className:t.debugItem,children:[e.jsx("span",{className:t.debugKey,children:"Memory"}),e.jsx("span",{className:t.debugValue,children:"12.4 MB"})]}),e.jsxs("div",{className:t.debugItem,children:[e.jsx("span",{className:t.debugKey,children:"FPS"}),e.jsx("span",{className:t.debugValue,children:"60"})]})]})]})]}),D&&e.jsxs("div",{className:t.aiDock,children:[e.jsxs("div",{className:t.aiDockHeader,children:[e.jsx("span",{className:t.aiDockTitle,children:"AI Assistant"}),e.jsx("button",{className:t.toolBtn,onClick:()=>I(!1),children:"×"})]}),e.jsxs("div",{className:t.aiDockBody,children:["Ask Claude about your code, get explanations, generate tests, refactor, or debug issues.",e.jsx("br",{}),e.jsx("br",{}),e.jsx("strong",{children:"Try:"}),e.jsxs("ul",{style:{paddingLeft:"16px",margin:"8px 0"},children:[e.jsx("li",{children:'"Explain this function"'}),e.jsx("li",{children:'"Write tests for App.tsx"'}),e.jsx("li",{children:'"Find potential bugs"'}),e.jsx("li",{children:'"Refactor with better types"'}),e.jsx("li",{children:'"Generate API documentation"'})]})]}),e.jsxs("div",{className:t.aiDockInput,children:[e.jsx("input",{className:t.aiDockTextarea,placeholder:"Ask about your code..."}),e.jsx("button",{className:t.aiDockSend,children:"↑"})]})]})]})}function E({nodes:i,activeFile:p,onSelect:d,depth:m}){const[o,u]=c.useState(new Set(["src","src/utils"])),x=a=>{u(r=>{const h=new Set(r);return h.has(a)?h.delete(a):h.add(a),h})},_=[...i].sort((a,r)=>a.type!==r.type?a.type==="directory"?-1:1:a.name.localeCompare(r.name));return e.jsx(e.Fragment,{children:_.map(a=>e.jsxs(R.Fragment,{children:[e.jsxs("div",{className:`${t.treeItem} ${a.path===p?t.active:""}`,style:{paddingLeft:8+m*16},onClick:()=>{a.type==="directory"?x(a.path):d(a.path)},children:[e.jsx("span",{className:t.treeIcon,children:a.type==="directory"?o.has(a.path)?"▾":"▸":Me(a.name)}),e.jsx("span",{className:t.treeName,children:a.name})]}),a.type==="directory"&&o.has(a.path)&&a.children&&e.jsx(E,{nodes:a.children,activeFile:p,onSelect:d,depth:m+1})]},a.path))})}function Me(i){return i.endsWith(".tsx")||i.endsWith(".ts")?"⊡":i.endsWith(".json")?"{ }":i.endsWith(".md")?"◈":i.endsWith(".css")?"#":i.endsWith(".html")?"◇":"○"}function Ge(i){return{typescript:"ts",javascript:"js",python:"py",html:"html",css:"css",json:"json",rust:"rs",go:"go",java:"java"}[i||""]||"txt"}export{Qe as CodeWorkspace};
