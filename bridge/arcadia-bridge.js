@@ -5,9 +5,12 @@
  * Runs on localhost:8087 and forwards requests from the ArcadIA web app
  * to Claude Code CLI, which handles Meta internal authentication.
  * 
- * v3.0.0 improvements:
+ * v3.1.0:
+ * - Removed auth token requirement (CORS is sufficient for localhost security)
+ * - Fixed keepalive variable scoping crash in non-streaming/auto-fix paths
+ *
+ * v3.0.0:
  * - Security: CORS restricted to localhost + GitHub Pages origin
- * - Security: Random auth token generated on startup, validated on every request
  * - Security: Command allowlist for /v1/validate endpoint
  * - Structured messages: Preserves conversation context with role markers
  * - Better prompt building: Includes system prompt, conversation history
@@ -359,6 +362,7 @@ function handleMessages(req, res, body) {
   let killed = false;
   let responseFinished = false;
   let firstTokenReceived = false;
+  let keepalive = null; // SSE keepalive interval (set in streaming mode)
 
   // Set timeout
   const timeout = setTimeout(() => {
@@ -372,7 +376,7 @@ function handleMessages(req, res, body) {
   // Clean up on done
   function cleanup() {
     clearTimeout(timeout);
-    clearInterval(keepalive);
+    if (keepalive) clearInterval(keepalive);
     activeRequests--;
   }
 
@@ -410,7 +414,7 @@ function handleMessages(req, res, body) {
     let totalChars = 0;
 
     // ─── SSE Keepalive ───────────────────────────────────────────────
-    const keepalive = setInterval(() => {
+    keepalive = setInterval(() => {
       if (!responseFinished && !killed) {
         try {
           const elapsed = ((Date.now() - startTime) / 1000).toFixed(0);
@@ -564,7 +568,6 @@ function handleMessages(req, res, body) {
 
   } else {
     // ─── Non-streaming mode ──────────────────────────────────────────
-    const keepalive = null;
 
     claude.stdout.on('data', (data) => {
       output += data.toString();
