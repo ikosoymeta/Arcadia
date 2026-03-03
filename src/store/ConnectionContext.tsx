@@ -16,13 +16,17 @@ interface ConnectionContextType {
 const ConnectionContext = createContext<ConnectionContextType | null>(null);
 
 export function ConnectionProvider({ children }: { children: React.ReactNode }) {
-  const [connections, setConnections] = useState<Connection[]>(() => storage.getConnections());
+  const [connections, setConnections] = useState<Connection[]>(() => {
+    const stored = storage.getConnections();
+    // Filter out any legacy Meta proxy connections that point to localhost:8087
+    return stored.filter(c => !c.baseUrl?.includes('localhost:8087'));
+  });
 
   useEffect(() => {
     storage.saveConnections(connections);
   }, [connections]);
 
-  const activeConnection = connections.find(c => c.isActive) || null;
+  const activeConnection = connections.find(c => c.isActive) ?? null;
 
   const addConnection = useCallback((conn: Omit<Connection, 'id' | 'status' | 'isActive'>) => {
     const newConn: Connection = {
@@ -31,7 +35,14 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
       status: 'disconnected',
       isActive: connections.length === 0,
     };
-    setConnections(prev => [...prev, newConn]);
+    setConnections(prev => {
+      // If this is the first connection, make it active
+      if (prev.length === 0) {
+        storage.setActiveConnectionId(newConn.id);
+        return [{ ...newConn, isActive: true }];
+      }
+      return [...prev, newConn];
+    });
   }, [connections.length]);
 
   const updateConnection = useCallback((id: string, updates: Partial<Connection>) => {
@@ -39,7 +50,15 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
   }, []);
 
   const deleteConnection = useCallback((id: string) => {
-    setConnections(prev => prev.filter(c => c.id !== id));
+    setConnections(prev => {
+      const remaining = prev.filter(c => c.id !== id);
+      // If deleted was active, activate the first remaining
+      if (prev.find(c => c.id === id)?.isActive && remaining.length > 0) {
+        remaining[0].isActive = true;
+        storage.setActiveConnectionId(remaining[0].id);
+      }
+      return remaining;
+    });
   }, []);
 
   const setActiveConnection = useCallback((id: string) => {
@@ -52,7 +71,7 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
     if (!conn) return false;
 
     try {
-      const success = await testApiConnection(conn.apiKey, conn.model, conn.baseUrl);
+      const success = await testApiConnection(conn.apiKey, conn.model);
       updateConnection(id, { status: success ? 'connected' : 'error', lastUsed: Date.now() });
       return success;
     } catch {

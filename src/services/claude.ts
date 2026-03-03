@@ -1,332 +1,419 @@
-import type { Artifact, Message } from '../types';
+import type { Connection, Message, Artifact, ApiLogEntry, ToolDefinition, ContentBlock } from '../types';
 
-interface StreamCallbacks {
-  onToken: (text: string) => void;
-  onArtifact: (artifact: Artifact) => void;
-  onComplete: (message: Message) => void;
-  onError: (error: string) => void;
+// ─── API Log Store (in-memory, for engineer console) ─────────────────────────
+
+const apiLogs: ApiLogEntry[] = [];
+const logListeners: Array<(logs: ApiLogEntry[]) => void> = [];
+
+export function getApiLogs(): ApiLogEntry[] {
+  return [...apiLogs];
 }
 
-let abortController: AbortController | null = null;
-
-const IS_DEV = import.meta.env.DEV;
-const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
-
-// Detect if running on Meta internal infrastructure
-const IS_META_INTERNAL = typeof window !== 'undefined' && (
-  window.location.hostname.includes('.intern.facebook.com') ||
-  window.location.hostname.includes('.internalfb.com') ||
-  window.location.hostname.includes('.thefacebook.com')
-);
-
-export function abortStream(): void {
-  if (abortController) {
-    abortController.abort();
-    abortController = null;
-  }
+export function clearApiLogs(): void {
+  apiLogs.length = 0;
+  notifyLogListeners();
 }
 
-/**
- * Build the fetch request depending on environment and connection config:
- * - Custom baseUrl (Meta proxy): call baseUrl/v1/messages directly, no API key header
- * - Development (no baseUrl): use Vite proxy at /api/claude
- * - Production (no baseUrl): call Anthropic API directly with browser-access header
- */
-function buildRequest(
-  apiKey: string,
-  payload: Record<string, unknown>,
-  signal: AbortSignal,
-  baseUrl?: string,
-): { url: string; init: RequestInit } {
-  // Custom endpoint (e.g. Meta LDAR proxy at localhost:8087)
-  if (baseUrl) {
-    const url = baseUrl.replace(/\/+$/, '');
-    return {
-      url: `${url}/v1/messages`,
-      init: {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify(payload),
-        signal,
-      },
-    };
-  }
-
-  // Meta internal deployment: use co-located proxy (no API key needed)
-  if (IS_META_INTERNAL) {
-    return {
-      url: '/v1/messages',
-      init: {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify(payload),
-        signal,
-      },
-    };
-  }
-
-  if (IS_DEV) {
-    return {
-      url: '/api/claude',
-      init: {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...payload, apiKey }),
-        signal,
-      },
-    };
-  }
-
-  // Production: direct Anthropic API call
-  return {
-    url: ANTHROPIC_API_URL,
-    init: {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true',
-      },
-      body: JSON.stringify(payload),
-      signal,
-    },
+export function subscribeToApiLogs(fn: (logs: ApiLogEntry[]) => void): () => void {
+  logListeners.push(fn);
+  return () => {
+    const i = logListeners.indexOf(fn);
+    if (i >= 0) logListeners.splice(i, 1);
   };
 }
 
-export async function sendMessage(
-  messages: { role: 'user' | 'assistant'; content: string }[],
-  apiKey: string,
-  model: string,
-  maxTokens: number,
-  temperature: number,
-  callbacks: StreamCallbacks,
-  systemPrompt?: string,
-  baseUrl?: string,
-): Promise<void> {
-  abortController = new AbortController();
-
-  const startTime = performance.now();
-  let firstTokenTime = 0;
-  let fullText = '';
-  let totalTokens = 0;
-
-  try {
-    const payload: Record<string, unknown> = {
-      model,
-      max_tokens: maxTokens,
-      temperature,
-      messages,
-      stream: true,
-      ...(systemPrompt ? { system: systemPrompt } : {}),
-    };
-
-    const { url, init } = buildRequest(apiKey, payload, abortController.signal, baseUrl);
-    const response = await fetch(url, init);
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ error: response.statusText }));
-      throw new Error(errorData.error?.message || errorData.error || `API error: ${response.status}`);
-    }
-
-    const reader = response.body?.getReader();
-    if (!reader) throw new Error('No response stream');
-
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || ''; // keep last (potentially incomplete) line
-
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        const data = line.slice(6);
-        if (data === '[DONE]') continue;
-
-        try {
-          const event = JSON.parse(data);
-
-          if (event.type === 'content_block_delta' && event.delta?.text) {
-            if (!firstTokenTime) firstTokenTime = performance.now();
-            fullText += event.delta.text;
-            totalTokens++;
-            callbacks.onToken(event.delta.text);
-          }
-
-          if (event.type === 'message_delta' && event.usage) {
-            totalTokens = event.usage.output_tokens || totalTokens;
-          }
-        } catch {
-          // skip non-JSON lines
-        }
-      }
-    }
-
-    // Extract artifacts from the full text
-    const artifacts = extractArtifacts(fullText);
-    artifacts.forEach(a => callbacks.onArtifact(a));
-
-    const endTime = performance.now();
-    const message: Message = {
-      id: crypto.randomUUID(),
-      role: 'assistant',
-      content: fullText,
-      timestamp: Date.now(),
-      tokens: totalTokens,
-      artifacts,
-    };
-
-    // Attach performance metrics
-    (message as any)._perf = {
-      ttft: firstTokenTime ? firstTokenTime - startTime : 0,
-      totalTime: endTime - startTime,
-      tokensPerSecond: totalTokens / ((endTime - startTime) / 1000),
-    };
-
-    callbacks.onComplete(message);
-  } catch (err: any) {
-    if (err.name === 'AbortError') return;
-    // Provide actionable error messages
-    if (err.message === 'Failed to fetch' || err.name === 'TypeError') {
-      if (baseUrl) {
-        callbacks.onError(
-          `Cannot reach ${baseUrl}. ` +
-          (baseUrl.includes('localhost:8087')
-            ? 'Make sure LDAR is running on your devserver, or switch to API Key mode in Settings.'
-            : 'Check that the proxy URL is correct in Settings.'),
-        );
-      } else if (!apiKey) {
-        callbacks.onError('No API key configured. Go to Settings to add one.');
-      } else {
-        callbacks.onError('Network error. Check your internet connection and try again.');
-      }
-    } else {
-      callbacks.onError(err.message || 'Unknown error');
-    }
-  }
+function addLog(entry: Omit<ApiLogEntry, 'id' | 'timestamp'>): void {
+  const log: ApiLogEntry = {
+    id: crypto.randomUUID(),
+    timestamp: Date.now(),
+    ...entry,
+  };
+  apiLogs.unshift(log);
+  if (apiLogs.length > 200) apiLogs.splice(200);
+  notifyLogListeners();
 }
 
-function extractArtifacts(text: string): Artifact[] {
+function notifyLogListeners(): void {
+  const snapshot = [...apiLogs];
+  logListeners.forEach(fn => fn(snapshot));
+}
+
+// ─── Build Request ────────────────────────────────────────────────────────────
+
+function buildEndpoint(conn: Connection): string {
+  if (conn.baseUrl) return `${conn.baseUrl}/v1/messages`;
+  if (import.meta.env.DEV) return '/api/claude';
+  return 'https://api.anthropic.com/v1/messages';
+}
+
+function buildHeaders(conn: Connection): Record<string, string> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'anthropic-version': '2023-06-01',
+  };
+  if (conn.baseUrl) {
+    // Proxy mode — no API key in headers
+  } else if (import.meta.env.DEV) {
+    // Dev proxy handles key injection
+  } else {
+    headers['x-api-key'] = conn.apiKey;
+    headers['anthropic-dangerous-direct-browser-access'] = 'true';
+  }
+  return headers;
+}
+
+// ─── Message Conversion ───────────────────────────────────────────────────────
+
+interface ApiMessage {
+  role: 'user' | 'assistant';
+  content: string | ContentBlock[];
+}
+
+function convertMessages(messages: Message[]): ApiMessage[] {
+  return messages.map(m => {
+    if (m.contentBlocks && m.contentBlocks.length > 0) {
+      return { role: m.role, content: m.contentBlocks };
+    }
+    return { role: m.role, content: m.content };
+  });
+}
+
+// ─── Artifact Extraction ──────────────────────────────────────────────────────
+
+export function extractArtifacts(text: string): Artifact[] {
   const artifacts: Artifact[] = [];
   const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g;
   let match;
-
   while ((match = codeBlockRegex.exec(text)) !== null) {
     const language = match[1] || 'text';
     const content = match[2].trim();
-
-    const isHtml = language === 'html' && (
-      content.includes('<html') ||
-      content.includes('<!DOCTYPE') ||
-      content.includes('<body') ||
-      (content.includes('<div') && content.includes('<style'))
-    );
-
+    if (!content) continue;
+    const type = language === 'html' ? 'html' : language === 'markdown' || language === 'md' ? 'markdown' : 'code';
     artifacts.push({
       id: crypto.randomUUID(),
-      type: isHtml ? 'html' : 'code',
+      type,
       language,
       content,
-      title: `${language} snippet`,
+      title: language === 'html' ? 'HTML Preview' : `${language.charAt(0).toUpperCase() + language.slice(1)} Code`,
     });
   }
-
   return artifacts;
 }
 
-// Direct API call for benchmarking (non-streaming)
+// ─── Send Message (streaming) ─────────────────────────────────────────────────
+
+export interface SendMessageOptions {
+  connection: Connection;
+  messages: Message[];
+  systemPrompt?: string;
+  tools?: ToolDefinition[];
+  onToken: (text: string) => void;
+  onThinking?: (text: string) => void;
+  onToolCall?: (toolCall: { name: string; input: Record<string, unknown> }) => void;
+  onLog?: (entry: ApiLogEntry) => void;
+  signal?: AbortSignal;
+}
+
+export interface SendMessageResult {
+  content: string;
+  thinkingText?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  artifacts: Artifact[];
+  ttft?: number;
+  totalTime?: number;
+  tokensPerSecond?: number;
+  toolCalls?: Array<{ id: string; name: string; input: Record<string, unknown> }>;
+}
+
+export async function sendMessage(opts: SendMessageOptions): Promise<SendMessageResult> {
+  const { connection, messages, systemPrompt, tools, onToken, onThinking, onToolCall, signal } = opts;
+
+  const endpoint = buildEndpoint(connection);
+  const headers = buildHeaders(connection);
+
+  const apiMessages = convertMessages(messages);
+
+  // Build request body
+  const body: Record<string, unknown> = {
+    model: connection.model,
+    max_tokens: connection.maxTokens ?? 4096,
+    messages: apiMessages,
+    stream: true,
+  };
+
+  if (connection.apiKey && import.meta.env.DEV) {
+    (body as Record<string, unknown>).apiKey = connection.apiKey;
+  }
+
+  if (systemPrompt) {
+    body.system = systemPrompt;
+  }
+
+  if (tools && tools.length > 0) {
+    body.tools = tools;
+  }
+
+  // Extended thinking
+  if (connection.enableThinking) {
+    body.thinking = {
+      type: 'enabled',
+      budget_tokens: connection.thinkingBudget ?? 10000,
+    };
+    // Thinking requires temperature=1
+    body.temperature = 1;
+  } else {
+    body.temperature = connection.temperature ?? 0.7;
+  }
+
+  // Log request
+  addLog({
+    direction: 'request',
+    data: { ...body, messages: `[${apiMessages.length} messages]` },
+    model: connection.model,
+    label: `POST ${endpoint}`,
+  });
+
+  const startTime = performance.now();
+  let ttft: number | undefined;
+
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    let errorMsg: string;
+    try {
+      const errorJson = JSON.parse(errorText);
+      errorMsg = errorJson.error?.message ?? errorText;
+    } catch {
+      errorMsg = errorText;
+    }
+    addLog({ direction: 'error', data: { status: response.status, error: errorMsg }, model: connection.model });
+    throw new Error(`Claude API error ${response.status}: ${errorMsg}`);
+  }
+
+  // Stream SSE
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let fullText = '';
+  let thinkingText = '';
+  let inputTokens: number | undefined;
+  let outputTokens: number | undefined;
+  const toolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }> = [];
+  let currentToolId = '';
+  let currentToolName = '';
+  let currentToolInputStr = '';
+  // Track thinking block state (used for future tool-use interleaving)
+  let _inThinkingBlock = false; void _inThinkingBlock;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const data = line.slice(6).trim();
+      if (data === '[DONE]') continue;
+
+      let event: Record<string, unknown>;
+      try {
+        event = JSON.parse(data);
+      } catch {
+        continue;
+      }
+
+      const type = event.type as string;
+
+      if (type === 'content_block_start') {
+        const block = event.content_block as Record<string, unknown>;
+        if (block?.type === 'thinking') {
+          _inThinkingBlock = true;
+        } else if (block?.type === 'tool_use') {
+          currentToolId = block.id as string;
+          currentToolName = block.name as string;
+          currentToolInputStr = '';
+          _inThinkingBlock = false;
+        } else {
+          _inThinkingBlock = false;
+        }
+      }
+
+      if (type === 'content_block_delta') {
+        const delta = event.delta as Record<string, unknown>;
+        if (!delta) continue;
+
+        if (delta.type === 'thinking_delta') {
+          const chunk = delta.thinking as string ?? '';
+          thinkingText += chunk;
+          if (onThinking) onThinking(chunk);
+          addLog({ direction: 'thinking', data: chunk, label: 'thinking_delta' });
+        } else if (delta.type === 'text_delta') {
+          const chunk = delta.text as string ?? '';
+          if (ttft === undefined) {
+            ttft = performance.now() - startTime;
+          }
+          fullText += chunk;
+          onToken(chunk);
+        } else if (delta.type === 'input_json_delta') {
+          currentToolInputStr += delta.partial_json as string ?? '';
+        }
+      }
+
+      if (type === 'content_block_stop') {
+        if (currentToolName) {
+          let toolInput: Record<string, unknown> = {};
+          try { toolInput = JSON.parse(currentToolInputStr); } catch { /* ignore */ }
+          toolCalls.push({ id: currentToolId, name: currentToolName, input: toolInput });
+          if (onToolCall) onToolCall({ name: currentToolName, input: toolInput });
+          addLog({
+            direction: 'tool_call',
+            data: { id: currentToolId, name: currentToolName, input: toolInput },
+            label: `tool_use: ${currentToolName}`,
+          });
+          currentToolName = '';
+          currentToolId = '';
+          currentToolInputStr = '';
+        }
+        _inThinkingBlock = false;
+      }
+
+      if (type === 'message_delta') {
+        const usage = (event.usage as Record<string, unknown>) ?? {};
+        if (usage.output_tokens) outputTokens = usage.output_tokens as number;
+      }
+
+      if (type === 'message_start') {
+        const msg = event.message as Record<string, unknown>;
+        const usage = (msg?.usage as Record<string, unknown>) ?? {};
+        if (usage.input_tokens) inputTokens = usage.input_tokens as number;
+      }
+    }
+  }
+
+  const totalTime = performance.now() - startTime;
+  const tokensPerSecond = outputTokens && totalTime > 0 ? (outputTokens / (totalTime / 1000)) : undefined;
+
+  addLog({
+    direction: 'response',
+    data: { text: fullText.slice(0, 200) + (fullText.length > 200 ? '...' : ''), inputTokens, outputTokens },
+    model: connection.model,
+    ttft,
+    totalTime,
+    tokensPerSecond,
+    inputTokens,
+    outputTokens,
+    label: `Response (${outputTokens ?? '?'} tokens)`,
+  });
+
+  const artifacts = extractArtifacts(fullText);
+
+  return {
+    content: fullText,
+    thinkingText: thinkingText || undefined,
+    inputTokens,
+    outputTokens,
+    artifacts,
+    ttft,
+    totalTime,
+    tokensPerSecond,
+    toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+  };
+}
+
+// ─── Test Connection ──────────────────────────────────────────────────────────
+
+export async function testConnection(apiKey: string, model: string): Promise<boolean> {
+  const conn: Connection = {
+    id: 'test',
+    label: 'test',
+    apiKey,
+    model,
+    maxTokens: 16,
+    temperature: 0.5,
+    isActive: false,
+    status: 'disconnected',
+  };
+
+  try {
+    let got = false;
+    await sendMessage({
+      connection: conn,
+      messages: [{ id: 'test', role: 'user', content: 'Say "ok" in one word.', timestamp: Date.now() }],
+      onToken: () => { got = true; },
+    });
+    return got;
+  } catch {
+    return false;
+  }
+}
+
+// ─── Non-streaming single call (for benchmarks) ───────────────────────────────
+
+export async function sendMessageSimple(
+  connection: Connection,
+  messages: Message[],
+  systemPrompt?: string,
+): Promise<{ content: string; inputTokens?: number; outputTokens?: number }> {
+  let content = '';
+  let inputTokens: number | undefined;
+  let outputTokens: number | undefined;
+
+  const result = await sendMessage({
+    connection,
+    messages,
+    systemPrompt,
+    onToken: t => { content += t; },
+  });
+
+  content = result.content;
+  inputTokens = result.inputTokens;
+  outputTokens = result.outputTokens;
+
+  return { content, inputTokens, outputTokens };
+}
+
+// ─── Benchmark helper (used by benchmark.ts) ──────────────────────────────────
+
 export async function sendBenchmarkMessage(
   prompt: string,
   apiKey: string,
   model: string,
   baseUrl?: string,
-): Promise<{ ttft: number; totalTime: number; tokensPerSecond: number; totalTokens: number; response: string }> {
-  const startTime = performance.now();
-  let firstTokenTime = 0;
-  let totalTokens = 0;
-  let fullText = '';
-
-  const payload: Record<string, unknown> = {
+): Promise<{ content: string; ttft: number; totalTime: number; tokensPerSecond: number; totalTokens: number }> {
+  const conn: Connection = {
+    id: 'benchmark',
+    label: 'benchmark',
+    apiKey,
     model,
-    max_tokens: 1024,
-    temperature: 0,
-    messages: [{ role: 'user', content: prompt }],
-    stream: true,
+    maxTokens: 2048,
+    temperature: 0.7,
+    isActive: false,
+    status: 'disconnected',
+    baseUrl,
   };
 
-  const { url, init } = buildRequest(apiKey, payload, new AbortController().signal, baseUrl);
-  const response = await fetch(url, init);
+  let content = '';
+  const result = await sendMessage({
+    connection: conn,
+    messages: [{ id: 'bm', role: 'user', content: prompt, timestamp: Date.now() }],
+    onToken: t => { content += t; },
+  });
 
-  if (!response.ok) {
-    throw new Error(`API error: ${response.status}`);
-  }
-
-  const reader = response.body?.getReader();
-  if (!reader) throw new Error('No stream');
-  const decoder = new TextDecoder();
-  let buffer = '';
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
-    for (const line of lines) {
-      if (!line.startsWith('data: ')) continue;
-      const data = line.slice(6);
-      if (data === '[DONE]') continue;
-      try {
-        const event = JSON.parse(data);
-        if (event.type === 'content_block_delta' && event.delta?.text) {
-          if (!firstTokenTime) firstTokenTime = performance.now();
-          fullText += event.delta.text;
-          totalTokens++;
-        }
-        if (event.type === 'message_delta' && event.usage) {
-          totalTokens = event.usage.output_tokens || totalTokens;
-        }
-      } catch { /* skip */ }
-    }
-  }
-
-  const endTime = performance.now();
   return {
-    ttft: firstTokenTime ? firstTokenTime - startTime : 0,
-    totalTime: endTime - startTime,
-    tokensPerSecond: totalTokens / ((endTime - startTime) / 1000),
-    totalTokens,
-    response: fullText,
+    content: result.content,
+    ttft: result.ttft ?? 0,
+    totalTime: result.totalTime ?? 0,
+    tokensPerSecond: result.tokensPerSecond ?? 0,
+    totalTokens: (result.inputTokens ?? 0) + (result.outputTokens ?? 0),
   };
-}
-
-/**
- * Test an API connection. Used by onboarding and settings.
- * Works in both dev (proxy) and production (direct) modes.
- */
-export async function testConnection(apiKey: string, model: string, baseUrl?: string): Promise<boolean> {
-  const payload: Record<string, unknown> = {
-    model,
-    max_tokens: 10,
-    messages: [{ role: 'user', content: 'Say "connected" in one word.' }],
-  };
-
-  try {
-    const { url, init } = buildRequest(apiKey, payload, new AbortController().signal, baseUrl);
-    const response = await fetch(url, init);
-    return response.ok;
-  } catch {
-    return false;
-  }
 }

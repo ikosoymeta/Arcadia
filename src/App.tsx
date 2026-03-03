@@ -1,12 +1,13 @@
-import { useState, lazy, Suspense } from 'react';
+import { useState, lazy, Suspense, useEffect } from 'react';
 import { ChatProvider } from './store/ChatContext';
 import { ConnectionProvider } from './store/ConnectionContext';
 import { PreviewProvider } from './store/PreviewContext';
 import { Sidebar } from './components/Sidebar/Sidebar';
-import { ChatPanel } from './components/Chat/ChatPanel';
-import { PreviewPanel } from './components/Preview/PreviewPanel';
 import { OnboardingWizard } from './components/Onboarding/OnboardingWizard';
-import type { ViewMode } from './types';
+import { SimpleView } from './components/SimpleView/SimpleView';
+import { EngineerView } from './components/EngineerView/EngineerView';
+import { ModeSwitcher } from './components/ModeSwitcher/ModeSwitcher';
+import type { ViewMode, InterfaceMode } from './types';
 import styles from './App.module.css';
 
 // Lazy-loaded panels for code splitting
@@ -16,6 +17,7 @@ const CodeWorkspace = lazy(() => import('./components/CodeWorkspace/CodeWorkspac
 const SkillsPanel = lazy(() => import('./components/Skills/SkillsPanel').then(m => ({ default: m.SkillsPanel })));
 const TeamPanel = lazy(() => import('./components/Team/TeamPanel').then(m => ({ default: m.TeamPanel })));
 const HelpPanel = lazy(() => import('./components/Help/HelpPanel').then(m => ({ default: m.HelpPanel })));
+const PreviewPanel = lazy(() => import('./components/Preview/PreviewPanel').then(m => ({ default: m.PreviewPanel })));
 
 function LoadingFallback() {
   return (
@@ -30,11 +32,34 @@ function LoadingFallback() {
 
 function App() {
   const [viewMode, setViewMode] = useState<ViewMode>('chat');
+  const [interfaceMode, setInterfaceMode] = useState<InterfaceMode>(
+    () => (localStorage.getItem('arcadia-interface-mode') as InterfaceMode) ?? 'simple'
+  );
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [previewCollapsed, setPreviewCollapsed] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(
     () => !localStorage.getItem('arcadia-onboarding-complete')
   );
+
+  // Persist interface mode
+  useEffect(() => {
+    localStorage.setItem('arcadia-interface-mode', interfaceMode);
+  }, [interfaceMode]);
+
+  // Listen for navigation events from child components
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as ViewMode;
+      setViewMode(detail);
+    };
+    document.addEventListener('arcadia:navigate', handler);
+    return () => document.removeEventListener('arcadia:navigate', handler);
+  }, []);
+
+  const handleInterfaceChange = (mode: InterfaceMode) => {
+    setInterfaceMode(mode);
+    setViewMode('chat');
+  };
 
   return (
     <ConnectionProvider>
@@ -51,18 +76,37 @@ function App() {
               onToggleCollapse={() => setSidebarCollapsed(p => !p)}
             />
             <div className={styles.mainContent}>
+              {/* Mode switcher header — shown only on chat view */}
               {viewMode === 'chat' && (
-                <>
-                  <ChatPanel
-                    sidebarCollapsed={sidebarCollapsed}
-                    onExpandSidebar={() => setSidebarCollapsed(false)}
-                  />
-                  <PreviewPanel
-                    collapsed={previewCollapsed}
-                    onToggleCollapse={() => setPreviewCollapsed(p => !p)}
-                  />
-                </>
+                <div className={styles.modeHeader}>
+                  <ModeSwitcher mode={interfaceMode} onChange={handleInterfaceChange} />
+                  <div className={styles.modeHint}>
+                    {interfaceMode === 'simple'
+                      ? 'Friendly mode — just describe what you need'
+                      : 'Engineer mode — full API access, logs, terminal'}
+                  </div>
+                </div>
               )}
+
+              {/* Chat views */}
+              {viewMode === 'chat' && interfaceMode === 'simple' && (
+                <div className={styles.chatLayout}>
+                  <SimpleView />
+                  <Suspense fallback={null}>
+                    <PreviewPanel
+                      collapsed={previewCollapsed}
+                      onToggleCollapse={() => setPreviewCollapsed(p => !p)}
+                    />
+                  </Suspense>
+                </div>
+              )}
+              {viewMode === 'chat' && interfaceMode === 'engineer' && (
+                <div className={styles.engineerLayout}>
+                  <EngineerView />
+                </div>
+              )}
+
+              {/* Other views */}
               {viewMode === 'code-workspace' && (
                 <Suspense fallback={<LoadingFallback />}>
                   <CodeWorkspace onNavigateHome={() => setViewMode('chat')} />

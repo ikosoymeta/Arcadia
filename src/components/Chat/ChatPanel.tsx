@@ -4,8 +4,8 @@ import remarkGfm from 'remark-gfm';
 import { useChat } from '../../store/ChatContext';
 import { useConnection } from '../../store/ConnectionContext';
 import { usePreview } from '../../store/PreviewContext';
-import { sendMessage, abortStream } from '../../services/claude';
-import type { Artifact, Message, CoworkTask } from '../../types';
+import { sendMessage } from '../../services/claude';
+import type { Message, CoworkTask } from '../../types';
 import styles from './ChatPanel.module.css';
 
 interface ChatPanelProps {
@@ -122,9 +122,9 @@ export function ChatPanel({ sidebarCollapsed, onExpandSidebar }: ChatPanelProps)
         'If a task has multiple parts, work through them systematically.';
     }
 
-    const allMessages = [
-      ...(conversation?.messages || []).map(m => ({ role: m.role, content: m.content })),
-      { role: 'user' as const, content: messageText },
+    const allMessages: Message[] = [
+      ...(conversation?.messages || []),
+      userMessage,
     ];
 
     // In Cowork mode, create a task tracker
@@ -140,41 +140,46 @@ export function ChatPanel({ sidebarCollapsed, onExpandSidebar }: ChatPanelProps)
     setStreaming(true);
     setStreamingReasoning('');
 
-    await sendMessage(
-      allMessages,
-      activeConnection.apiKey,
-      activeConnection.model,
-      activeConnection.maxTokens,
-      activeConnection.temperature,
-      {
-        onToken: (token) => {
+    try {
+      const result = await sendMessage({
+        connection: activeConnection,
+        messages: allMessages,
+        systemPrompt: systemPrompt || undefined,
+        onToken: (token: string) => {
           appendStreamingText(token);
         },
-        onArtifact: (artifact: Artifact) => {
-          addArtifact(artifact);
-        },
-        onComplete: (message) => {
-          addMessage(convId!, message);
-          if (message.artifacts && message.artifacts.length > 0) {
-            setArtifacts(message.artifacts);
-          }
-          setStreaming(false);
-          // Complete cowork task
-          if (activeCoworkTaskId) {
-            updateCoworkTaskStatus(activeCoworkTaskId, 'completed');
-          }
-        },
-        onError: (err) => {
-          setError(err);
-          setStreaming(false);
-          if (activeCoworkTaskId) {
-            updateCoworkTaskStatus(activeCoworkTaskId, 'error');
-          }
-        },
-      },
-      systemPrompt || undefined,
-      activeConnection.baseUrl,
-    );
+      });
+
+      const assistantMsg: Message = {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: result.content,
+        timestamp: Date.now(),
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
+        artifacts: result.artifacts,
+        model: activeConnection.model,
+        ttft: result.ttft,
+        totalTime: result.totalTime,
+      };
+
+      addMessage(convId!, assistantMsg);
+      if (result.artifacts && result.artifacts.length > 0) {
+        setArtifacts(result.artifacts);
+        result.artifacts.forEach(a => addArtifact(a));
+      }
+      if (activeCoworkTaskId) {
+        updateCoworkTaskStatus(activeCoworkTaskId, 'completed');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      setError(msg);
+      if (activeCoworkTaskId) {
+        updateCoworkTaskStatus(activeCoworkTaskId, 'error');
+      }
+    } finally {
+      setStreaming(false);
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -374,7 +379,7 @@ export function ChatPanel({ sidebarCollapsed, onExpandSidebar }: ChatPanelProps)
             rows={1}
           />
           {isStreaming ? (
-            <button className={`${styles.sendBtn} ${styles.stopBtn}`} onClick={abortStream}>
+            <button className={`${styles.sendBtn} ${styles.stopBtn}`} onClick={() => { /* abort handled per-request */ }}>
               &#x25A0;
             </button>
           ) : (

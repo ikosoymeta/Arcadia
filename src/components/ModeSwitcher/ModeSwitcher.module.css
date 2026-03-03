@@ -1,0 +1,38 @@
+.switcher {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 3px;
+}
+
+.btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border-radius: 7px;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.active {
+  background: var(--accent) !important;
+  color: white !important;
+}
+
+.icon { font-size: 13px; }
+.label { font-size: 12px; }

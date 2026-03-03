@@ -1,12 +1,168 @@
+// ─── Claude Models ────────────────────────────────────────────────────────────
+
+export const CLAUDE_MODELS = [
+  {
+    id: 'claude-opus-4-6',
+    label: 'Claude Opus 4.6',
+    desc: 'Most powerful — complex reasoning, long tasks, multi-agent',
+    badge: '🧠 Most Powerful',
+    supportsThinking: true,
+    supportsVision: true,
+    contextWindow: 200000,
+    tier: 'opus' as const,
+  },
+  {
+    id: 'claude-sonnet-4-6',
+    label: 'Claude Sonnet 4.6',
+    desc: 'Best balance of intelligence and speed',
+    badge: '⭐ Recommended',
+    supportsThinking: true,
+    supportsVision: true,
+    contextWindow: 200000,
+    tier: 'sonnet' as const,
+  },
+  {
+    id: 'claude-sonnet-4-5',
+    label: 'Claude Sonnet 4.5',
+    desc: 'Best coding model — great for complex agents',
+    badge: '💻 Best for Code',
+    supportsThinking: true,
+    supportsVision: true,
+    contextWindow: 200000,
+    tier: 'sonnet' as const,
+  },
+  {
+    id: 'claude-haiku-4-5-20251001',
+    label: 'Claude Haiku 4.5',
+    desc: 'Fastest responses — great for quick questions',
+    badge: '⚡ Fastest',
+    supportsThinking: false,
+    supportsVision: true,
+    contextWindow: 200000,
+    tier: 'haiku' as const,
+  },
+  {
+    id: 'claude-sonnet-4-20250514',
+    label: 'Claude Sonnet 4',
+    desc: 'Stable Sonnet 4 release',
+    badge: '',
+    supportsThinking: true,
+    supportsVision: true,
+    contextWindow: 200000,
+    tier: 'sonnet' as const,
+  },
+  {
+    id: 'claude-opus-4-20250514',
+    label: 'Claude Opus 4',
+    desc: 'Stable Opus 4 release',
+    badge: '',
+    supportsThinking: true,
+    supportsVision: true,
+    contextWindow: 200000,
+    tier: 'opus' as const,
+  },
+  {
+    id: 'claude-haiku-35-20241022',
+    label: 'Claude 3.5 Haiku',
+    desc: 'Fast and affordable',
+    badge: '',
+    supportsThinking: false,
+    supportsVision: true,
+    contextWindow: 200000,
+    tier: 'haiku' as const,
+  },
+];
+
+export type ClaudeModelId = string;
+
+export function getModelInfo(id: string) {
+  return CLAUDE_MODELS.find(m => m.id === id) ?? null;
+}
+
+// ─── Content Blocks ───────────────────────────────────────────────────────────
+
+export interface TextBlock {
+  type: 'text';
+  text: string;
+}
+
+export interface ThinkingBlock {
+  type: 'thinking';
+  thinking: string;
+}
+
+export interface ImageBlock {
+  type: 'image';
+  source: {
+    type: 'base64';
+    media_type: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
+    data: string;
+  };
+}
+
+export interface ToolUseBlock {
+  type: 'tool_use';
+  id: string;
+  name: string;
+  input: Record<string, unknown>;
+}
+
+export interface ToolResultBlock {
+  type: 'tool_result';
+  tool_use_id: string;
+  content: string;
+  is_error?: boolean;
+}
+
+export type ContentBlock = TextBlock | ThinkingBlock | ImageBlock | ToolUseBlock | ToolResultBlock;
+
+// ─── Tool Definition ──────────────────────────────────────────────────────────
+
+export interface ToolDefinition {
+  name: string;
+  description: string;
+  input_schema: {
+    type: 'object';
+    properties: Record<string, { type: string; description: string }>;
+    required?: string[];
+  };
+}
+
+// ─── API Debug Log ────────────────────────────────────────────────────────────
+
+export interface ApiLogEntry {
+  id: string;
+  timestamp: number;
+  direction: 'request' | 'response' | 'stream_token' | 'error' | 'tool_call' | 'thinking';
+  data: unknown;
+  model?: string;
+  ttft?: number;
+  totalTime?: number;
+  tokensPerSecond?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  label?: string;
+}
+
+// ─── Core Types ───────────────────────────────────────────────────────────────
+
 export interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  contentBlocks?: ContentBlock[];
   timestamp: number;
   tokens?: number;
+  inputTokens?: number;
+  outputTokens?: number;
   artifacts?: Artifact[];
   authorId?: string;
   authorName?: string;
+  thinkingText?: string;
+  toolCalls?: ToolUseBlock[];
+  model?: string;
+  ttft?: number;
+  totalTime?: number;
 }
 
 export interface Artifact {
@@ -41,9 +197,12 @@ export interface Conversation {
   shareUrl?: string;
   collaborators: Collaborator[];
   checkpoints: Checkpoint[];
-  threadId?: string; // for multi-threaded branching
+  threadId?: string;
   parentThreadId?: string;
   tags: string[];
+  systemPrompt?: string;
+  enableThinking?: boolean;
+  thinkingBudget?: number;
 }
 
 export interface Collaborator {
@@ -62,10 +221,11 @@ export interface Folder {
   color?: string;
   icon?: string;
   isExpanded?: boolean;
-  instructions?: string; // Cowork: folder-specific instructions for Claude
+  instructions?: string;
 }
 
 export type ChatMode = 'chat' | 'cowork';
+export type InterfaceMode = 'simple' | 'engineer';
 
 export interface CoworkTask {
   id: string;
@@ -130,6 +290,8 @@ export interface Connection {
   status: 'connected' | 'disconnected' | 'error';
   lastUsed?: number;
   baseUrl?: string;
+  enableThinking?: boolean;
+  thinkingBudget?: number;
 }
 
 export interface BenchmarkResult {
@@ -177,4 +339,14 @@ export interface TerminalEntry {
   output: string;
   timestamp: number;
   status: 'running' | 'success' | 'error';
+}
+
+// ─── Image Attachment ─────────────────────────────────────────────────────────
+
+export interface ImageAttachment {
+  id: string;
+  name: string;
+  mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
+  data: string; // base64
+  previewUrl: string;
 }
