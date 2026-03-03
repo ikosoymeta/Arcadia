@@ -1,6 +1,6 @@
 # Arcadia — Claude Web Editor
 
-AI-powered web editor with Manus-style UI, real-time preview, VS Code-like code workspace, and built-in performance benchmarking.
+AI-powered web editor build to support Technical and Not Technical users, and built-in performance benchmarking. ENcourage working together with your team and AI agents and tools.
 
 ## Features
 
