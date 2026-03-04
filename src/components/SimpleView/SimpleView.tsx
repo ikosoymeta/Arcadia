@@ -527,12 +527,20 @@ export function SimpleView() {
     addMessage(convId, userMsg);
     trackMessage(userMsg, convId);
 
-    // Build activity steps
-    const steps: ActivityStep[] = [
-      { id: 'thinking', label: 'Claude is thinking...', status: 'active', icon: '🧠' },
-      { id: 'writing', label: 'Writing response', status: 'pending', icon: '✍️' },
-      { id: 'artifacts', label: 'Preparing results', status: 'pending', icon: '📦' },
-    ];
+    // Build activity steps — show connecting phase for Meta LDAR (bridge) connections
+    const isLdar = !!(activeConnection.baseUrl?.includes('localhost:8087'));
+    const steps: ActivityStep[] = isLdar
+      ? [
+          { id: 'connecting', label: 'Connecting to Claude Code...', status: 'active', icon: '🔌' },
+          { id: 'thinking', label: 'Claude is thinking...', status: 'pending', icon: '🧠' },
+          { id: 'writing', label: 'Writing response', status: 'pending', icon: '✍️' },
+          { id: 'artifacts', label: 'Preparing results', status: 'pending', icon: '📦' },
+        ]
+      : [
+          { id: 'thinking', label: 'Claude is thinking...', status: 'active', icon: '🧠' },
+          { id: 'writing', label: 'Writing response', status: 'pending', icon: '✍️' },
+          { id: 'artifacts', label: 'Preparing results', status: 'pending', icon: '📦' },
+        ];
     setActivitySteps(steps);
     setShowActivity(true);
 
@@ -542,15 +550,31 @@ export function SimpleView() {
     const controller = new AbortController();
     setAbortController(convId, controller);
 
-    // Elapsed time counter for "thinking" phase
+    // Elapsed time counter with phase-aware labels for LDAR connections
     const sendStartTime = Date.now();
     const elapsedTimer = setInterval(() => {
       const elapsed = Math.round((Date.now() - sendStartTime) / 1000);
-      setActivitySteps(prev => prev.map(s =>
-        s.id === 'thinking' && s.status === 'active'
-          ? { ...s, detail: `${elapsed}s elapsed` }
-          : s
-      ));
+      if (isLdar) {
+        // Update the active step with elapsed time and phase-specific detail
+        setActivitySteps(prev => prev.map(s => {
+          if (s.id === 'connecting' && s.status === 'active') {
+            const phaseDetail = elapsed < 3 ? 'Dispatching to Claude Code...'
+              : elapsed < 15 ? 'Loading Meta auth & plugins...'
+              : `Waiting for response... ${elapsed}s`;
+            return { ...s, detail: phaseDetail };
+          }
+          if (s.id === 'thinking' && s.status === 'active') {
+            return { ...s, detail: `${elapsed}s elapsed` };
+          }
+          return s;
+        }));
+      } else {
+        setActivitySteps(prev => prev.map(s =>
+          s.id === 'thinking' && s.status === 'active'
+            ? { ...s, detail: `${elapsed}s elapsed` }
+            : s
+        ));
+      }
     }, 1000);
 
     const allMessages = [...(conversation?.messages ?? []), userMsg];
@@ -568,7 +592,12 @@ export function SimpleView() {
             firstToken = true;
             clearInterval(elapsedTimer);
             const ttftSec = ((Date.now() - sendStartTime) / 1000).toFixed(1);
-            setStep('thinking', 'done', `${ttftSec}s`);
+            if (isLdar) {
+              setStep('connecting', 'done', 'Connected');
+              setStep('thinking', 'done', `${ttftSec}s`);
+            } else {
+              setStep('thinking', 'done', `${ttftSec}s`);
+            }
             setStep('writing', 'active', 'Streaming response...');
           }
           appendStreamingText(convId!, chunk);
