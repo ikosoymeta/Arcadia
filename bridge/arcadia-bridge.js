@@ -1117,7 +1117,47 @@ const SB_ALLOWED_COMMANDS = [
   'brew install --cask',
   'node --version',
   'npm --version',
+  'npm install -g',
+  'mkdir -p',
+  'open ',
 ];
+
+// Default CLAUDE.md content for Second Brain initialization
+const DEFAULT_CLAUDE_MD = `# Second Brain Configuration
+
+## Slash Commands
+
+### /daily-brief
+Give me my morning briefing. Check my priorities, calendar for today, and any pending tasks. Summarize what I should focus on.
+
+### /eod
+End of day wrap-up. Process any meeting notes from today, update task statuses, and preview what's on for tomorrow.
+
+### /eow
+End of week summary. Compile what was accomplished this week, capture any PSC-worthy items, and outline priorities for next week.
+
+### /prepare-meeting <person or topic>
+Research the person or topic and generate a meeting agenda. Include relevant context from my projects and recent interactions.
+
+### /add-context <url or text>
+Process this information and route it to the appropriate project or knowledge area in my workspace.
+
+### /deep-research <topic>
+Conduct thorough research on this topic. Find multiple sources, cross-reference information, and provide a comprehensive summary with citations.
+
+## Preferences
+- Keep responses concise and actionable
+- Use bullet points for lists
+- Always include next steps when relevant
+- Match my writing style (see style guide if available)
+
+## Workspace Structure
+- projects/ — Active project folders
+- notes/ — Meeting notes and quick captures  
+- research/ — Deep research outputs
+- templates/ — Reusable templates
+- archive/ — Completed items
+`;
 
 function handleSecondBrainSetup(req, res, body) {
   setCorsHeaders(res, req);
@@ -1132,6 +1172,207 @@ function handleSecondBrainSetup(req, res, body) {
   }
 
   const { action, command } = payload;
+  const fs = require('fs');
+  const home = process.env.HOME || os.homedir();
+  const username = process.env.USER || os.userInfo().username;
+
+  // ─── Create workspace folder ───────────────────────────────────────
+  if (action === 'create-workspace') {
+    console.log(`[${new Date().toISOString()}] 🧠 Second Brain: Creating workspace...`);
+    try {
+      // Try to find Google Drive mount
+      let drivePaths;
+      if (IS_WIN) {
+        drivePaths = [
+          `${home}\\Google Drive\\My Drive`,
+          `G:\\My Drive`,
+          `${home}\\GoogleDrive\\My Drive`,
+        ];
+      } else {
+        drivePaths = [
+          `${home}/Library/CloudStorage/GoogleDrive-${username}@meta.com/My Drive`,
+          `${home}/Google Drive/My Drive`,
+          `${home}/gdrive`,
+        ];
+      }
+
+      let driveRoot = null;
+      for (const p of drivePaths) {
+        if (fs.existsSync(p)) {
+          driveRoot = p;
+          break;
+        }
+      }
+
+      if (!driveRoot) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: false,
+          action: 'create-workspace',
+          error: 'google-drive-not-found',
+          message: 'Google Drive is not mounted on this computer. Please install and sign into Google Drive for Desktop first.',
+          searchedPaths: drivePaths,
+        }));
+        return;
+      }
+
+      const sep = IS_WIN ? '\\' : '/';
+      const workspacePath = `${driveRoot}${sep}claude`;
+      const subfolders = ['projects', 'notes', 'research', 'templates', 'archive'];
+
+      // Create main workspace
+      if (!fs.existsSync(workspacePath)) {
+        fs.mkdirSync(workspacePath, { recursive: true });
+      }
+
+      // Create subfolders
+      for (const sub of subfolders) {
+        const subPath = `${workspacePath}${sep}${sub}`;
+        if (!fs.existsSync(subPath)) {
+          fs.mkdirSync(subPath, { recursive: true });
+        }
+      }
+
+      console.log(`[${new Date().toISOString()}] 🧠 Workspace created at: ${workspacePath}`);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        success: true,
+        action: 'create-workspace',
+        workspacePath,
+        subfolders,
+      }));
+    } catch (err) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        success: false,
+        action: 'create-workspace',
+        error: err.message,
+      }));
+    }
+    return;
+  }
+
+  // ─── Initialize CLAUDE.md ──────────────────────────────────────────
+  if (action === 'init-claudemd') {
+    console.log(`[${new Date().toISOString()}] 🧠 Second Brain: Initializing CLAUDE.md...`);
+    try {
+      // Find the workspace
+      let workspacePath = null;
+      const drivePaths = IS_WIN
+        ? [`${home}\\Google Drive\\My Drive\\claude`, `G:\\My Drive\\claude`]
+        : [
+            `${home}/Library/CloudStorage/GoogleDrive-${username}@meta.com/My Drive/claude`,
+            `${home}/Google Drive/My Drive/claude`,
+            `${home}/gdrive/claude`,
+          ];
+
+      for (const p of drivePaths) {
+        if (fs.existsSync(p)) {
+          workspacePath = p;
+          break;
+        }
+      }
+
+      if (!workspacePath) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: false,
+          action: 'init-claudemd',
+          error: 'workspace-not-found',
+          message: 'Workspace folder not found. Please create the workspace first.',
+        }));
+        return;
+      }
+
+      const sep = IS_WIN ? '\\' : '/';
+      const claudeMdPath = `${workspacePath}${sep}CLAUDE.md`;
+
+      // Don't overwrite existing CLAUDE.md
+      if (fs.existsSync(claudeMdPath)) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: true,
+          action: 'init-claudemd',
+          alreadyExists: true,
+          path: claudeMdPath,
+        }));
+        return;
+      }
+
+      fs.writeFileSync(claudeMdPath, DEFAULT_CLAUDE_MD, 'utf-8');
+      console.log(`[${new Date().toISOString()}] 🧠 CLAUDE.md created at: ${claudeMdPath}`);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        success: true,
+        action: 'init-claudemd',
+        path: claudeMdPath,
+        alreadyExists: false,
+      }));
+    } catch (err) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        success: false,
+        action: 'init-claudemd',
+        error: err.message,
+      }));
+    }
+    return;
+  }
+
+  // ─── Check Homebrew availability ───────────────────────────────────
+  if (action === 'check-homebrew') {
+    try {
+      const brewPath = execSync('which brew', { encoding: 'utf-8', timeout: 5000 }).trim();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, action: 'check-homebrew', path: brewPath }));
+    } catch {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, action: 'check-homebrew' }));
+    }
+    return;
+  }
+
+  // ─── Install claude-templates via npm ──────────────────────────────
+  if (action === 'install-claude-templates') {
+    console.log(`[${new Date().toISOString()}] 🧠 Second Brain: Installing claude-templates...`);
+    const cmd = IS_WIN
+      ? 'npm install -g claude-templates'
+      : 'npm install -g claude-templates 2>&1 || sudo npm install -g claude-templates 2>&1';
+
+    const proc = spawn(cmd, [], {
+      cwd: home,
+      env: { ...process.env },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      shell: true,
+    });
+
+    let stdout = '';
+    let stderr = '';
+    proc.stdout.on('data', d => { stdout += d.toString(); });
+    proc.stderr.on('data', d => { stderr += d.toString(); });
+
+    const timeout = setTimeout(() => proc.kill('SIGTERM'), 120000);
+
+    proc.on('close', code => {
+      clearTimeout(timeout);
+      console.log(`[${new Date().toISOString()}] 🧠 claude-templates install: code=${code}`);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        success: code === 0,
+        action: 'install-claude-templates',
+        stdout: stdout.slice(-3000),
+        stderr: stderr.slice(-3000),
+        exitCode: code,
+      }));
+    });
+
+    proc.on('error', err => {
+      clearTimeout(timeout);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    });
+    return;
+  }
 
   if (action === 'install-skills') {
     const cmd = 'claude-templates skill tasks,deep-research,google-docs,google-docs-fast-reader,google-sheets,google-slides-presentation,calendar,create-wiki,gchat install';
