@@ -68,7 +68,7 @@ export async function runBenchmarkSuite(
         renderTime: Math.max(0, renderTime),
         totalTokens: result.totalTokens,
         timestamp: Date.now(),
-        status: result.ttft > 3000 || result.tokensPerSecond < 10 ? 'slow' : 'pass',
+        status: result.totalTokens === 0 ? 'fail' : result.ttft > 3000 || result.tokensPerSecond < 10 ? 'slow' : 'pass',
         pipelineBreakdown: result.pipelineTimings,
       };
 
