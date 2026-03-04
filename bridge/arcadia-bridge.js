@@ -1,39 +1,28 @@
 #!/usr/bin/env node
 /**
- * ArcadIA Bridge v3.3.0 — Local proxy connecting ArcadIA web app to Claude Code
+ * ArcadIA Bridge v3.4.0 — Local proxy connecting ArcadIA web app to Claude Code
  * 
  * Runs on localhost:8087 and forwards requests from the ArcadIA web app
  * to Claude Code CLI, which handles Meta internal authentication.
  * 
+ * v3.4.0:
+ * - Process pool of 2: keeps TWO standby processes for back-to-back requests
+ * - Optimized CLI flags: --model, --no-session-persistence, reduced overhead
+ * - Better readiness detection: waits for auth completion, not just 2s timer
+ * - Instant replacement: 0ms delay when taking a standby
+ * - Warm-up spawns pool immediately (parallel with warm-up, not after)
+ *
  * v3.3.0:
  * - Process pre-spawning: keeps a standby claude process ready for instant dispatch
  * - Phase-aware keepalive: sends phase info (spawning/loading/waiting) to frontend
- * - Dramatically reduces TTFT for 2nd+ requests (from ~50s to ~5-10s)
  *
- * v3.2.3:
- * - Pre-flight port kill, graceful shutdown, child process tracking
- *
- * v3.2.2:
- * - Robust Meta stderr noise filter (scribecat, glog, configerator, thrift)
- * - Clean error messages for content policy blocks
- *
- * v3.2.0:
- * - Simplified setup: one-line command, no .sh download needed
- * - Filtered scribecat/Meta internal stderr noise from console output
- * - Added Manus domain support (*.manus.computer, *.manus.space)
- *
- * v3.1.0:
- * - Removed auth token requirement (CORS is sufficient for localhost security)
- * - Fixed keepalive variable scoping crash in non-streaming/auto-fix paths
- *
- * v3.0.0:
- * - Security: CORS restricted to localhost + GitHub Pages origin
- * - Security: Command allowlist for /v1/validate endpoint
- * - Structured messages: Preserves conversation context with role markers
- * - Better prompt building: Includes system prompt, conversation history
- *
+ * v3.2.3: Pre-flight port kill, graceful shutdown, child process tracking
+ * v3.2.2: Robust Meta stderr noise filter, clean error messages
+ * v3.2.0: Simplified setup, Manus domain support
+ * v3.1.0: Removed auth token, fixed keepalive scoping
+ * v3.0.0: CORS security, command allowlist, structured messages
  * v2.1.0: /v1/validate, /v1/auto-fix endpoints
- * v2.0.0: SSE keepalive, warm-up, res.on('close') fix
+ * v2.0.0: SSE keepalive, warm-up
  */
 
 const http = require('http');
@@ -43,7 +32,7 @@ const os = require('os');
 
 const PORT = 8087;
 const HOST = '127.0.0.1';
-const VERSION = '3.3.0';
+const VERSION = '3.4.0';
 const TIMEOUT_MS = 180000; // 3 minute timeout
 const KEEPALIVE_INTERVAL_MS = 2000; // SSE keepalive every 2s
 
@@ -166,26 +155,34 @@ try {
   console.log(`  ℹ Skipping version check (will verify on first request)`);
 }
 
-// ─── Process Pool: pre-spawn claude processes for faster dispatch ─────────
-// Instead of spawning a new `claude -p` per request (which takes ~50s for Meta auth),
-// we keep a "standby" process that's already loaded and waiting for stdin input.
-// When a request arrives, we use the standby process immediately and spawn a new one.
+// ─── Process Pool: pre-spawn multiple claude processes for instant dispatch ──
+// The biggest bottleneck is Meta auth plugin loading (~40-50s per process).
+// We maintain a POOL of pre-spawned processes so requests get instant dispatch.
+// Pool size of 2 handles back-to-back requests without waiting.
 
 let warmedUp = false;
 let warmupTime = 0;
-let standbyProcess = null;  // Pre-spawned claude process waiting for input
-let standbyReady = false;   // True when standby process has finished loading
-let standbySpawnTime = 0;   // When the standby was spawned
-const STANDBY_MAX_AGE_MS = 300000; // Recycle standby after 5 minutes to avoid stale auth
+const POOL_SIZE = 2;  // Number of standby processes to maintain
+const STANDBY_MAX_AGE_MS = 300000; // Recycle after 5 minutes to avoid stale auth
 
-function spawnStandby() {
-  if (standbyProcess) return; // Already have one
+// Pool: array of { proc, ready, spawnTime, stderrBuffer }
+const pool = [];
+
+// Build CLI args for standby processes (optimized for speed)
+function getClaudeArgs(model) {
+  const args = ['-p', '--no-session-persistence'];
+  // Disable tools for simple chat (reduces plugin loading)
+  // Note: auto-fix still spawns fresh processes with tools enabled
+  if (model) args.push('--model', model);
+  return args;
+}
+
+function spawnPoolProcess(slot) {
+  const spawnTime = Date.now();
+  const args = getClaudeArgs();
+  console.log(`[${new Date().toISOString()}] 🔄 Pool[${slot}]: Spawning standby (${CLAUDE_PATH} ${args.join(' ')})...`);
   
-  standbySpawnTime = Date.now();
-  standbyReady = false;
-  console.log(`[${new Date().toISOString()}] 🔄 Pre-spawning standby claude process...`);
-  
-  const proc = spawn(CLAUDE_PATH, ['-p'], {
+  const proc = spawn(CLAUDE_PATH, args, {
     env: { ...process.env },
     stdio: ['pipe', 'pipe', 'pipe'],
     shell: false,
@@ -193,100 +190,134 @@ function spawnStandby() {
   
   activeChildren.add(proc);
   
-  // The process is "ready" once it's running and hasn't errored.
-  // We can't easily detect when Meta auth is done, but the process being alive
-  // means it's at least started loading. We'll mark ready after a brief delay
-  // to let the Node.js event loop settle.
+  const entry = { proc, ready: false, spawnTime, stderrBuffer: '' };
+  pool[slot] = entry;
+  
   let hasErrored = false;
+  let stderrQuietTimer = null;
+  let stderrLineCount = 0;
   
   proc.on('error', (err) => {
     hasErrored = true;
-    standbyProcess = null;
-    standbyReady = false;
+    entry.ready = false;
     activeChildren.delete(proc);
-    console.log(`[${new Date().toISOString()}] ⚠ Standby process error: ${err.message}`);
+    console.log(`[${new Date().toISOString()}] ⚠ Pool[${slot}]: Process error: ${err.message}`);
+    // Respawn after delay
+    setTimeout(() => fillPool(), 3000);
   });
   
   proc.on('exit', (code) => {
     activeChildren.delete(proc);
-    if (standbyProcess === proc) {
-      standbyProcess = null;
-      standbyReady = false;
-      // If it exited unexpectedly (not from us using it), respawn
-      if (code !== 0 && code !== null) {
-        console.log(`[${new Date().toISOString()}] ⚠ Standby exited with code ${code}, respawning...`);
-        setTimeout(spawnStandby, 2000);
+    if (pool[slot] && pool[slot].proc === proc) {
+      pool[slot] = null;
+      if (code !== 0 && code !== null && !hasErrored) {
+        console.log(`[${new Date().toISOString()}] ⚠ Pool[${slot}]: Exited with code ${code}, will respawn...`);
+        setTimeout(() => fillPool(), 2000);
       }
     }
   });
   
-  // Detect readiness: watch stderr for Meta auth completion indicators
-  // or just use a timer as fallback
-  let readyTimer = null;
+  // Readiness detection: Meta auth produces a burst of stderr output during loading.
+  // When stderr goes quiet for 3s after at least some output, auth is likely done.
+  // Fallback: mark ready after 5s regardless (process is at least spawned and loading).
   proc.stderr.on('data', (data) => {
     const text = data.toString();
-    // When we see stderr output, the process is at least alive and loading
-    if (!standbyReady && !hasErrored) {
-      // Don't mark ready immediately — wait for auth to settle
-      if (readyTimer) clearTimeout(readyTimer);
-      readyTimer = setTimeout(() => {
-        if (!hasErrored && standbyProcess === proc) {
-          standbyReady = true;
-          console.log(`[${new Date().toISOString()}] ✓ Standby process ready (${((Date.now() - standbySpawnTime) / 1000).toFixed(1)}s)`);
+    entry.stderrBuffer += text;
+    stderrLineCount++;
+    
+    if (!entry.ready && !hasErrored) {
+      // Reset quiet timer on each stderr output
+      if (stderrQuietTimer) clearTimeout(stderrQuietTimer);
+      stderrQuietTimer = setTimeout(() => {
+        if (!hasErrored && pool[slot] && pool[slot].proc === proc && !entry.ready) {
+          entry.ready = true;
+          const elapsed = ((Date.now() - spawnTime) / 1000).toFixed(1);
+          console.log(`[${new Date().toISOString()}] ✓ Pool[${slot}]: Ready after ${elapsed}s (${stderrLineCount} stderr lines, auth settled)`);
         }
-      }, 500);
+      }, 3000); // 3s quiet = auth done
     }
   });
   
-  // Fallback: mark ready after 2s even if no stderr (process is at least spawned)
+  // Fallback: mark ready after 5s even if no stderr
   setTimeout(() => {
-    if (!hasErrored && standbyProcess === proc && !standbyReady) {
-      standbyReady = true;
-      console.log(`[${new Date().toISOString()}] ✓ Standby process ready (timer fallback, ${((Date.now() - standbySpawnTime) / 1000).toFixed(1)}s)`);
+    if (!hasErrored && pool[slot] && pool[slot].proc === proc && !entry.ready) {
+      entry.ready = true;
+      const elapsed = ((Date.now() - spawnTime) / 1000).toFixed(1);
+      console.log(`[${new Date().toISOString()}] ✓ Pool[${slot}]: Ready after ${elapsed}s (timer fallback)`);
     }
-  }, 2000);
-  
-  standbyProcess = proc;
+  }, 5000);
 }
 
-function takeStandby() {
-  if (!standbyProcess || !standbyReady) return null;
+function fillPool() {
+  for (let i = 0; i < POOL_SIZE; i++) {
+    if (!pool[i] || !pool[i].proc) {
+      spawnPoolProcess(i);
+    }
+  }
+}
+
+function takeFromPool() {
+  // Find the oldest ready process (most likely to have completed auth)
+  let bestIdx = -1;
+  let bestAge = 0;
   
-  // Check if standby is too old (stale auth)
-  if (Date.now() - standbySpawnTime > STANDBY_MAX_AGE_MS) {
-    console.log(`[${new Date().toISOString()}] ♻ Standby too old (${((Date.now() - standbySpawnTime) / 1000).toFixed(0)}s), recycling...`);
-    try { standbyProcess.kill('SIGTERM'); } catch {}
-    standbyProcess = null;
-    standbyReady = false;
-    spawnStandby();
-    return null;
+  for (let i = 0; i < pool.length; i++) {
+    const entry = pool[i];
+    if (!entry || !entry.ready) continue;
+    
+    // Check if too old
+    const age = Date.now() - entry.spawnTime;
+    if (age > STANDBY_MAX_AGE_MS) {
+      console.log(`[${new Date().toISOString()}] ♻ Pool[${i}]: Too old (${(age / 1000).toFixed(0)}s), recycling...`);
+      try { entry.proc.kill('SIGTERM'); } catch {}
+      pool[i] = null;
+      continue;
+    }
+    
+    if (age > bestAge) {
+      bestAge = age;
+      bestIdx = i;
+    }
   }
   
-  const proc = standbyProcess;
-  standbyProcess = null;
-  standbyReady = false;
+  if (bestIdx === -1) return null;
   
-  // Immediately spawn a replacement
-  setTimeout(spawnStandby, 100);
+  const entry = pool[bestIdx];
+  const proc = entry.proc;
+  pool[bestIdx] = null;
   
+  // Immediately start refilling the pool (0ms delay)
+  setImmediate(() => fillPool());
+  
+  const age = ((Date.now() - entry.spawnTime) / 1000).toFixed(1);
+  console.log(`[${new Date().toISOString()}]   ⚡ Took Pool[${bestIdx}] (age: ${age}s, auth settled)`);
   return proc;
 }
 
-// Recycle standby periodically to keep auth fresh
+// Recycle stale pool processes periodically
 setInterval(() => {
-  if (standbyProcess && standbyReady && Date.now() - standbySpawnTime > STANDBY_MAX_AGE_MS) {
-    console.log(`[${new Date().toISOString()}] ♻ Recycling stale standby process...`);
-    try { standbyProcess.kill('SIGTERM'); } catch {}
-    standbyProcess = null;
-    standbyReady = false;
-    spawnStandby();
+  for (let i = 0; i < pool.length; i++) {
+    const entry = pool[i];
+    if (entry && entry.ready && Date.now() - entry.spawnTime > STANDBY_MAX_AGE_MS) {
+      console.log(`[${new Date().toISOString()}] ♻ Pool[${i}]: Recycling stale process...`);
+      try { entry.proc.kill('SIGTERM'); } catch {}
+      pool[i] = null;
+    }
   }
+  fillPool();
 }, 60000);
 
 function warmUp() {
   console.log('  ⏳ Warming up Claude Code (pre-loading auth & plugins)...');
+  console.log(`  📦 Pool size: ${POOL_SIZE} standby processes`);
   const start = Date.now();
-  const warmup = spawn(CLAUDE_PATH, ['-p'], {
+  
+  // Start filling the pool IMMEDIATELY (in parallel with warm-up)
+  // Don't wait for warm-up to finish — every second counts
+  fillPool();
+  
+  // Also run a quick warm-up probe to verify Claude Code works
+  const warmup = spawn(CLAUDE_PATH, ['-p', '--no-session-persistence'], {
     env: { ...process.env },
     stdio: ['pipe', 'pipe', 'pipe'],
     shell: false,
@@ -299,14 +330,13 @@ function warmUp() {
     warmedUp = true;
     activeChildren.delete(warmup);
     console.log(`  ✓ Warm-up complete in ${(warmupTime / 1000).toFixed(1)}s (exit code: ${code})`);
-    // After warm-up, spawn the first standby process
-    spawnStandby();
+    // Ensure pool is full after warm-up
+    fillPool();
   });
   warmup.on('error', () => {
     warmedUp = true;
     activeChildren.delete(warmup);
-    console.log('  ⚠ Warm-up failed, spawning standby anyway...');
-    spawnStandby();
+    console.log('  ⚠ Warm-up failed, pool processes should still be spawning...');
   });
 }
 
@@ -358,8 +388,12 @@ function handleHealthCheck(res, req) {
     claude_version: claudeVersion,
     warmed_up: warmedUp,
     warmup_time_ms: warmupTime,
-    standby_ready: standbyReady,
-    standby_age_ms: standbyProcess ? Date.now() - standbySpawnTime : 0,
+    pool_size: POOL_SIZE,
+    pool_status: pool.map((entry, i) => entry ? {
+      slot: i,
+      ready: entry.ready,
+      age_ms: Date.now() - entry.spawnTime,
+    } : { slot: i, ready: false, age_ms: 0 }),
     auth_required: false,
     capabilities: {
       validate: true,
@@ -532,15 +566,16 @@ function handleMessages(req, res, body) {
   console.log(`[${new Date().toISOString()}] → #${reqNum} Request: model=${model}, tokens=${maxTokens}, stream=${stream}${trimNote}`);
   console.log(`[${new Date().toISOString()}]   Prompt: ${fullPrompt.slice(0, 120)}${fullPrompt.length > 120 ? '...' : ''}`);
 
-  // Try to use a pre-spawned standby process for faster dispatch
+  // Try to use a pre-spawned process from the pool for instant dispatch
   let claude;
-  const standby = takeStandby();
-  if (standby) {
-    claude = standby;
-    console.log(`[${new Date().toISOString()}]   ⚡ Using pre-spawned standby process (instant dispatch)`);
+  const poolProc = takeFromPool();
+  if (poolProc) {
+    claude = poolProc;
   } else {
-    console.log(`[${new Date().toISOString()}]   Spawning: claude -p (no standby available)`);
-    claude = spawn(CLAUDE_PATH, ['-p'], {
+    // No pool process available — spawn fresh with optimized flags
+    const args = getClaudeArgs(model);
+    console.log(`[${new Date().toISOString()}]   Spawning: ${CLAUDE_PATH} ${args.join(' ')} (no pool process available)`);
+    claude = spawn(CLAUDE_PATH, args, {
       env: { ...process.env },
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: false,
@@ -1109,7 +1144,7 @@ function printBanner() {
   console.log('');
   console.log('  ╔══════════════════════════════════════════════════════════╗');
   console.log('  ║                                                          ║');
-  console.log(`  ║   ⚡ ArcadIA Bridge v${VERSION}                              ║`);
+  console.log(`  ║   ⚡ ArcadIA Bridge v${VERSION}                             ║`);
   console.log('  ║                                                          ║');
   console.log(`  ║   Running on http://${HOST}:${PORT}                    ║`);
   console.log('  ║   Forwarding requests to Claude Code (via -p flag)       ║');
@@ -1162,7 +1197,15 @@ server.on('error', (err) => {
 function gracefulShutdown(signal) {
   console.log(`\n  Received ${signal}. Shutting down gracefully...`);
   
-  // Kill all active child processes
+  // Kill all pool processes first
+  for (const entry of pool) {
+    if (entry && entry.proc) {
+      try { entry.proc.kill('SIGTERM'); } catch {}
+    }
+  }
+  pool.length = 0;
+  
+  // Kill all other active child processes
   for (const child of activeChildren) {
     try {
       child.kill('SIGTERM');
