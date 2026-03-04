@@ -129,20 +129,63 @@ export function BenchmarkPanel() {
             {latestSuite.results.map(r => {
               const pct = (r.totalTime / getMaxTime()) * 100;
               const speed = r.totalTime < 3000 ? 'fast' : r.totalTime < 8000 ? 'medium' : 'slow';
+              const pb = r.pipelineBreakdown;
               return (
                 <div key={r.id} className={styles.bar}>
                   <div className={styles.barLabel}>{r.name}</div>
                   <div className={styles.barTrack}>
-                    <div
-                      className={`${styles.barFill} ${styles[speed]}`}
-                      style={{ width: `${Math.max(pct, 5)}%` }}
-                    >
-                      {r.totalTime.toFixed(0)}ms
-                    </div>
+                    {pb && r.totalTime > 0 ? (
+                      <>
+                        <div
+                          className={styles.barFill}
+                          style={{
+                            width: `${Math.max((pb.fetchLatency / r.totalTime) * pct, 2)}%`,
+                            backgroundColor: '#4a90d9',
+                            borderRadius: '4px 0 0 4px',
+                          }}
+                          title={`Fetch: ${pb.fetchLatency}ms`}
+                        />
+                        <div
+                          className={styles.barFill}
+                          style={{
+                            width: `${Math.max((pb.firstSSELatency / r.totalTime) * pct, 2)}%`,
+                            backgroundColor: '#e6a23c',
+                            borderRadius: 0,
+                          }}
+                          title={`Model wait: ${pb.firstSSELatency}ms`}
+                        />
+                        <div
+                          className={styles.barFill}
+                          style={{
+                            width: `${Math.max((pb.streamDuration / r.totalTime) * pct, 2)}%`,
+                            backgroundColor: '#67c23a',
+                            borderRadius: '0 4px 4px 0',
+                          }}
+                          title={`Streaming: ${pb.streamDuration}ms`}
+                        />
+                        <span style={{ marginLeft: '6px', fontSize: '11px', whiteSpace: 'nowrap' }}>
+                          {r.totalTime.toFixed(0)}ms
+                        </span>
+                      </>
+                    ) : (
+                      <div
+                        className={`${styles.barFill} ${styles[speed]}`}
+                        style={{ width: `${Math.max(pct, 5)}%` }}
+                      >
+                        {r.totalTime.toFixed(0)}ms
+                      </div>
+                    )}
                   </div>
                 </div>
               );
             })}
+            {latestSuite.results.some(r => r.pipelineBreakdown) && (
+              <div style={{ display: 'flex', gap: '12px', marginTop: '8px', fontSize: '11px', opacity: 0.7 }}>
+                <span><span style={{ display: 'inline-block', width: '10px', height: '10px', backgroundColor: '#4a90d9', borderRadius: '2px', marginRight: '4px' }} />Fetch</span>
+                <span><span style={{ display: 'inline-block', width: '10px', height: '10px', backgroundColor: '#e6a23c', borderRadius: '2px', marginRight: '4px' }} />Model Wait</span>
+                <span><span style={{ display: 'inline-block', width: '10px', height: '10px', backgroundColor: '#67c23a', borderRadius: '2px', marginRight: '4px' }} />Streaming</span>
+              </div>
+            )}
           </div>
 
           {/* Results Grid */}
@@ -169,6 +212,11 @@ export function BenchmarkPanel() {
                       <span className={styles.metricValue}>{r.totalTokens}</span>
                     </div>
                   </div>
+                  {r.pipelineBreakdown && (
+                    <div style={{ fontSize: '11px', opacity: 0.6, marginTop: '6px' }}>
+                      Fetch: {r.pipelineBreakdown.fetchLatency}ms | Wait: {r.pipelineBreakdown.firstSSELatency}ms | Stream: {r.pipelineBreakdown.streamDuration}ms
+                    </div>
+                  )}
                 </div>
                 <span className={`${styles.statusBadge} ${styles[r.status]}`}>{r.status}</span>
               </div>

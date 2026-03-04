@@ -305,6 +305,11 @@ export interface BenchmarkResult {
   totalTokens: number;
   timestamp: number;
   status: 'pass' | 'slow' | 'fail';
+  pipelineBreakdown?: {
+    fetchLatency: number;
+    firstSSELatency: number;
+    streamDuration: number;
+  };
 }
 
 export interface BenchmarkSuite {

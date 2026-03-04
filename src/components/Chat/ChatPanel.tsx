@@ -33,6 +33,7 @@ export function ChatPanel({ sidebarCollapsed, onExpandSidebar }: ChatPanelProps)
   const [showInstructions, setShowInstructions] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const {
     isStreaming,
     streamingText,
@@ -77,6 +78,19 @@ export function ChatPanel({ sidebarCollapsed, onExpandSidebar }: ChatPanelProps)
       textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 200) + 'px';
     }
   }, [input]);
+
+  // Debounce streaming text for ReactMarkdown to avoid re-parsing on every token
+  const [debouncedStreamingText, setDebouncedStreamingText] = useState('');
+  useEffect(() => {
+    if (!isStreaming) {
+      setDebouncedStreamingText(streamingText);
+      return;
+    }
+    const timer = setTimeout(() => {
+      setDebouncedStreamingText(streamingText);
+    }, 80);
+    return () => clearTimeout(timer);
+  }, [streamingText, isStreaming]);
 
   const handleSend = async (text?: string) => {
     const messageText = text || input.trim();
@@ -139,6 +153,7 @@ export function ChatPanel({ sidebarCollapsed, onExpandSidebar }: ChatPanelProps)
 
     setStreaming(true);
     setStreamingReasoning('');
+    abortRef.current = new AbortController();
 
     try {
       const result = await sendMessage({
@@ -148,6 +163,7 @@ export function ChatPanel({ sidebarCollapsed, onExpandSidebar }: ChatPanelProps)
         onToken: (token: string) => {
           appendStreamingText(token);
         },
+        signal: abortRef.current.signal,
       });
 
       const assistantMsg: Message = {
@@ -298,7 +314,7 @@ export function ChatPanel({ sidebarCollapsed, onExpandSidebar }: ChatPanelProps)
                     </div>
                   )}
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {streamingText}
+                    {debouncedStreamingText}
                   </ReactMarkdown>
                   <div className={styles.streamingDots}>
                     <span /><span /><span />
@@ -379,7 +395,7 @@ export function ChatPanel({ sidebarCollapsed, onExpandSidebar }: ChatPanelProps)
             rows={1}
           />
           {isStreaming ? (
-            <button className={`${styles.sendBtn} ${styles.stopBtn}`} onClick={() => { /* abort handled per-request */ }}>
+            <button className={`${styles.sendBtn} ${styles.stopBtn}`} onClick={() => abortRef.current?.abort()}>
               &#x25A0;
             </button>
           ) : (

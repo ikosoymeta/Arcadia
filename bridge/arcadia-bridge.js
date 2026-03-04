@@ -362,6 +362,7 @@ function handleMessages(req, res, body) {
   let responseFinished = false;
   let firstTokenReceived = false;
   let keepalive = null; // SSE keepalive interval (set in streaming mode)
+  let headerFlushTimer = null; // Timeout to flush buffered header data
 
   // Set timeout
   const timeout = setTimeout(() => {
@@ -376,6 +377,7 @@ function handleMessages(req, res, body) {
   function cleanup() {
     clearTimeout(timeout);
     if (keepalive) clearInterval(keepalive);
+    if (headerFlushTimer) clearTimeout(headerFlushTimer);
     activeRequests--;
   }
 
@@ -439,9 +441,30 @@ function handleMessages(req, res, body) {
         const stripped = stripHeader(output);
         if (stripped !== output || output.split('\n').length > 5) {
           headerStripped = true;
+          if (headerFlushTimer) { clearTimeout(headerFlushTimer); headerFlushTimer = null; }
           text = stripped;
           output = stripped;
         } else {
+          // Start a 200ms timer to flush if header detection takes too long
+          if (!headerFlushTimer) {
+            headerFlushTimer = setTimeout(() => {
+              if (!headerStripped && output) {
+                headerStripped = true;
+                const flushed = stripHeader(output) || output;
+                output = flushed;
+                if (flushed) {
+                  totalChars += flushed.length;
+                  try {
+                    res.write(`event: content_block_delta\ndata: ${JSON.stringify({
+                      type: 'content_block_delta',
+                      index: 0,
+                      delta: { type: 'text_delta', text: flushed },
+                    })}\n\n`);
+                  } catch (e) { /* Connection closed */ }
+                }
+              }
+            }, 200);
+          }
           return;
         }
       } else {

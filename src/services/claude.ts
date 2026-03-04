@@ -396,6 +396,11 @@ export interface SendMessageResult {
   outputTokens?: number;
   ttft?: number;
   totalTime?: number;
+  pipelineTimings?: {
+    fetchLatency: number;
+    firstSSELatency: number;
+    streamDuration: number;
+  };
 }
 
 export async function sendMessage(opts: SendMessageOptions): Promise<SendMessageResult> {
@@ -404,7 +409,12 @@ export async function sendMessage(opts: SendMessageOptions): Promise<SendMessage
   const endpoint = buildEndpoint(connection);
   const headers = buildHeaders(connection);
   const startTime = Date.now();
+  const perfStart = performance.now();
   let ttft: number | undefined;
+  let fetchResponseTime: number | undefined;
+
+  // Performance marks for Chrome DevTools profiling
+  performance.mark('arcadia:send-start');
 
   // Build system prompt with folder instructions if any
   const systemParts: string[] = [];
@@ -481,6 +491,10 @@ export async function sendMessage(opts: SendMessageOptions): Promise<SendMessage
   if (!res || !res.ok) {
     throw lastError || new Error('Request failed after retries');
   }
+
+  // Mark fetch response time for pipeline profiling
+  performance.mark('arcadia:fetch-response');
+  fetchResponseTime = performance.now();
 
   // ── Stream parsing ────────────────────────────────────────────────────────
   const reader = res.body!.getReader();
@@ -559,7 +573,10 @@ export async function sendMessage(opts: SendMessageOptions): Promise<SendMessage
 
         if (delta.type === 'text_delta') {
           const text = delta.text as string;
-          if (!ttft) ttft = Date.now() - startTime;
+          if (!ttft) {
+            ttft = Date.now() - startTime;
+            performance.mark('arcadia:first-token');
+          }
           fullText += text;
           onToken?.(text);
         }
@@ -654,7 +671,29 @@ export async function sendMessage(opts: SendMessageOptions): Promise<SendMessage
   }
 
   const totalTime = Date.now() - startTime;
+  const perfEnd = performance.now();
   const tokensPerSecond = outputTokens && totalTime > 0 ? Math.round(outputTokens / (totalTime / 1000)) : undefined;
+
+  // Pipeline profiling: compute per-stage timings and emit DevTools measures
+  performance.mark('arcadia:stream-end');
+  let pipelineTimings: SendMessageResult['pipelineTimings'];
+  try {
+    performance.measure('arcadia:fetch', 'arcadia:send-start', 'arcadia:fetch-response');
+    if (ttft) {
+      performance.measure('arcadia:model-wait', 'arcadia:fetch-response', 'arcadia:first-token');
+      performance.measure('arcadia:streaming', 'arcadia:first-token', 'arcadia:stream-end');
+    }
+    performance.measure('arcadia:total', 'arcadia:send-start', 'arcadia:stream-end');
+  } catch { /* marks may be missing if request failed early */ }
+
+  if (fetchResponseTime !== undefined) {
+    const fetchLatency = Math.round(fetchResponseTime - perfStart);
+    pipelineTimings = {
+      fetchLatency,
+      firstSSELatency: ttft ? Math.round(ttft - fetchLatency) : 0,
+      streamDuration: ttft ? Math.round(perfEnd - perfStart - ttft) : Math.round(perfEnd - perfStart),
+    };
+  }
 
   addLog({
     direction: 'response',
@@ -679,6 +718,7 @@ export async function sendMessage(opts: SendMessageOptions): Promise<SendMessage
     outputTokens,
     ttft,
     totalTime,
+    pipelineTimings,
   };
 }
 
@@ -687,12 +727,12 @@ export async function sendMessage(opts: SendMessageOptions): Promise<SendMessage
 export async function sendBenchmarkMessage(
   connection: Connection,
   prompt: string
-): Promise<{ ttft: number; totalTime: number; tokensPerSecond: number; totalTokens: number }> {
+): Promise<{ ttft: number; totalTime: number; tokensPerSecond: number; totalTokens: number; pipelineTimings?: SendMessageResult['pipelineTimings'] }> {
   const start = Date.now();
   let ttft = 0;
   let tokenCount = 0;
 
-  await sendMessage({
+  const result = await sendMessage({
     connection,
     messages: [{ id: 'bench', role: 'user', content: prompt, timestamp: Date.now() }],
     onToken: () => {
@@ -707,5 +747,6 @@ export async function sendBenchmarkMessage(
     totalTime,
     tokensPerSecond: totalTime > 0 ? Math.round(tokenCount / (totalTime / 1000)) : 0,
     totalTokens: tokenCount,
+    pipelineTimings: result.pipelineTimings,
   };
 }

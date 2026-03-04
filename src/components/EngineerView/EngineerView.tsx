@@ -342,6 +342,19 @@ function EngineerChat() {
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, streamingText]);
 
+  // Debounce streaming text for ReactMarkdown to avoid re-parsing on every token
+  const [debouncedStreamingText, setDebouncedStreamingText] = useState('');
+  useEffect(() => {
+    if (!isStreaming) {
+      setDebouncedStreamingText(streamingText);
+      return;
+    }
+    const timer = setTimeout(() => {
+      setDebouncedStreamingText(streamingText);
+    }, 80);
+    return () => clearTimeout(timer);
+  }, [streamingText, isStreaming]);
+
   const modelInfo = CLAUDE_MODELS.find(m => m.id === activeConnection?.model);
 
   const handleSend = useCallback(async () => {
@@ -603,8 +616,8 @@ function EngineerChat() {
               </div>
             )}
             <div className={styles.engMsgContent}>
-              {streamingText ? (
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{streamingText}</ReactMarkdown>
+              {debouncedStreamingText ? (
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{debouncedStreamingText}</ReactMarkdown>
               ) : (
                 <span className={styles.engCursor}>▌</span>
               )}

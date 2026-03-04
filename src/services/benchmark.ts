@@ -69,6 +69,7 @@ export async function runBenchmarkSuite(
         totalTokens: result.totalTokens,
         timestamp: Date.now(),
         status: result.ttft > 3000 || result.tokensPerSecond < 10 ? 'slow' : 'pass',
+        pipelineBreakdown: result.pipelineTimings,
       };
 
       results.push(br);
@@ -174,6 +175,29 @@ export function identifyWorstCases(suite: BenchmarkSuite): {
         severity: r.renderTime > 1000 ? 'critical' : 'warning',
         suggestion: 'Slow rendering. Consider virtualizing long message lists or debouncing preview updates.',
       });
+    }
+
+    // Pipeline-specific issues
+    if (r.pipelineBreakdown) {
+      if (r.pipelineBreakdown.fetchLatency > 2000) {
+        issues.push({
+          metric: 'Fetch Latency',
+          value: r.pipelineBreakdown.fetchLatency,
+          benchmark: r.name,
+          severity: r.pipelineBreakdown.fetchLatency > 4000 ? 'critical' : 'warning',
+          suggestion: 'High fetch latency. Bridge spawn overhead is slow — consider keeping a warm process pool.',
+        });
+      }
+
+      if (r.pipelineBreakdown.firstSSELatency > 3000) {
+        issues.push({
+          metric: 'First SSE Delay',
+          value: r.pipelineBreakdown.firstSSELatency,
+          benchmark: r.name,
+          severity: r.pipelineBreakdown.firstSSELatency > 5000 ? 'critical' : 'warning',
+          suggestion: 'Slow first SSE event. Model cold start or header stripping delay in the bridge.',
+        });
+      }
     }
   }
 
