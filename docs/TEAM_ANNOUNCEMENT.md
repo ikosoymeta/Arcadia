@@ -6,7 +6,7 @@
 
 ## What is ArcadIA?
 
-ArcadIA Editor gives you a polished, ChatGPT-style interface for Claude — but it runs through your Meta corporate Claude Code license. No API keys to manage, no VPN required, no terminal skills needed. Just open the link and start chatting.
+ArcadIA Editor gives you a polished, ChatGPT-style interface for Claude — but it runs through your Meta corporate Claude Code license. No API keys to manage, no VPN required, no terminal skills needed. Works on **macOS and Windows**. Just open the link and start chatting.
 
 **Try it now:** [https://arcadia.manus.space](https://arcadia.manus.space)
 
@@ -14,19 +14,25 @@ ArcadIA Editor gives you a polished, ChatGPT-style interface for Claude — but 
 
 ## One-Time Setup (60 seconds)
 
-ArcadIA needs a small bridge service running on your Mac to connect to Claude Code. You only do this once — after that, it auto-starts every time you log in.
+ArcadIA needs a small bridge service running on your computer to connect to Claude Code. You only do this once — after that, it auto-starts every time you log in.
 
-**Step 1:** Open Terminal on your Mac.
+**Step 1:** Open your terminal.
 
-**Step 2:** Paste this command and press Enter:
+**Step 2:** Paste the command for your OS and press Enter:
 
-```
+**macOS / Linux (Terminal):**
+```bash
 curl -sL https://raw.githubusercontent.com/ikosoymeta/Arcadia/main/bridge/setup.sh | bash
+```
+
+**Windows (PowerShell — run as Administrator):**
+```powershell
+irm https://raw.githubusercontent.com/ikosoymeta/Arcadia/main/bridge/setup.ps1 | iex
 ```
 
 **Step 3:** Open [https://arcadia.manus.space](https://arcadia.manus.space) in your browser. You should see a green "Active" dot — you're connected.
 
-That's it. The bridge auto-starts on login, so tomorrow you just open the link and go.
+That's it. The bridge auto-starts on login (macOS: LaunchAgent, Windows: Startup folder shortcut), so tomorrow you just open the link and go.
 
 ---
 
@@ -86,9 +92,9 @@ We're actively building:
 
 ## Requirements
 
-- A Meta laptop with **Claude Code** installed ([install here](https://fburl.com/claude.code.users))
-- **Node.js** (pre-installed on most Meta Macs)
-- A modern browser (Chrome, Safari, Firefox)
+- A Meta laptop (macOS or Windows) with **Claude Code** installed ([install here](https://fburl.com/claude.code.users))
+- **Node.js** (pre-installed on most Meta Macs; the Windows setup script will install it via winget if missing)
+- A modern browser (Chrome, Safari, Firefox, Edge)
 - No VPN needed
 
 ---

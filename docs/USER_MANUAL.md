@@ -1,6 +1,6 @@
 # ArcadIA Editor — User Manual
 
-**Version 3.3.0** | Last updated: March 2026
+**Version 3.4.1** | Last updated: March 2026
 
 ArcadIA Editor is a web-based interface for Claude AI, designed specifically for Meta employees. It connects to Claude Code on your laptop through a lightweight local bridge, so you get full Claude access with zero API keys and zero VPN required. This manual covers every feature, panel, and workflow available in the app.
 
@@ -32,20 +32,28 @@ ArcadIA Editor is a web-based interface for Claude AI, designed specifically for
 Getting started with ArcadIA takes about 60 seconds:
 
 1. **Open ArcadIA** in your browser at [https://ikosoymeta.github.io/Arcadia/](https://ikosoymeta.github.io/Arcadia/) or [https://arcadia.manus.space](https://arcadia.manus.space).
-2. **Run the bridge** (one-time setup). On your first visit, you will see a setup screen with a single command. Copy it, paste it into Terminal on your Mac, and press Enter:
-   ```
+2. **Run the bridge** (one-time setup). On your first visit, you will see a setup screen with a single command. Copy it and paste it into your terminal:
+
+   **macOS / Linux (Terminal):**
+   ```bash
    curl -sL https://raw.githubusercontent.com/ikosoymeta/Arcadia/main/bridge/setup.sh | bash
    ```
+
+   **Windows (PowerShell — run as Administrator):**
+   ```powershell
+   irm https://raw.githubusercontent.com/ikosoymeta/Arcadia/main/bridge/setup.ps1 | iex
+   ```
+
 3. **Wait for the green dot.** Once the bridge is running, the sidebar will show a green "Active" indicator next to your connection name. ArcadIA auto-connects — no API keys, no VPN, no configuration.
 4. **Start chatting.** Click "+ New Chat" or pick one of the quick-start prompts on the welcome screen.
 
-After the one-time setup, the bridge auto-starts on login (via a macOS LaunchAgent), so you just open ArcadIA and go.
+After the one-time setup, the bridge auto-starts on login. On macOS this uses a LaunchAgent; on Windows it creates a shortcut in your Startup folder.
 
 ---
 
 ## 2. The ArcadIA Bridge
 
-The bridge is a small Node.js service that runs locally on your Mac (port 8087). It acts as a translator between ArcadIA in your browser and Claude Code on your laptop. Claude Code handles all Meta internal authentication automatically through the `meta@Meta` plugin.
+The bridge is a small Node.js service that runs locally on your computer (port 8087). It works on **macOS, Windows, and Linux**. It acts as a translator between ArcadIA in your browser and Claude Code on your laptop. Claude Code handles all Meta internal authentication automatically through the `meta@Meta` plugin.
 
 ### How it works
 
@@ -53,20 +61,23 @@ The bridge is a small Node.js service that runs locally on your Mac (port 8087).
 Browser (ArcadIA)  ──HTTP──▶  localhost:8087 (Bridge)  ──stdin/stdout──▶  Claude Code CLI
 ```
 
-### Key features (v3.3.0)
+### Key features (v3.4.1)
 
 | Feature | Description |
 |---|---|
-| **Auto-start** | Installs a macOS LaunchAgent so the bridge starts on login |
-| **Process pre-spawning** | Keeps a standby Claude process ready for instant dispatch, reducing response time from ~50s to ~5-10s for subsequent requests |
-| **Phase-aware progress** | Sends real-time status (Connecting → Authenticating → Waiting) to the frontend |
-| **Auto port recovery** | Automatically kills stale processes on port 8087 before starting |
-| **Graceful shutdown** | Properly cleans up child processes on Ctrl+C or system shutdown |
+| **Cross-platform** | Works on macOS, Windows, and Linux with automatic OS detection |
+| **Auto-start** | macOS: LaunchAgent. Windows: Startup folder shortcut. Starts on login automatically |
+| **Process pool (x2)** | Keeps TWO standby Claude processes ready for instant dispatch, reducing response time from ~50s to ~5-10s for subsequent requests |
+| **Contextual tips** | Shows relevant tips while waiting for Claude, matched to your prompt category (writing, data, code, etc.) |
+| **TTFT estimate** | Tracks historical response times and shows "Usually responds in ~Xs" based on your averages |
+| **Auto port recovery** | Automatically kills stale processes on port 8087 before starting (uses `lsof` on macOS/Linux, `netstat` on Windows) |
+| **Graceful shutdown** | Properly cleans up all pool and child processes on Ctrl+C or system shutdown |
 | **Context management** | Trims old messages to stay within Claude's context window |
 | **Streaming** | Real-time SSE streaming so you see tokens as they arrive |
 
 ### Manual bridge commands
 
+**macOS / Linux:**
 ```bash
 # Start the bridge manually
 node ~/.arcadia-bridge/arcadia-bridge.js
@@ -79,6 +90,21 @@ curl http://127.0.0.1:8087/health
 
 # View bridge logs
 cat ~/.arcadia-bridge/bridge.log
+```
+
+**Windows (PowerShell):**
+```powershell
+# Start the bridge manually
+node "$env:USERPROFILE\.arcadia-bridge\arcadia-bridge.js"
+
+# Re-run setup (updates to latest version)
+irm https://raw.githubusercontent.com/ikosoymeta/Arcadia/main/bridge/setup.ps1 | iex
+
+# Check if bridge is running
+Invoke-RestMethod http://127.0.0.1:8087/health
+
+# View bridge logs
+Get-Content "$env:USERPROFILE\.arcadia-bridge\bridge.log" -Tail 50
 ```
 
 ---
@@ -364,9 +390,9 @@ The Help panel (? icon in sidebar) contains a searchable FAQ covering every feat
 **Contact support:** [ikosoy@meta.com](mailto:ikosoy@meta.com?subject=ArcadIA%20Editor%20Support)
 
 When reporting issues, include:
-- Your Mac model and macOS version
+- Your OS and version (macOS, Windows, or Linux)
 - Output of `claude --version`
-- Output of `lsof -i :8087`
+- Output of `curl http://127.0.0.1:8087/health` (or `Invoke-RestMethod http://127.0.0.1:8087/health` on Windows)
 - Any error messages you see
 
 ---
@@ -385,22 +411,34 @@ When reporting issues, include:
 
 ### "Unable to connect" or no green dot
 
-The bridge is not running. Open Terminal and run:
+The bridge is not running. Open your terminal and start it:
+
+**macOS / Linux:**
 ```bash
 node ~/.arcadia-bridge/arcadia-bridge.js
 ```
 
-If you have not set it up yet, run the one-time setup:
-```bash
-curl -sL https://raw.githubusercontent.com/ikosoymeta/Arcadia/main/bridge/setup.sh | bash
+**Windows (PowerShell):**
+```powershell
+node "$env:USERPROFILE\.arcadia-bridge\arcadia-bridge.js"
 ```
+
+If you have not set it up yet, run the one-time setup (see [Quick Start](#1-quick-start)).
 
 ### Bridge is running but ArcadIA will not connect
 
 Check that nothing else is using port 8087:
+
+**macOS / Linux:**
 ```bash
 lsof -i :8087
 ```
+
+**Windows (PowerShell):**
+```powershell
+netstat -ano | findstr :8087
+```
+
 The bridge (v3.2.3+) automatically kills stale processes on startup, but if the issue persists, manually kill the process and restart.
 
 ### Claude Code is not installed
@@ -414,22 +452,36 @@ claude --version
 
 ### Bridge stopped working after a restart
 
-The bridge should auto-start on login. If it did not, reload the LaunchAgent:
+The bridge should auto-start on login. If it did not:
+
+**macOS:** Reload the LaunchAgent:
 ```bash
 launchctl load ~/Library/LaunchAgents/com.arcadia.bridge.plist
 ```
 
-Or re-run the setup command to reinstall.
+**Windows:** Check that the "ArcadIA Bridge" shortcut exists in your Startup folder:
+```powershell
+ls "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\ArcadIA Bridge.lnk"
+```
+
+On either platform, re-run the setup command to reinstall (see [Quick Start](#1-quick-start)).
 
 ### Slow first response (~50s)
 
-The first request after bridge startup takes ~50 seconds because Claude Code needs to load Meta's authentication plugins. Subsequent requests should be much faster (~5-10s) thanks to process pre-spawning in v3.3.0. If every request is slow, check your network connection and Claude Code installation.
+The first request after bridge startup takes ~50 seconds because Claude Code needs to load Meta's authentication plugins. Subsequent requests should be much faster (~5-10s) thanks to the process pool in v3.4.0, which keeps two standby processes ready. If every request is slow, check your network connection and Claude Code installation. You can verify pool status via the health endpoint — look for `pool_status` entries where `ready: true`.
 
 ### Connection diagnostics
 
 On the welcome screen, click "Connection diagnostics" to see bridge status, endpoint, version, and last check time. You can also check the bridge health directly:
+
+**macOS / Linux:**
 ```bash
 curl http://127.0.0.1:8087/health | python3 -m json.tool
 ```
 
-This shows bridge version, warm-up status, standby process readiness, and request statistics.
+**Windows (PowerShell):**
+```powershell
+Invoke-RestMethod http://127.0.0.1:8087/health | ConvertTo-Json
+```
+
+This shows bridge version, platform, warm-up status, pool process readiness (2 slots), and request statistics. The `platform` field confirms whether the bridge is running on `darwin` (macOS), `win32` (Windows), or `linux`.

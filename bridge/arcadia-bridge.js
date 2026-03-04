@@ -32,7 +32,8 @@ const os = require('os');
 
 const PORT = 8087;
 const HOST = '127.0.0.1';
-const VERSION = '3.4.0';
+const VERSION = '3.4.1';
+const IS_WIN = process.platform === 'win32';
 const TIMEOUT_MS = 180000; // 3 minute timeout
 const KEEPALIVE_INTERVAL_MS = 2000; // SSE keepalive every 2s
 
@@ -43,19 +44,44 @@ const activeChildren = new Set();
 // ─── Pre-flight: kill any existing process on our port ────────────────────
 function killProcessOnPort(port) {
   try {
-    // lsof may return multiple PIDs (one per line); kill each individually
-    const raw = execSync(`lsof -ti :${port} 2>/dev/null || true`, { encoding: 'utf-8', shell: true }).trim();
-    if (!raw) return false;
-    const pids = raw.split(/\s+/).filter(p => p && p !== String(process.pid));
+    let pids = [];
+    if (IS_WIN) {
+      // Windows: use netstat to find PIDs on the port
+      const raw = execSync(`netstat -ano | findstr :${port} | findstr LISTENING`, { encoding: 'utf-8', shell: true }).trim();
+      if (!raw) return false;
+      // Each line ends with the PID; extract unique PIDs
+      const seen = new Set();
+      for (const line of raw.split('\n')) {
+        const parts = line.trim().split(/\s+/);
+        const pid = parts[parts.length - 1];
+        if (pid && pid !== '0' && pid !== String(process.pid) && !seen.has(pid)) {
+          seen.add(pid);
+          pids.push(pid);
+        }
+      }
+    } else {
+      // macOS/Linux: use lsof
+      const raw = execSync(`lsof -ti :${port} 2>/dev/null || true`, { encoding: 'utf-8', shell: true }).trim();
+      if (!raw) return false;
+      pids = raw.split(/\s+/).filter(p => p && p !== String(process.pid));
+    }
     if (pids.length === 0) return false;
     for (const pid of pids) {
       try {
         console.log(`  Killing old process on port ${port}: PID ${pid}`);
-        execSync(`kill -9 ${pid} 2>/dev/null || true`, { shell: true });
+        if (IS_WIN) {
+          execSync(`taskkill /PID ${pid} /F 2>nul`, { shell: true });
+        } else {
+          execSync(`kill -9 ${pid} 2>/dev/null || true`, { shell: true });
+        }
       } catch { /* already dead */ }
     }
     // Give the OS a moment to release the port
-    execSync('sleep 0.5', { shell: true });
+    if (IS_WIN) {
+      execSync('ping -n 2 127.0.0.1 >nul', { shell: true }); // ~1s delay on Windows
+    } else {
+      execSync('sleep 0.5', { shell: true });
+    }
     return true;
   } catch {
     return false;
@@ -65,8 +91,15 @@ function killProcessOnPort(port) {
 // Kill any leftover process on our port before we start
 (function preflightPortCheck() {
   try {
-    const raw = execSync(`lsof -ti :${PORT} 2>/dev/null || true`, { encoding: 'utf-8', shell: true }).trim();
-    if (raw) {
+    let occupied = false;
+    if (IS_WIN) {
+      const raw = execSync(`netstat -ano | findstr :${PORT} | findstr LISTENING`, { encoding: 'utf-8', shell: true }).trim();
+      occupied = !!raw;
+    } else {
+      const raw = execSync(`lsof -ti :${PORT} 2>/dev/null || true`, { encoding: 'utf-8', shell: true }).trim();
+      occupied = !!raw;
+    }
+    if (occupied) {
       console.log(`\n  ⚠ Port ${PORT} is occupied. Cleaning up...`);
       killProcessOnPort(PORT);
       console.log(`  ✓ Port ${PORT} freed.\n`);
@@ -136,7 +169,8 @@ function isMetaStderrNoise(text) {
 // ─── Detect Claude Code path ───────────────────────────────────────────────
 let CLAUDE_PATH = 'claude';
 try {
-  const which = execSync('which claude 2>/dev/null || where claude 2>/dev/null', { encoding: 'utf-8', shell: true }).trim();
+  const findCmd = IS_WIN ? 'where claude 2>nul' : 'which claude 2>/dev/null';
+  const which = execSync(findCmd, { encoding: 'utf-8', shell: true }).trim();
   if (which) {
     CLAUDE_PATH = which.split('\n')[0].trim();
     console.log(`  Found Claude Code at: ${CLAUDE_PATH}`);
@@ -148,7 +182,8 @@ try {
 // ─── Verify Claude Code works ──────────────────────────────────────────────
 let claudeVersion = 'unknown';
 try {
-  claudeVersion = execSync(`"${CLAUDE_PATH}" --version 2>&1`, { encoding: 'utf-8', shell: true, timeout: 5000 }).trim();
+  const versionRedirect = IS_WIN ? '2>&1' : '2>&1';
+  claudeVersion = execSync(`"${CLAUDE_PATH}" --version ${versionRedirect}`, { encoding: 'utf-8', shell: true, timeout: 5000 }).trim();
   console.log(`  Claude Code version: ${claudeVersion}`);
 } catch (e) {
   // Don't block startup on version check — Meta's Claude Code can be slow to respond
@@ -382,6 +417,7 @@ function handleHealthCheck(res, req) {
     status: 'ok',
     bridge: 'arcadia-bridge',
     version: VERSION,
+    platform: process.platform,
     claude_code: true,
     meta_internal: true,
     claude_path: CLAUDE_PATH,
@@ -980,11 +1016,12 @@ function handleValidate(req, res, body) {
     const startTime = Date.now();
     console.log(`[${new Date().toISOString()}]   Running: ${cmd}`);
 
-    const proc = spawn('sh', ['-c', cmd], {
+    // Cross-platform: use shell: true instead of sh -c / cmd /c
+    const proc = spawn(cmd, [], {
       cwd: cwd,
       env: { ...process.env },
       stdio: ['ignore', 'pipe', 'pipe'],
-      shell: false,
+      shell: true,
     });
 
     let stdout = '';
