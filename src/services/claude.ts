@@ -298,6 +298,15 @@ export function detectErrorInContent(content: string): DetectedError | null {
         suggestion: 'Try a shorter or simpler prompt. If this keeps happening, the Claude Code service may be under heavy load.',
       };
     }
+    // Content policy block (exit code with no real error)
+    if (detail.includes('blocked by content policy') || detail.includes('Try rephrasing')) {
+      return {
+        type: 'content_policy',
+        title: 'Request Blocked',
+        message: 'Claude Code could not process this request. It may have been blocked by Meta\'s content policy filters.',
+        suggestion: 'Try rephrasing your prompt, making it shorter, or breaking it into smaller parts.',
+      };
+    }
     return {
       type: 'bridge_error',
       title: 'Bridge Error',

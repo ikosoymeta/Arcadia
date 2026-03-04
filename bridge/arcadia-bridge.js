@@ -75,6 +75,25 @@ function isCommandAllowed(cmd) {
   return ALLOWED_COMMAND_PREFIXES.some(prefix => trimmed.startsWith(prefix));
 }
 
+// ─── Meta internal stderr noise filter ─────────────────────────────────────
+// Filters out Meta-specific logging noise from Claude Code stderr output.
+// These are harmless internal log lines (scribecat, glog, etc.) that confuse users.
+function isMetaStderrNoise(text) {
+  if (!text || !text.trim()) return true; // empty lines are noise
+  const t = text.trim();
+  // scribecat logger references
+  if (t.includes('scribe_cat.go') || t.includes('scribecat:') || t.includes('scribecat ')) return true;
+  // glog-format lines: F0304, I0304, W0304, E0304 (severity + date)
+  if (/^[FIWED]\d{4}\s/.test(t)) return true;
+  // Claude Code branding lines
+  if (t.includes('Claude Code at Meta') || t.includes('fburl.com')) return true;
+  // Meta internal tool noise
+  if (t.includes('thrift') || t.includes('configerator') || t.includes('tupperware')) return true;
+  // Node.js deprecation warnings
+  if (t.startsWith('(node:') || t.includes('DeprecationWarning')) return true;
+  return false;
+}
+
 // ─── Detect Claude Code path ───────────────────────────────────────────────
 let CLAUDE_PATH = 'claude';
 try {
@@ -500,8 +519,8 @@ function handleMessages(req, res, body) {
     claude.stderr.on('data', (data) => {
       const errText = data.toString();
       stderrLines.push(errText);
-      // Filter out known noise: Meta internal scribecat logger, Claude Code branding
-      if (!errText.includes('Claude Code at Meta') && !errText.includes('fburl.com') && !errText.includes('scribe_cat.go') && !errText.includes('scribecat:')) {
+      // Filter out known noise: Meta internal scribecat/glog, Claude Code branding
+      if (!isMetaStderrNoise(errText)) {
         errorOutput += errText;
         console.log(`[${new Date().toISOString()}]   stderr: ${errText.trim()}`);
       }
@@ -525,10 +544,15 @@ function handleMessages(req, res, body) {
         }
       }
 
-      if (totalChars === 0 && (code !== 0 || errorOutput)) {
+      // Clean errorOutput: remove any remaining Meta noise that slipped through
+      const cleanError = errorOutput.split('\n').filter(line => !isMetaStderrNoise(line)).join('\n').trim();
+
+      if (totalChars === 0 && (code !== 0 || cleanError)) {
         const errMsg = killed
           ? `Request timed out after ${TIMEOUT_MS / 1000}s`
-          : `Claude Code exited with code ${code} (signal: ${signal}). ${errorOutput.slice(0, 500)}`;
+          : cleanError
+            ? `Claude Code exited with code ${code}. ${cleanError.slice(0, 500)}`
+            : `Claude Code exited with code ${code}. The request may have been blocked by content policy. Try rephrasing your prompt.`;
         
         try {
           res.write(`event: content_block_delta\ndata: ${JSON.stringify({
@@ -609,8 +633,8 @@ function handleMessages(req, res, body) {
     claude.stderr.on('data', (data) => {
       const errText = data.toString();
       stderrLines.push(errText);
-      // Filter out known noise: Meta internal scribecat logger, Claude Code branding
-      if (!errText.includes('Claude Code at Meta') && !errText.includes('fburl.com') && !errText.includes('scribe_cat.go') && !errText.includes('scribecat:')) {
+      // Filter out known noise: Meta internal scribecat/glog, Claude Code branding
+      if (!isMetaStderrNoise(errText)) {
         errorOutput += errText;
         console.log(`[${new Date().toISOString()}]   stderr: ${errText.trim()}`);
       }
@@ -621,11 +645,14 @@ function handleMessages(req, res, body) {
       const elapsed = Date.now() - startTime;
 
       const strippedOutput = stripHeader(output).trim();
+      const cleanError = errorOutput.split('\n').filter(line => !isMetaStderrNoise(line)).join('\n').trim();
 
       if ((code !== 0 && code !== null) && !strippedOutput) {
         const errMsg = killed
           ? `Request timed out after ${TIMEOUT_MS / 1000}s`
-          : `Claude Code exited with code ${code} (signal: ${signal}): ${errorOutput.slice(0, 500)}`;
+          : cleanError
+            ? `Claude Code exited with code ${code}. ${cleanError.slice(0, 500)}`
+            : `Claude Code exited with code ${code}. The request may have been blocked by content policy. Try rephrasing your prompt.`;
         
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
