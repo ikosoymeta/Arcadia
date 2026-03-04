@@ -44,8 +44,17 @@ function getFollowUpSuggestions(content: string): string[] {
 
 // ─── Bridge Setup Prompt ─────────────────────────────────────────────────────
 
-const SETUP_COMMAND = 'curl -sL https://raw.githubusercontent.com/ikosoymeta/Arcadia/main/bridge/setup.sh | bash';
-const MANUAL_START_CMD = 'node ~/.arcadia-bridge/arcadia-bridge.js';
+const SETUP_CMD_MAC = 'curl -sL https://raw.githubusercontent.com/ikosoymeta/Arcadia/main/bridge/setup.sh | bash';
+const SETUP_CMD_WIN = 'irm https://raw.githubusercontent.com/ikosoymeta/Arcadia/main/bridge/setup.ps1 | iex';
+const MANUAL_CMD_MAC = 'node ~/.arcadia-bridge/arcadia-bridge.js';
+const MANUAL_CMD_WIN = 'node "%USERPROFILE%\\.arcadia-bridge\\arcadia-bridge.js"';
+
+function detectOS(): 'mac' | 'win' | 'linux' {
+  const ua = navigator.userAgent.toLowerCase();
+  if (ua.includes('win')) return 'win';
+  if (ua.includes('linux') && !ua.includes('android')) return 'linux';
+  return 'mac';
+}
 
 interface DiagState {
   bridge: 'checking' | 'ok' | 'fail';
@@ -58,6 +67,13 @@ function BridgeSetupPrompt({ onRetry }: { onRetry: () => void }) {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [diag, setDiag] = useState<DiagState>({ bridge: 'checking', bridgeVersion: '', lastCheck: '' });
   const [pollCount, setPollCount] = useState(0);
+  const [os] = useState(detectOS);
+  const setupCmd = os === 'win' ? SETUP_CMD_WIN : SETUP_CMD_MAC;
+  const manualCmd = os === 'win' ? MANUAL_CMD_WIN : MANUAL_CMD_MAC;
+  const terminalName = os === 'win' ? 'PowerShell' : 'Terminal';
+  const terminalHint = os === 'win'
+    ? 'Press \u229e Win → type "PowerShell" → right-click → Run as Administrator'
+    : 'Press \u2318 Space → type "Terminal" → press Enter';
 
   // Health check
   const runDiagnostics = useCallback(async () => {
@@ -91,7 +107,7 @@ function BridgeSetupPrompt({ onRetry }: { onRetry: () => void }) {
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(SETUP_COMMAND);
+      await navigator.clipboard.writeText(setupCmd);
       setCopied(true);
       setTimeout(() => setCopied(false), 3000);
     } catch {
@@ -112,21 +128,61 @@ function BridgeSetupPrompt({ onRetry }: { onRetry: () => void }) {
         Connect to Claude
       </div>
       <div className={styles.bridgeSubtitle}>
-        Paste this command in Terminal to connect ArcadIA to Claude on your Mac.
-        <br />
-        <span style={{ opacity: 0.7, fontSize: '12px' }}>
-          Open Terminal: press <kbd style={{
-            background: 'var(--bg-tertiary)', padding: '1px 5px', borderRadius: '3px',
-            fontSize: '11px', border: '1px solid var(--border-color)'
-          }}>⌘ Space</kbd> → type "Terminal" → press Enter
-        </span>
+        Paste this command in <strong>{terminalName}</strong> to connect ArcadIA to Claude.
+      </div>
+
+      {/* Step 1: Open Terminal */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: '10px',
+        padding: '10px 14px', borderRadius: '8px',
+        background: 'rgba(255, 255, 255, 0.03)',
+        border: '1px solid var(--border-color)',
+        marginBottom: '8px'
+      }}>
+        <span style={{
+          background: 'var(--accent)', color: '#fff', borderRadius: '50%',
+          width: '22px', height: '22px', display: 'flex', alignItems: 'center',
+          justifyContent: 'center', fontSize: '12px', fontWeight: 700, flexShrink: 0
+        }}>1</span>
+        <div style={{ fontSize: '13px' }}>
+          <div>Open <strong style={{ color: 'var(--text-primary)' }}>{terminalName}</strong></div>
+          <div style={{ opacity: 0.6, fontSize: '11.5px', marginTop: '2px' }}>{terminalHint}</div>
+        </div>
+      </div>
+
+      {/* Step 2: Paste command */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: '10px',
+        padding: '10px 14px', borderRadius: '8px',
+        background: 'rgba(255, 255, 255, 0.03)',
+        border: '1px solid var(--border-color)',
+        marginBottom: '8px'
+      }}>
+        <span style={{
+          background: 'var(--accent)', color: '#fff', borderRadius: '50%',
+          width: '22px', height: '22px', display: 'flex', alignItems: 'center',
+          justifyContent: 'center', fontSize: '12px', fontWeight: 700, flexShrink: 0
+        }}>2</span>
+        <span style={{ fontSize: '13px' }}>Paste the command below and press Enter</span>
       </div>
 
       <div className={styles.cmdBox}>
-        <code id="bridge-cmd" className={styles.cmdText} style={{ fontSize: '11.5px' }}>{SETUP_COMMAND}</code>
+        <code id="bridge-cmd" className={styles.cmdText} style={{ fontSize: '11.5px' }}>{setupCmd}</code>
         <button className={styles.copyBtn} onClick={handleCopy}>
           {copied ? '✓ Copied!' : '📋 Copy'}
         </button>
+      </div>
+
+      {/* Warning: not Claude Code */}
+      <div style={{
+        display: 'flex', alignItems: 'flex-start', gap: '8px',
+        padding: '8px 12px', borderRadius: '6px',
+        background: 'rgba(234, 179, 8, 0.08)',
+        border: '1px solid rgba(234, 179, 8, 0.2)',
+        marginTop: '4px', fontSize: '12px', color: 'rgba(234, 179, 8, 0.9)'
+      }}>
+        <span style={{ flexShrink: 0, marginTop: '1px' }}>⚠️</span>
+        <span>Use your system <strong>{terminalName}</strong>, not Claude Code's terminal. Pasting into Claude Code will trigger a security review instead of running the setup.</span>
       </div>
 
       {/* Auto-detection status - always visible */}
@@ -157,7 +213,7 @@ function BridgeSetupPrompt({ onRetry }: { onRetry: () => void }) {
       <div className={styles.bridgeNote} style={{ marginTop: '12px' }}>
         Already set up? The bridge auto-starts on login. If it stopped, run: <code style={{
           fontSize: '11px', background: 'var(--bg-tertiary)', padding: '2px 6px', borderRadius: '4px'
-        }}>{MANUAL_START_CMD}</code>
+        }}>{manualCmd}</code>
       </div>
 
       {/* Troubleshooting - collapsed by default */}
@@ -191,8 +247,8 @@ function BridgeSetupPrompt({ onRetry }: { onRetry: () => void }) {
               <ul className={styles.troubleshootList}>
                 <li>Make sure Claude Code is installed: <code>claude --version</code></li>
                 <li>Make sure Node.js is installed: <code>node --version</code></li>
-                <li>Check if port is in use: <code>lsof -i :8087</code></li>
-                <li>Restart the bridge: <code>bash ~/.arcadia-bridge/setup.sh</code></li>
+                <li>Check if port is in use: <code>{os === 'win' ? 'netstat -ano | findstr :8087' : 'lsof -i :8087'}</code></li>
+                <li>Restart the bridge: <code>{os === 'win' ? 'irm https://raw.githubusercontent.com/ikosoymeta/Arcadia/main/bridge/setup.ps1 | iex' : 'bash ~/.arcadia-bridge/setup.sh'}</code></li>
                 <li>Need help? <a href="mailto:ikosoy@meta.com?subject=ArcadIA%20Editor%20Support" style={{ color: 'var(--accent)' }}>Contact support</a></li>
               </ul>
             </div>
