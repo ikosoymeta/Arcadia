@@ -324,7 +324,12 @@ function DebugPanel() {
 
 function EngineerChat() {
   const { activeConnection, connections, setActiveConnection } = useConnection();
-  const { getActiveConversation, addMessage, createConversation, isStreaming, setStreaming, streamingText, setStreamingText, appendStreamingText, streamingReasoning, appendStreamingReasoning, setStreamingReasoning } = useChat();
+  const {
+    getActiveConversation, addMessage, createConversation,
+    isStreaming, streamingText, streamingReasoning,
+    setStreaming, appendStreamingText, appendStreamingReasoning, setStreamingReasoning,
+    getStreamingState, abortConversationStream, setAbortController,
+  } = useChat();
 
   const [input, setInput] = useState('');
   const [systemPrompt, setSystemPrompt] = useState('');
@@ -333,7 +338,6 @@ function EngineerChat() {
   const [images, setImages] = useState<ImageAttachment[]>([]);
   const [error, setError] = useState('');
   const [showThinkingFor, setShowThinkingFor] = useState<Set<string>>(new Set());
-  const abortRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -361,7 +365,6 @@ function EngineerChat() {
     const text = input.trim();
     if (!text && images.length === 0) return;
     if (!activeConnection) { setError('Connecting to Meta infrastructure... Please wait.'); return; }
-    if (isStreaming) return;
 
     setError('');
     setInput('');
@@ -369,6 +372,23 @@ function EngineerChat() {
 
     let convId = conversation?.id;
     if (!convId) convId = createConversation(activeConnection.model);
+
+    // If already streaming, abort current stream and save partial response
+    const currentStreamState = getStreamingState(convId);
+    if (currentStreamState.isStreaming) {
+      const partialText = abortConversationStream(convId);
+      if (partialText.trim()) {
+        const partialMsg: Message = {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: partialText + '\n\n*[Response interrupted]*',
+          timestamp: Date.now(),
+          model: activeConnection.model,
+        };
+        addMessage(convId, partialMsg);
+      }
+      await new Promise(r => setTimeout(r, 50));
+    }
 
     const userMsg: Message = {
       id: crypto.randomUUID(),
@@ -390,10 +410,9 @@ function EngineerChat() {
 
     addMessage(convId, userMsg);
     trackMessage(userMsg, convId);
-    setStreaming(true);
-    setStreamingText('');
-    setStreamingReasoning('');
-    abortRef.current = new AbortController();
+    setStreaming(convId, true);
+    const controller = new AbortController();
+    setAbortController(convId, controller);
 
     const allMessages = [...(conversation?.messages ?? []), userMsg];
 
@@ -403,14 +422,13 @@ function EngineerChat() {
         messages: allMessages,
         systemPrompt: systemPrompt || undefined,
         tools: enableTools ? BUILTIN_TOOLS : undefined,
-        onToken: appendStreamingText,
-        onThinking: appendStreamingReasoning,
+        onToken: (chunk: string) => appendStreamingText(convId!, chunk),
+        onThinking: (chunk: string) => appendStreamingReasoning(convId!, chunk),
         onToolCall: (tc) => {
-          // Execute built-in tool and show result
           const toolResult = executeBuiltinTool(tc.name, tc.input);
           console.log(`Tool ${tc.name} result:`, toolResult);
         },
-        signal: abortRef.current.signal,
+        signal: controller.signal,
       });
 
       const assistantMsg: Message = {
@@ -435,11 +453,10 @@ function EngineerChat() {
         setError(err.message);
       }
     } finally {
-      setStreaming(false);
-      setStreamingText('');
-      setStreamingReasoning('');
+      setStreaming(convId!, false);
+      setAbortController(convId!, null);
     }
-  }, [input, images, activeConnection, isStreaming, conversation, createConversation, addMessage, setStreaming, setStreamingText, appendStreamingText, setStreamingReasoning, appendStreamingReasoning, systemPrompt, enableTools]);
+  }, [input, images, activeConnection, conversation, createConversation, addMessage, setStreaming, appendStreamingText, setStreamingReasoning, appendStreamingReasoning, systemPrompt, enableTools, getStreamingState, abortConversationStream, setAbortController]);
 
   const toggleThinking = (msgId: string) => {
     setShowThinkingFor(prev => {
@@ -671,13 +688,17 @@ function EngineerChat() {
             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
             placeholder="Message Claude... (Enter to send, Shift+Enter for newline)"
             rows={1}
-            disabled={!activeConnection || isStreaming}
+            disabled={!activeConnection}
           />
-          {isStreaming ? (
-            <button className={styles.engStopBtn} onClick={() => abortRef.current?.abort()}>⏹</button>
-          ) : (
-            <button className={styles.engSendBtn} onClick={handleSend} disabled={!input.trim() && images.length === 0}>↑</button>
+          {isStreaming && (
+            <button className={styles.engStopBtn} onClick={() => { if (conversation?.id) abortConversationStream(conversation.id); }} title="Stop generation">⏹</button>
           )}
+          <button
+            className={styles.engSendBtn}
+            onClick={handleSend}
+            disabled={!input.trim() && images.length === 0}
+            title={isStreaming ? 'Send follow-up (interrupts current response)' : 'Send (Enter)'}
+          >↑</button>
         </div>
       </div>
     </div>

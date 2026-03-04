@@ -319,6 +319,14 @@ export interface BenchmarkSuite {
   timestamp: number;
 }
 
+// ─── Per-Conversation Streaming State ─────────────────────────────────────────
+
+export interface ConversationStreamingState {
+  isStreaming: boolean;
+  streamingText: string;
+  streamingReasoning: string;
+}
+
 export interface WebVitalsResult {
   lcp?: number;
   fid?: number;

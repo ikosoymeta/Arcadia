@@ -454,8 +454,9 @@ export function SimpleView() {
   const { activeConnection, updateConnection, isMetaProxy, configStatus, retryAutoConnect } = useConnection();
   const {
     getActiveConversation, addMessage, createConversation,
-    isStreaming, setStreaming, streamingText, setStreamingText,
-    appendStreamingText, streamingReasoning, setStreamingReasoning, appendStreamingReasoning,
+    isStreaming, streamingText, streamingReasoning,
+    setStreaming, appendStreamingText, appendStreamingReasoning,
+    getStreamingState, abortConversationStream, setAbortController,
   } = useChat();
 
   const [input, setInput] = useState('');
@@ -467,7 +468,6 @@ export function SimpleView() {
   const [isDragging, setIsDragging] = useState(false);
   const [showModelSelector, setShowModelSelector] = useState(false);
   const [showThinkingLive, setShowThinkingLive] = useState(false);
-  const abortRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesAreaRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -528,18 +528,35 @@ export function SimpleView() {
     const text = (overrideText ?? input).trim();
     if (!text && images.length === 0) return;
     if (!activeConnection) { setError('No connection configured. Go to Settings to add your API key.'); return; }
-    if (isStreaming) return;
-
-    setError('');
-    setInput('');
-    setImages([]);
-    setFollowUps([]);
 
     // Ensure conversation exists
     let convId = conversation?.id;
     if (!convId) {
       convId = createConversation(activeConnection.model);
     }
+
+    // If this conversation is already streaming, abort and save partial response
+    const currentStreamState = getStreamingState(convId);
+    if (currentStreamState.isStreaming) {
+      const partialText = abortConversationStream(convId);
+      if (partialText.trim()) {
+        const partialMsg: Message = {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: partialText + '\n\n*[Response interrupted]*',
+          timestamp: Date.now(),
+          model: activeConnection.model,
+        };
+        addMessage(convId, partialMsg);
+      }
+      // Brief pause to let abort propagate
+      await new Promise(r => setTimeout(r, 50));
+    }
+
+    setError('');
+    setInput('');
+    setImages([]);
+    setFollowUps([]);
 
     // Build user message
     const userMsg: Message = {
@@ -573,12 +590,11 @@ export function SimpleView() {
     setActivitySteps(steps);
     setShowActivity(true);
 
-    setStreaming(true);
-    setStreamingText('');
-    setStreamingReasoning('');
+    setStreaming(convId, true);
     setShowThinkingLive(false);
 
-    abortRef.current = new AbortController();
+    const controller = new AbortController();
+    setAbortController(convId, controller);
 
     // Elapsed time counter for "thinking" phase
     const sendStartTime = Date.now();
@@ -609,12 +625,12 @@ export function SimpleView() {
             setStep('thinking', 'done', `${ttftSec}s`);
             setStep('writing', 'active', 'Streaming response...');
           }
-          appendStreamingText(chunk);
+          appendStreamingText(convId!, chunk);
         },
         onThinking: (chunk) => {
-          appendStreamingReasoning(chunk);
+          appendStreamingReasoning(convId!, chunk);
         },
-        signal: abortRef.current.signal,
+        signal: controller.signal,
       });
 
       setStep('writing', 'done');
@@ -657,12 +673,12 @@ export function SimpleView() {
       }
     } finally {
       clearInterval(elapsedTimer);
-      setStreaming(false);
-      setStreamingText('');
-      setStreamingReasoning('');
+      setStreaming(convId!, false);
+      setAbortController(convId!, null);
     }
-  }, [input, images, activeConnection, isStreaming, conversation, createConversation, addMessage,
-    setStreaming, setStreamingText, appendStreamingText, setStreamingReasoning, appendStreamingReasoning, setStep]);
+  }, [input, images, activeConnection, conversation, createConversation, addMessage,
+    setStreaming, appendStreamingText, appendStreamingReasoning, setStep,
+    getStreamingState, abortConversationStream, setAbortController]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -703,7 +719,9 @@ export function SimpleView() {
   };
 
   const handleStop = () => {
-    abortRef.current?.abort();
+    if (conversation?.id) {
+      abortConversationStream(conversation.id);
+    }
   };
 
   const isEmpty = messages.length === 0;
@@ -912,16 +930,15 @@ export function SimpleView() {
             rows={1}
             style={{ resize: 'none' }}
           />
-          {isStreaming ? (
+          {isStreaming && (
             <button className={styles.stopBtn} onClick={handleStop} title="Stop generation">⏹</button>
-          ) : (
-            <button
-              className={styles.sendBtn}
-              onClick={() => handleSend()}
-              disabled={!input.trim() && images.length === 0}
-              title="Send (Enter)"
-            >↑</button>
           )}
+          <button
+            className={styles.sendBtn}
+            onClick={() => handleSend()}
+            disabled={!input.trim() && images.length === 0}
+            title={isStreaming ? 'Send follow-up (interrupts current response)' : 'Send (Enter)'}
+          >↑</button>
         </div>
         <div className={styles.inputHint}>
           Enter to send · Shift+Enter for new line · Drag & drop images

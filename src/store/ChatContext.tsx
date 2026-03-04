@@ -1,30 +1,56 @@
-import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
-import type { Conversation, Message, Folder, Checkpoint, ChatMode, CoworkTask, CoworkStep } from '../types';
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
+import type { Conversation, Message, Folder, Checkpoint, ChatMode, CoworkTask, CoworkStep, ConversationStreamingState } from '../types';
 import { storage } from '../services/storage';
+
+const DEFAULT_STREAMING: ConversationStreamingState = {
+  isStreaming: false,
+  streamingText: '',
+  streamingReasoning: '',
+};
 
 interface ChatState {
   conversations: Conversation[];
   folders: Folder[];
   activeConversationId: string | null;
-  isStreaming: boolean;
-  streamingText: string;
+  streamingStates: Record<string, ConversationStreamingState>;
   chatMode: ChatMode;
   globalInstructions: string;
   coworkTasks: CoworkTask[];
   activeCoworkTaskId: string | null;
-  streamingReasoning: string;
 }
 
-interface ChatContextType extends ChatState {
+interface ChatContextType {
+  // State
+  conversations: Conversation[];
+  folders: Folder[];
+  activeConversationId: string | null;
+  chatMode: ChatMode;
+  globalInstructions: string;
+  coworkTasks: CoworkTask[];
+  activeCoworkTaskId: string | null;
+
+  // Derived backward-compatible streaming state (from active conversation)
+  isStreaming: boolean;
+  streamingText: string;
+  streamingReasoning: string;
+
+  // Per-conversation streaming
+  getStreamingState: (conversationId: string) => ConversationStreamingState;
+  isConversationStreaming: (conversationId: string) => boolean;
+  setStreaming: (conversationId: string, streaming: boolean) => void;
+  appendStreamingText: (conversationId: string, text: string) => void;
+  setStreamingReasoning: (conversationId: string, text: string) => void;
+  appendStreamingReasoning: (conversationId: string, text: string) => void;
+  setAbortController: (conversationId: string, controller: AbortController | null) => void;
+  abortConversationStream: (conversationId: string) => string;
+
+  // Conversation management
   createConversation: (model: string, folderId?: string | null) => string;
   deleteConversation: (id: string) => void;
   renameConversation: (id: string, title: string) => void;
   setActiveConversation: (id: string) => void;
   clearActiveConversation: () => void;
   addMessage: (conversationId: string, message: Message) => void;
-  setStreaming: (streaming: boolean) => void;
-  setStreamingText: (text: string) => void;
-  appendStreamingText: (text: string) => void;
   getActiveConversation: () => Conversation | undefined;
   togglePin: (id: string) => void;
   setVisibility: (id: string, visibility: 'private' | 'team' | 'public') => void;
@@ -45,8 +71,6 @@ interface ChatContextType extends ChatState {
   updateCoworkTaskStatus: (taskId: string, status: CoworkTask['status']) => void;
   updateCoworkStepStatus: (taskId: string, stepId: string, status: CoworkStep['status'], detail?: string) => void;
   setActiveCoworkTask: (taskId: string | null) => void;
-  setStreamingReasoning: (text: string) => void;
-  appendStreamingReasoning: (text: string) => void;
 }
 
 const ChatContext = createContext<ChatContextType | null>(null);
@@ -56,30 +80,117 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     conversations: storage.getConversations(),
     folders: storage.getFolders(),
     activeConversationId: null,
-    isStreaming: false,
-    streamingText: '',
+    streamingStates: {},
     chatMode: (localStorage.getItem('arcadia-chat-mode') as ChatMode) || 'chat',
     globalInstructions: localStorage.getItem('arcadia-global-instructions') || '',
     coworkTasks: [],
     activeCoworkTaskId: null,
-    streamingReasoning: '',
   }));
 
+  // Abort controllers live in a ref (mutable, not part of render state)
+  const abortControllersRef = useRef<Record<string, AbortController>>({});
+
   // Debounce conversation saves during streaming to avoid blocking the main thread.
-  // During streaming, appendStreamingText triggers rapid state updates which each
-  // trigger this effect. Debouncing batches these into a single write.
   useEffect(() => {
-    if (state.isStreaming) {
+    const anyStreaming = Object.values(state.streamingStates).some(s => s.isStreaming);
+    if (anyStreaming) {
       storage.debouncedSaveConversations(state.conversations);
     } else {
-      // When not streaming, save immediately to ensure data integrity
       storage.saveConversations(state.conversations);
     }
-  }, [state.conversations, state.isStreaming]);
+  }, [state.conversations, state.streamingStates]);
 
   useEffect(() => {
     storage.saveFolders(state.folders);
   }, [state.folders]);
+
+  // ─── Per-Conversation Streaming Methods ──────────────────────────────────────
+
+  const getStreamingState = useCallback((conversationId: string): ConversationStreamingState => {
+    return state.streamingStates[conversationId] ?? DEFAULT_STREAMING;
+  }, [state.streamingStates]);
+
+  const isConversationStreaming = useCallback((conversationId: string): boolean => {
+    return state.streamingStates[conversationId]?.isStreaming ?? false;
+  }, [state.streamingStates]);
+
+  const setStreaming = useCallback((conversationId: string, streaming: boolean) => {
+    setState(prev => {
+      const newStates = { ...prev.streamingStates };
+      if (streaming) {
+        newStates[conversationId] = {
+          isStreaming: true,
+          streamingText: '',
+          streamingReasoning: '',
+        };
+      } else {
+        delete newStates[conversationId];
+      }
+      return { ...prev, streamingStates: newStates };
+    });
+  }, []);
+
+  const appendStreamingText = useCallback((conversationId: string, text: string) => {
+    setState(prev => {
+      const existing = prev.streamingStates[conversationId];
+      if (!existing) return prev;
+      return {
+        ...prev,
+        streamingStates: {
+          ...prev.streamingStates,
+          [conversationId]: { ...existing, streamingText: existing.streamingText + text },
+        },
+      };
+    });
+  }, []);
+
+  const setStreamingReasoning = useCallback((conversationId: string, text: string) => {
+    setState(prev => {
+      const existing = prev.streamingStates[conversationId];
+      if (!existing) return prev;
+      return {
+        ...prev,
+        streamingStates: {
+          ...prev.streamingStates,
+          [conversationId]: { ...existing, streamingReasoning: text },
+        },
+      };
+    });
+  }, []);
+
+  const appendStreamingReasoning = useCallback((conversationId: string, text: string) => {
+    setState(prev => {
+      const existing = prev.streamingStates[conversationId];
+      if (!existing) return prev;
+      return {
+        ...prev,
+        streamingStates: {
+          ...prev.streamingStates,
+          [conversationId]: { ...existing, streamingReasoning: existing.streamingReasoning + text },
+        },
+      };
+    });
+  }, []);
+
+  const setAbortController = useCallback((conversationId: string, controller: AbortController | null) => {
+    if (controller) {
+      abortControllersRef.current[conversationId] = controller;
+    } else {
+      delete abortControllersRef.current[conversationId];
+    }
+  }, []);
+
+  const abortConversationStream = useCallback((conversationId: string): string => {
+    const partialText = state.streamingStates[conversationId]?.streamingText ?? '';
+    const controller = abortControllersRef.current[conversationId];
+    if (controller) {
+      controller.abort();
+      delete abortControllersRef.current[conversationId];
+    }
+    return partialText;
+  }, [state.streamingStates]);
+
+  // ─── Conversation Management ─────────────────────────────────────────────────
 
   const createConversation = useCallback((model: string, folderId: string | null = null) => {
     const id = crypto.randomUUID();
@@ -108,11 +219,22 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const deleteConversation = useCallback((id: string) => {
-    setState(prev => ({
-      ...prev,
-      conversations: prev.conversations.filter(c => c.id !== id),
-      activeConversationId: prev.activeConversationId === id ? null : prev.activeConversationId,
-    }));
+    // Abort any active stream for this conversation
+    const controller = abortControllersRef.current[id];
+    if (controller) {
+      controller.abort();
+      delete abortControllersRef.current[id];
+    }
+    setState(prev => {
+      const newStates = { ...prev.streamingStates };
+      delete newStates[id];
+      return {
+        ...prev,
+        conversations: prev.conversations.filter(c => c.id !== id),
+        activeConversationId: prev.activeConversationId === id ? null : prev.activeConversationId,
+        streamingStates: newStates,
+      };
+    });
   }, []);
 
   const renameConversation = useCallback((id: string, title: string) => {
@@ -144,18 +266,6 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         return updated;
       }),
     }));
-  }, []);
-
-  const setStreaming = useCallback((isStreaming: boolean) => {
-    setState(prev => ({ ...prev, isStreaming, streamingText: isStreaming ? '' : prev.streamingText }));
-  }, []);
-
-  const setStreamingText = useCallback((streamingText: string) => {
-    setState(prev => ({ ...prev, streamingText }));
-  }, []);
-
-  const appendStreamingText = useCallback((text: string) => {
-    setState(prev => ({ ...prev, streamingText: prev.streamingText + text }));
   }, []);
 
   const getActiveConversation = useCallback(() => {
@@ -194,7 +304,6 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
   const importConversation = useCallback((conv: Conversation) => {
     setState(prev => {
-      // Don't import if already exists
       if (prev.conversations.some(c => c.id === conv.id)) {
         return { ...prev, activeConversationId: conv.id };
       }
@@ -353,26 +462,45 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     setState(prev => ({ ...prev, activeCoworkTaskId: taskId }));
   }, []);
 
-  const setStreamingReasoning = useCallback((streamingReasoning: string) => {
-    setState(prev => ({ ...prev, streamingReasoning }));
-  }, []);
+  // ─── Derived backward-compatible streaming properties ────────────────────────
 
-  const appendStreamingReasoning = useCallback((text: string) => {
-    setState(prev => ({ ...prev, streamingReasoning: prev.streamingReasoning + text }));
-  }, []);
+  const activeStreamState = state.activeConversationId
+    ? state.streamingStates[state.activeConversationId] ?? DEFAULT_STREAMING
+    : DEFAULT_STREAMING;
 
   return (
     <ChatContext.Provider value={{
-      ...state,
+      // State
+      conversations: state.conversations,
+      folders: state.folders,
+      activeConversationId: state.activeConversationId,
+      chatMode: state.chatMode,
+      globalInstructions: state.globalInstructions,
+      coworkTasks: state.coworkTasks,
+      activeCoworkTaskId: state.activeCoworkTaskId,
+
+      // Derived streaming state for active conversation (backward compat)
+      isStreaming: activeStreamState.isStreaming,
+      streamingText: activeStreamState.streamingText,
+      streamingReasoning: activeStreamState.streamingReasoning,
+
+      // Per-conversation streaming
+      getStreamingState,
+      isConversationStreaming,
+      setStreaming,
+      appendStreamingText,
+      setStreamingReasoning,
+      appendStreamingReasoning,
+      setAbortController,
+      abortConversationStream,
+
+      // Conversation management
       createConversation,
       deleteConversation,
       renameConversation,
       setActiveConversation,
       clearActiveConversation,
       addMessage,
-      setStreaming,
-      setStreamingText,
-      appendStreamingText,
       getActiveConversation,
       togglePin,
       setVisibility,
@@ -393,8 +521,6 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       updateCoworkTaskStatus,
       updateCoworkStepStatus,
       setActiveCoworkTask,
-      setStreamingReasoning,
-      appendStreamingReasoning,
     }}>
       {children}
     </ChatContext.Provider>

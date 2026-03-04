@@ -413,8 +413,9 @@ export async function sendMessage(opts: SendMessageOptions): Promise<SendMessage
   let ttft: number | undefined;
   let fetchResponseTime: number | undefined;
 
-  // Performance marks for Chrome DevTools profiling
-  performance.mark('arcadia:send-start');
+  // Performance marks for Chrome DevTools profiling (namespaced per request for concurrency)
+  const reqId = crypto.randomUUID().slice(0, 8);
+  performance.mark(`arcadia:send-start:${reqId}`);
 
   // Build system prompt with folder instructions if any
   const systemParts: string[] = [];
@@ -493,7 +494,7 @@ export async function sendMessage(opts: SendMessageOptions): Promise<SendMessage
   }
 
   // Mark fetch response time for pipeline profiling
-  performance.mark('arcadia:fetch-response');
+  performance.mark(`arcadia:fetch-response:${reqId}`);
   fetchResponseTime = performance.now();
 
   // ── Stream parsing ────────────────────────────────────────────────────────
@@ -575,7 +576,7 @@ export async function sendMessage(opts: SendMessageOptions): Promise<SendMessage
           const text = delta.text as string;
           if (!ttft) {
             ttft = Date.now() - startTime;
-            performance.mark('arcadia:first-token');
+            performance.mark(`arcadia:first-token:${reqId}`);
           }
           fullText += text;
           onToken?.(text);
@@ -675,15 +676,15 @@ export async function sendMessage(opts: SendMessageOptions): Promise<SendMessage
   const tokensPerSecond = outputTokens && totalTime > 0 ? Math.round(outputTokens / (totalTime / 1000)) : undefined;
 
   // Pipeline profiling: compute per-stage timings and emit DevTools measures
-  performance.mark('arcadia:stream-end');
+  performance.mark(`arcadia:stream-end:${reqId}`);
   let pipelineTimings: SendMessageResult['pipelineTimings'];
   try {
-    performance.measure('arcadia:fetch', 'arcadia:send-start', 'arcadia:fetch-response');
+    performance.measure(`arcadia:fetch:${reqId}`, `arcadia:send-start:${reqId}`, `arcadia:fetch-response:${reqId}`);
     if (ttft) {
-      performance.measure('arcadia:model-wait', 'arcadia:fetch-response', 'arcadia:first-token');
-      performance.measure('arcadia:streaming', 'arcadia:first-token', 'arcadia:stream-end');
+      performance.measure(`arcadia:model-wait:${reqId}`, `arcadia:fetch-response:${reqId}`, `arcadia:first-token:${reqId}`);
+      performance.measure(`arcadia:streaming:${reqId}`, `arcadia:first-token:${reqId}`, `arcadia:stream-end:${reqId}`);
     }
-    performance.measure('arcadia:total', 'arcadia:send-start', 'arcadia:stream-end');
+    performance.measure(`arcadia:total:${reqId}`, `arcadia:send-start:${reqId}`, `arcadia:stream-end:${reqId}`);
   } catch { /* marks may be missing if request failed early */ }
 
   if (fetchResponseTime !== undefined) {

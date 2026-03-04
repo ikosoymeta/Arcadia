@@ -33,7 +33,6 @@ export function ChatPanel({ sidebarCollapsed, onExpandSidebar }: ChatPanelProps)
   const [showInstructions, setShowInstructions] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
-  const abortRef = useRef<AbortController | null>(null);
   const {
     isStreaming,
     streamingText,
@@ -45,7 +44,6 @@ export function ChatPanel({ sidebarCollapsed, onExpandSidebar }: ChatPanelProps)
     activeCoworkTaskId,
     setStreaming,
     appendStreamingText,
-    setStreamingReasoning,
     addMessage,
     getActiveConversation,
     createConversation,
@@ -54,6 +52,9 @@ export function ChatPanel({ sidebarCollapsed, onExpandSidebar }: ChatPanelProps)
     createCoworkTask,
     updateCoworkTaskStatus,
     getFolderInstructions,
+    getStreamingState,
+    abortConversationStream,
+    setAbortController,
   } = useChat();
   const { activeConnection } = useConnection();
   const { addArtifact, setArtifacts } = usePreview();
@@ -94,7 +95,7 @@ export function ChatPanel({ sidebarCollapsed, onExpandSidebar }: ChatPanelProps)
 
   const handleSend = async (text?: string) => {
     const messageText = text || input.trim();
-    if (!messageText || isStreaming) return;
+    if (!messageText) return;
 
     if (!activeConnection) {
       setError('Connecting to Meta infrastructure... Please wait a moment.');
@@ -107,6 +108,23 @@ export function ChatPanel({ sidebarCollapsed, onExpandSidebar }: ChatPanelProps)
     let convId = activeConversationId;
     if (!convId) {
       convId = createConversation(activeConnection.model);
+    }
+
+    // If already streaming, abort current stream and save partial response
+    const currentStreamState = getStreamingState(convId);
+    if (currentStreamState.isStreaming) {
+      const partialText = abortConversationStream(convId);
+      if (partialText.trim()) {
+        const partialMsg: Message = {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: partialText + '\n\n*[Response interrupted]*',
+          timestamp: Date.now(),
+          model: activeConnection.model,
+        };
+        addMessage(convId, partialMsg);
+      }
+      await new Promise(r => setTimeout(r, 50));
     }
 
     const userMessage: Message = {
@@ -151,9 +169,9 @@ export function ChatPanel({ sidebarCollapsed, onExpandSidebar }: ChatPanelProps)
       ]);
     }
 
-    setStreaming(true);
-    setStreamingReasoning('');
-    abortRef.current = new AbortController();
+    setStreaming(convId, true);
+    const controller = new AbortController();
+    setAbortController(convId, controller);
 
     try {
       const result = await sendMessage({
@@ -161,9 +179,9 @@ export function ChatPanel({ sidebarCollapsed, onExpandSidebar }: ChatPanelProps)
         messages: allMessages,
         systemPrompt: systemPrompt || undefined,
         onToken: (token: string) => {
-          appendStreamingText(token);
+          appendStreamingText(convId!, token);
         },
-        signal: abortRef.current.signal,
+        signal: controller.signal,
       });
 
       const assistantMsg: Message = {
@@ -189,12 +207,15 @@ export function ChatPanel({ sidebarCollapsed, onExpandSidebar }: ChatPanelProps)
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Unknown error';
-      setError(msg);
+      if (!(err instanceof Error && err.name === 'AbortError')) {
+        setError(msg);
+      }
       if (activeCoworkTaskId) {
         updateCoworkTaskStatus(activeCoworkTaskId, 'error');
       }
     } finally {
-      setStreaming(false);
+      setStreaming(convId!, false);
+      setAbortController(convId!, null);
     }
   };
 
@@ -394,19 +415,19 @@ export function ChatPanel({ sidebarCollapsed, onExpandSidebar }: ChatPanelProps)
             disabled={!activeConnection}
             rows={1}
           />
-          {isStreaming ? (
-            <button className={`${styles.sendBtn} ${styles.stopBtn}`} onClick={() => abortRef.current?.abort()}>
+          {isStreaming && (
+            <button className={`${styles.sendBtn} ${styles.stopBtn}`} onClick={() => { if (activeConversationId) abortConversationStream(activeConversationId); }} title="Stop generation">
               &#x25A0;
             </button>
-          ) : (
-            <button
-              className={styles.sendBtn}
-              onClick={() => handleSend()}
-              disabled={!input.trim() || !activeConnection}
-            >
-              &#x2191;
-            </button>
           )}
+          <button
+            className={styles.sendBtn}
+            onClick={() => handleSend()}
+            disabled={!input.trim() || !activeConnection}
+            title={isStreaming ? 'Send follow-up (interrupts current response)' : 'Send'}
+          >
+            &#x2191;
+          </button>
         </div>
         {conversation && conversation.messages.length > 0 && (
           <div className={styles.tokenCount}>

@@ -248,7 +248,7 @@ function MoveModal({ conv, folders, onClose }: { conv: Conversation; folders: Fo
 
 export function Sidebar({ viewMode, onViewChange, collapsed, onToggleCollapse }: SidebarProps) {
   const {
-    conversations, folders, activeConversationId, chatMode, coworkTasks, isStreaming,
+    conversations, folders, activeConversationId, chatMode, coworkTasks, isConversationStreaming,
     createConversation, deleteConversation, renameConversation, setActiveConversation,
     clearActiveConversation, togglePin, setVisibility, createFolder, toggleFolderExpand,
     deleteFolder, setFolderInstructions,
@@ -309,7 +309,7 @@ export function Sidebar({ viewMode, onViewChange, collapsed, onToggleCollapse }:
   };
 
   const handleShare = (id: string) => {
-    if (isStreaming) return; // Don't open share modal during streaming — causes freeze
+    if (isConversationStreaming(id)) return; // Don't open share modal during streaming — causes freeze
     const conv = conversations.find(c => c.id === id);
     if (conv) setShareConv(conv);
     setContextMenu(null);
@@ -436,6 +436,7 @@ export function Sidebar({ viewMode, onViewChange, collapsed, onToggleCollapse }:
                 key={conv.id}
                 conv={conv}
                 isActive={conv.id === activeConversationId}
+                isStreaming={isConversationStreaming(conv.id)}
                 editingId={editingId}
                 editValue={editValue}
                 onSelect={() => { setActiveConversation(conv.id); onViewChange('chat'); }}
@@ -506,6 +507,7 @@ export function Sidebar({ viewMode, onViewChange, collapsed, onToggleCollapse }:
                   key={conv.id}
                   conv={conv}
                   isActive={conv.id === activeConversationId}
+                  isStreaming={isConversationStreaming(conv.id)}
                   editingId={editingId}
                   editValue={editValue}
                   onSelect={() => { setActiveConversation(conv.id); onViewChange('chat'); }}
@@ -539,6 +541,7 @@ export function Sidebar({ viewMode, onViewChange, collapsed, onToggleCollapse }:
             key={conv.id}
             conv={conv}
             isActive={conv.id === activeConversationId}
+            isStreaming={isConversationStreaming(conv.id)}
             editingId={editingId}
             editValue={editValue}
             onSelect={() => { setActiveConversation(conv.id); onViewChange('chat'); }}
@@ -665,11 +668,12 @@ export function Sidebar({ viewMode, onViewChange, collapsed, onToggleCollapse }:
 // ─── Conversation Item ────────────────────────────────────────────────────────
 
 function ConvItem({
-  conv, isActive, editingId, editValue, onSelect, onContextMenu, onDelete,
+  conv, isActive, isStreaming, editingId, editValue, onSelect, onContextMenu, onDelete,
   onEditChange, onEditFinish, onTogglePin, onShare, getVisibilityIcon, indent,
 }: {
   conv: Conversation;
   isActive: boolean;
+  isStreaming?: boolean;
   editingId: string | null;
   editValue: string;
   onSelect: () => void;
@@ -712,6 +716,7 @@ function ConvItem({
             {getVisibilityIcon(conv.visibility)}
           </span>
           <span className={styles.convTitle}>{conv.title}</span>
+          {isStreaming && <span className={styles.streamingDot} />}
           {(hovered || conv.isPinned) && (
             <div className={styles.convActions} style={{ opacity: hovered ? 1 : 0.6 }}>
               <button
