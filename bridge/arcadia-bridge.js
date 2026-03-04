@@ -1,10 +1,20 @@
 #!/usr/bin/env node
 /**
- * ArcadIA Bridge v3.2.0 — Local proxy connecting ArcadIA web app to Claude Code
+ * ArcadIA Bridge v3.2.3 — Local proxy connecting ArcadIA web app to Claude Code
  * 
  * Runs on localhost:8087 and forwards requests from the ArcadIA web app
  * to Claude Code CLI, which handles Meta internal authentication.
  * 
+ * v3.2.3:
+ * - Pre-flight port kill: kills any existing process on PORT before listen()
+ * - Graceful shutdown: properly closes server + kills child processes on SIGINT/SIGTERM
+ * - Child process tracking: ensures orphaned claude processes are cleaned up
+ * - macOS-compatible: handles multiple PIDs from lsof correctly
+ *
+ * v3.2.2:
+ * - Robust Meta stderr noise filter (scribecat, glog, configerator, thrift)
+ * - Clean error messages for content policy blocks
+ *
  * v3.2.0:
  * - Simplified setup: one-line command, no .sh download needed
  * - Filtered scribecat/Meta internal stderr noise from console output
@@ -31,9 +41,47 @@ const os = require('os');
 
 const PORT = 8087;
 const HOST = '127.0.0.1';
-const VERSION = '3.2.0';
+const VERSION = '3.2.3';
 const TIMEOUT_MS = 180000; // 3 minute timeout
 const KEEPALIVE_INTERVAL_MS = 2000; // SSE keepalive every 2s
+
+// ─── Child process tracking ──────────────────────────────────────────────
+// Track all spawned claude processes so we can kill them on shutdown
+const activeChildren = new Set();
+
+// ─── Pre-flight: kill any existing process on our port ────────────────────
+function killProcessOnPort(port) {
+  try {
+    // lsof may return multiple PIDs (one per line); kill each individually
+    const raw = execSync(`lsof -ti :${port} 2>/dev/null || true`, { encoding: 'utf-8', shell: true }).trim();
+    if (!raw) return false;
+    const pids = raw.split(/\s+/).filter(p => p && p !== String(process.pid));
+    if (pids.length === 0) return false;
+    for (const pid of pids) {
+      try {
+        console.log(`  Killing old process on port ${port}: PID ${pid}`);
+        execSync(`kill -9 ${pid} 2>/dev/null || true`, { shell: true });
+      } catch { /* already dead */ }
+    }
+    // Give the OS a moment to release the port
+    execSync('sleep 0.5', { shell: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Kill any leftover process on our port before we start
+(function preflightPortCheck() {
+  try {
+    const raw = execSync(`lsof -ti :${PORT} 2>/dev/null || true`, { encoding: 'utf-8', shell: true }).trim();
+    if (raw) {
+      console.log(`\n  ⚠ Port ${PORT} is occupied. Cleaning up...`);
+      killProcessOnPort(PORT);
+      console.log(`  ✓ Port ${PORT} freed.\n`);
+    }
+  } catch { /* no-op */ }
+})();
 
 // ─── Security ─────────────────────────────────────────────────────────────
 // Auth is handled by CORS (restricting which origins can call the bridge).
@@ -370,12 +418,17 @@ function handleMessages(req, res, body) {
     shell: false,
   });
 
+  // Track child process for cleanup on shutdown
+  activeChildren.add(claude);
+  claude.on('exit', () => activeChildren.delete(claude));
+
   // Write the prompt to stdin and close it
   try {
     claude.stdin.write(fullPrompt);
     claude.stdin.end();
   } catch (e) {
     activeRequests--;
+    activeChildren.delete(claude);
     console.error(`[${new Date().toISOString()}] ✗ Failed to write to stdin: ${e.message}`);
     res.writeHead(500, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'Failed to send prompt to Claude Code' }));
@@ -943,28 +996,25 @@ server.listen(PORT, HOST, () => {
 
 server.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
-    console.log(`\n  ⚠ Port ${PORT} is in use. Attempting to take over...`);
-    // Try to kill the existing process on this port and retry
-    try {
-      const pid = execSync(`lsof -ti :${PORT} 2>/dev/null`, { encoding: 'utf-8', shell: true }).trim();
-      if (pid) {
-        console.log(`  Stopping old bridge (PID ${pid})...`);
-        execSync(`kill -9 ${pid}`, { shell: true });
-        // Wait a moment for the port to free up, then retry
-        setTimeout(() => {
-          server.listen(PORT, HOST, () => {
-            console.log(`  ✓ Took over port ${PORT} successfully!\n`);
-            printBanner();
-            warmUp();
-          });
-        }, 1000);
-      } else {
-        console.error(`  ✗ Port ${PORT} is in use but could not identify the process.\n`);
-        console.error(`  Try: lsof -ti :${PORT} | xargs kill -9\n`);
-        process.exit(1);
-      }
-    } catch (killErr) {
-      console.error(`  ✗ Could not free port ${PORT}: ${killErr.message}`);
+    // Pre-flight should have handled this, but try once more
+    console.log(`\n  ⚠ Port ${PORT} still in use after pre-flight. Retrying...`);
+    const killed = killProcessOnPort(PORT);
+    if (killed) {
+      setTimeout(() => {
+        const retryServer = http.createServer(server.listeners('request')[0]);
+        retryServer.listen(PORT, HOST, () => {
+          console.log(`  ✓ Took over port ${PORT} successfully!\n`);
+          printBanner();
+          warmUp();
+        });
+        retryServer.on('error', (retryErr) => {
+          console.error(`  ✗ Still cannot bind port ${PORT}: ${retryErr.message}`);
+          console.error(`  Try manually: lsof -ti :${PORT} | xargs kill -9\n`);
+          process.exit(1);
+        });
+      }, 500);
+    } else {
+      console.error(`  ✗ Port ${PORT} is in use but could not identify the process.`);
       console.error(`  Try manually: lsof -ti :${PORT} | xargs kill -9\n`);
       process.exit(1);
     }
@@ -974,12 +1024,30 @@ server.on('error', (err) => {
   }
 });
 
-process.on('SIGINT', () => {
-  console.log('\n  Bridge stopped.\n');
-  process.exit(0);
-});
+// ─── Graceful shutdown ────────────────────────────────────────────────────
+function gracefulShutdown(signal) {
+  console.log(`\n  Received ${signal}. Shutting down gracefully...`);
+  
+  // Kill all active child processes
+  for (const child of activeChildren) {
+    try {
+      child.kill('SIGTERM');
+    } catch { /* already dead */ }
+  }
+  activeChildren.clear();
+  
+  // Close the HTTP server
+  server.close(() => {
+    console.log('  ✓ Server closed. Bridge stopped.\n');
+    process.exit(0);
+  });
+  
+  // Force exit after 3 seconds if server.close() hangs
+  setTimeout(() => {
+    console.log('  Force exit after timeout.\n');
+    process.exit(0);
+  }, 3000);
+}
 
-process.on('SIGTERM', () => {
-  console.log('\n  Bridge stopped.\n');
-  process.exit(0);
-});
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
