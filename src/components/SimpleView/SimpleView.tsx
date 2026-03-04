@@ -466,6 +466,7 @@ export function SimpleView() {
   const [followUps, setFollowUps] = useState<string[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [showModelSelector, setShowModelSelector] = useState(false);
+  const [showThinkingLive, setShowThinkingLive] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesAreaRef = useRef<HTMLDivElement>(null);
@@ -575,8 +576,20 @@ export function SimpleView() {
     setStreaming(true);
     setStreamingText('');
     setStreamingReasoning('');
+    setShowThinkingLive(false);
 
     abortRef.current = new AbortController();
+
+    // Elapsed time counter for "thinking" phase
+    const sendStartTime = Date.now();
+    const elapsedTimer = setInterval(() => {
+      const elapsed = Math.round((Date.now() - sendStartTime) / 1000);
+      setActivitySteps(prev => prev.map(s =>
+        s.id === 'thinking' && s.status === 'active'
+          ? { ...s, detail: `${elapsed}s elapsed` }
+          : s
+      ));
+    }, 1000);
 
     const allMessages = [...(conversation?.messages ?? []), userMsg];
 
@@ -591,7 +604,9 @@ export function SimpleView() {
         onToken: (chunk) => {
           if (!firstToken) {
             firstToken = true;
-            setStep('thinking', 'done');
+            clearInterval(elapsedTimer);
+            const ttftSec = ((Date.now() - sendStartTime) / 1000).toFixed(1);
+            setStep('thinking', 'done', `${ttftSec}s`);
             setStep('writing', 'active', 'Streaming response...');
           }
           appendStreamingText(chunk);
@@ -631,6 +646,7 @@ export function SimpleView() {
 
       setTimeout(() => setShowActivity(false), 2000);
     } catch (err: unknown) {
+      clearInterval(elapsedTimer);
       if (err instanceof Error && err.name === 'AbortError') {
         setActivitySteps(prev => prev.map(s => s.status === 'active' ? { ...s, status: 'error', detail: 'Stopped' } : s));
         setTimeout(() => setShowActivity(false), 1500);
@@ -640,6 +656,7 @@ export function SimpleView() {
         setActivitySteps(prev => prev.map(s => s.status === 'active' ? { ...s, status: 'error', detail: msg } : s));
       }
     } finally {
+      clearInterval(elapsedTimer);
       setStreaming(false);
       setStreamingText('');
       setStreamingReasoning('');
@@ -797,9 +814,17 @@ export function SimpleView() {
                 </div>
                 {streamingReasoning && (
                   <div className={styles.thinkingSection}>
-                    <div className={styles.thinkingLive}>
-                      🧠 <span>Thinking...</span>
-                    </div>
+                    <button
+                      className={styles.thinkingToggle}
+                      onClick={() => setShowThinkingLive(p => !p)}
+                    >
+                      🧠 {showThinkingLive ? 'Hide' : 'Show'} thinking ({Math.round(streamingReasoning.length / 4)} tokens)
+                    </button>
+                    {showThinkingLive && (
+                      <div className={styles.thinkingContent}>
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{streamingReasoning}</ReactMarkdown>
+                      </div>
+                    )}
                   </div>
                 )}
                 <div className={`${styles.bubbleContent} ${styles.assistantContent}`}>
