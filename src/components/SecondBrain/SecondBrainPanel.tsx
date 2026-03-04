@@ -19,7 +19,7 @@ interface DetectionResult {
   };
 }
 
-type StepStatus = 'waiting' | 'running' | 'done' | 'error' | 'needs-action';
+type StepStatus = 'waiting' | 'checking' | 'running' | 'done' | 'skipped' | 'error';
 
 interface SetupStep {
   id: string;
@@ -28,14 +28,7 @@ interface SetupStep {
   status: StepStatus;
   elapsed?: number;
   output?: string;
-  /** If needs-action, show this dialog */
-  dialog?: {
-    title: string;
-    message: string;
-    actionLabel: string;
-    actionUrl?: string;
-    confirmLabel: string;
-  };
+  detail?: string;
 }
 
 type Phase = 'detecting' | 'dashboard' | 'installing';
@@ -57,6 +50,31 @@ const ADDONS = [
   { id: 'wispr-flow', name: 'Wispr Flow / SuperWhisper', icon: '🎙️', description: 'Voice-to-text that\'s 3x faster than typing. Speak naturally and it transcribes into any app.', setupUrl: 'https://www.wispr.com/', detectionKey: 'wisprFlow' as const },
   { id: 'gclaude', name: 'GClaude', icon: '💬', description: 'Chat with your Second Brain via Google Chat. Send messages to the Bunny "gclaude" bot.', setupUrl: null, detectionKey: null },
   { id: 'obsidian', name: 'Obsidian', icon: '📓', description: 'Local knowledge management app that syncs with your Second Brain for offline access.', setupUrl: 'https://obsidian.md/', detectionKey: 'obsidian' as const },
+];
+
+// ─── The 4 fixed setup steps ────────────────────────────────────────────────
+
+const SETUP_STEPS: Omit<SetupStep, 'status'>[] = [
+  {
+    id: 'claude-code',
+    label: 'Claude Code',
+    friendlyDesc: 'Checking if Claude Code CLI is installed on your computer...',
+  },
+  {
+    id: 'google-drive-workspace',
+    label: 'Google Drive Workspace',
+    friendlyDesc: 'Checking Google Drive and creating workspace folders if needed...',
+  },
+  {
+    id: 'claudemd-config',
+    label: 'CLAUDE.md Configuration',
+    friendlyDesc: 'Checking for CLAUDE.md and creating it with slash commands if needed...',
+  },
+  {
+    id: 'skills-plugins',
+    label: 'Skills & Plugins',
+    friendlyDesc: 'Checking installed skills and installing missing ones...',
+  },
 ];
 
 // ─── Bridge API ─────────────────────────────────────────────────────────────
@@ -107,9 +125,17 @@ export function SecondBrainPanel() {
   const [steps, setSteps] = useState<SetupStep[]>([]);
   const [currentStepIdx, setCurrentStepIdx] = useState(0);
   const [copiedCommand, setCopiedCommand] = useState<string | null>(null);
-  const [dialogVisible, setDialogVisible] = useState(false);
+  const [setupLog, setSetupLog] = useState<string[]>([]);
   const detectRan = useRef(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // ─── Helper: add log line ────────────────────────────────────────────────
+
+  const addLog = useCallback((msg: string) => {
+    const ts = new Date().toLocaleTimeString();
+    console.log(`[SecondBrain] ${msg}`);
+    setSetupLog(prev => [...prev.slice(-50), `[${ts}] ${msg}`]);
+  }, []);
 
   // ─── Detection ──────────────────────────────────────────────────────────
 
@@ -133,7 +159,7 @@ export function SecondBrainPanel() {
     if (phase === 'installing') {
       timerRef.current = setInterval(() => {
         setSteps(prev => prev.map((s, i) =>
-          i === currentStepIdx && s.status === 'running'
+          i === currentStepIdx && (s.status === 'running' || s.status === 'checking')
             ? { ...s, elapsed: (s.elapsed || 0) + 1 }
             : s
         ));
@@ -142,235 +168,198 @@ export function SecondBrainPanel() {
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [phase, currentStepIdx]);
 
-  // ─── Build install plan ─────────────────────────────────────────────────
+  // ─── Update a step by index ─────────────────────────────────────────────
 
-  const buildSteps = useCallback((det: DetectionResult): SetupStep[] => {
-    const plan: SetupStep[] = [];
-    console.log('[SecondBrain] Building steps from detection:', JSON.stringify(det.summary));
-
-    // Step 1: Claude Code
-    if (!det.claudeCode.installed) {
-      plan.push({
-        id: 'claude-code',
-        label: 'Install Claude Code',
-        friendlyDesc: 'Claude Code is the AI engine that powers Second Brain. It needs to be installed on your computer.',
-        status: 'waiting',
-        dialog: {
-          title: 'Install Claude Code',
-          message: 'Claude Code needs to be installed on your computer. Click the button below to open the setup guide — it takes about 5 minutes. Come back here when you\'re done.',
-          actionLabel: 'Open Setup Guide',
-          actionUrl: 'https://secondbrain-setup.manus.space',
-          confirmLabel: 'I\'ve installed Claude Code — continue',
-        },
-      });
-    }
-
-    // Step 2: Google Drive
-    if (!det.googleDrive.installed) {
-      plan.push({
-        id: 'google-drive',
-        label: 'Set up Google Drive workspace',
-        friendlyDesc: 'Creating your Second Brain workspace folder in Google Drive where all your projects and notes will live.',
-        status: 'waiting',
-        dialog: {
-          title: 'Google Drive Not Found',
-          message: 'Google Drive for Desktop needs to be installed and signed in so your Second Brain can store files. If you already have it, make sure it\'s running.',
-          actionLabel: 'Download Google Drive',
-          actionUrl: 'https://www.google.com/drive/download/',
-          confirmLabel: 'Google Drive is running — continue',
-        },
-      });
-    }
-
-    // Step 3: Create workspace folders (only if Drive exists but no workspace)
-    if (det.googleDrive.installed && !det.secondBrain.initialized) {
-      plan.push({
-        id: 'create-workspace',
-        label: 'Create workspace folders',
-        friendlyDesc: 'Setting up your Second Brain folder structure in Google Drive (projects, notes, research, templates)...',
-        status: 'waiting',
-      });
-    }
-
-    // Step 4: Template manager
-    if (!det.claudeTemplates.installed) {
-      plan.push({
-        id: 'claude-templates',
-        label: 'Install template manager',
-        friendlyDesc: 'Installing the tool that manages Second Brain skills and plugins. This takes about 30 seconds.',
-        status: 'waiting',
-      });
-    }
-
-    // Step 5: Skills
-    if (det.skills.installed.length === 0) {
-      plan.push({
-        id: 'install-skills',
-        label: 'Install skills & plugins',
-        friendlyDesc: 'Adding capabilities and connecting Claude to your Google Workspace apps (Docs, Sheets, Slides, Calendar). This may take 1-2 minutes.',
-        status: 'waiting',
-      });
-    }
-
-    // Step 6: CLAUDE.md
-    if (!det.secondBrain.claudeMdExists) {
-      plan.push({
-        id: 'init-claudemd',
-        label: 'Configure slash commands',
-        friendlyDesc: 'Creating your CLAUDE.md configuration file with all 6 slash commands pre-configured and ready to use.',
-        status: 'waiting',
-      });
-    }
-
-    // Fallback: if summary says not ready but we couldn't identify specific missing steps,
-    // add a generic re-initialize step
-    if (plan.length === 0 && !det.summary.fullyReady) {
-      plan.push({
-        id: 'reinitialize',
-        label: 'Re-initialize Second Brain',
-        friendlyDesc: 'Some components need attention. Running a full re-initialization to ensure everything is properly configured.',
-        status: 'waiting',
-      });
-    }
-
-    console.log('[SecondBrain] Built', plan.length, 'steps:', plan.map(s => s.id).join(', '));
-    return plan;
+  const updateStep = useCallback((idx: number, updates: Partial<SetupStep>) => {
+    setSteps(prev => prev.map((s, i) => i === idx ? { ...s, ...updates } : s));
   }, []);
 
-  // ─── Run install ────────────────────────────────────────────────────────
+  // ─── Run full automated install ─────────────────────────────────────────
+  // Always runs all 4 steps. Each step: check → already done? skip : install → done/error
 
   const runInstall = useCallback(async () => {
-    if (!detection) return;
-    const plan = buildSteps(detection);
-    if (plan.length === 0) return;
+    addLog('Starting automated setup...');
 
-    setSteps(plan);
+    // Initialize all 4 steps as waiting
+    const initialSteps: SetupStep[] = SETUP_STEPS.map(s => ({ ...s, status: 'waiting' as StepStatus }));
+    setSteps(initialSteps);
     setCurrentStepIdx(0);
     setPhase('installing');
-    setDialogVisible(false);
 
-    for (let i = 0; i < plan.length; i++) {
-      setCurrentStepIdx(i);
-      const step = plan[i];
+    // Helper to update step in the loop (uses index directly since setSteps is batched)
+    const setStep = (idx: number, updates: Partial<SetupStep>) => {
+      setSteps(prev => prev.map((s, i) => i === idx ? { ...s, ...updates } : s));
+    };
 
-      // If step needs user action, show dialog and wait
-      if (step.dialog) {
-        setSteps(prev => prev.map((s, idx) => idx === i ? { ...s, status: 'needs-action' } : s));
-        setDialogVisible(true);
+    // ─── Step 1: Claude Code ──────────────────────────────────────────────
+    setCurrentStepIdx(0);
+    setStep(0, { status: 'checking', elapsed: 0, friendlyDesc: 'Checking if Claude Code CLI is installed...' });
+    addLog('Step 1/4: Checking Claude Code...');
 
-        // Wait for user to confirm
-        await new Promise<void>(resolve => {
-          const check = setInterval(async () => {
-            // Re-detect to see if the component is now installed
-            const freshDetect = await detect();
-            if (!freshDetect) return;
-
-            let resolved = false;
-            if (step.id === 'claude-code' && freshDetect.claudeCode.installed) resolved = true;
-            if (step.id === 'google-drive' && freshDetect.googleDrive.installed) resolved = true;
-
-            if (resolved) {
-              clearInterval(check);
-              setDetection(freshDetect);
-              setDialogVisible(false);
-              resolve();
-            }
-          }, 5000);
-
-          // Also allow manual "I've done this" click
-          const handler = () => {
-            clearInterval(check);
-            setDialogVisible(false);
-            resolve();
-            window.removeEventListener('sb-dialog-confirm', handler);
-          };
-          window.addEventListener('sb-dialog-confirm', handler);
-        });
-
-        setSteps(prev => prev.map((s, idx) => idx === i ? { ...s, status: 'done', elapsed: 0 } : s));
-        continue;
-      }
-
-      // Automated step
-      setSteps(prev => prev.map((s, idx) => idx === i ? { ...s, status: 'running', elapsed: 0 } : s));
-
-      try {
-        let result: any;
-
-        switch (step.id) {
-          case 'create-workspace':
-            result = await setupAction('create-workspace');
-            if (!result.success && result.error === 'google-drive-not-found') {
-              // Google Drive disappeared — show dialog
-              setSteps(prev => prev.map((s, idx) => idx === i ? {
-                ...s,
-                status: 'needs-action',
-                dialog: {
-                  title: 'Google Drive Not Found',
-                  message: 'Google Drive for Desktop needs to be installed and running. Please install it and sign in with your Meta account.',
-                  actionLabel: 'Download Google Drive',
-                  actionUrl: 'https://www.google.com/drive/download/',
-                  confirmLabel: 'Google Drive is running — retry',
-                },
-              } : s));
-              setDialogVisible(true);
-              await new Promise<void>(resolve => {
-                const handler = () => { setDialogVisible(false); resolve(); window.removeEventListener('sb-dialog-confirm', handler); };
-                window.addEventListener('sb-dialog-confirm', handler);
-              });
-              // Retry
-              result = await setupAction('create-workspace');
-            }
-            break;
-
-          case 'claude-templates':
-            result = await setupAction('install-claude-templates');
-            break;
-
-          case 'install-skills':
-            result = await setupAction('install-skills');
-            break;
-
-          case 'init-claudemd':
-            result = await setupAction('init-claudemd');
-            break;
-
-          case 'reinitialize':
-            // Run full re-init: create workspace + init claudemd
-            result = await setupAction('create-workspace');
-            if (result.success) {
-              const r2 = await setupAction('init-claudemd');
-              if (!r2.success) result = r2;
-            }
-            break;
-
-          default:
-            result = { success: true };
+    try {
+      const det = await detect();
+      if (det?.claudeCode.installed) {
+        const ver = det.claudeCode.version?.split('\n')[0]?.slice(0, 60) || 'installed';
+        setStep(0, { status: 'done', detail: ver, friendlyDesc: `Claude Code is installed (${ver})` });
+        addLog(`Claude Code: found (${ver})`);
+      } else {
+        // Try to detect via bridge health (claude is needed for bridge to work, so if bridge is up, claude exists)
+        const health = await checkBridge();
+        if (health) {
+          setStep(0, { status: 'done', detail: 'Detected via bridge', friendlyDesc: 'Claude Code is installed (detected via bridge connection)' });
+          addLog('Claude Code: detected via bridge');
+        } else {
+          setStep(0, { status: 'error', friendlyDesc: 'Claude Code not found. Install it from https://fburl.com/claude.code.users and re-run setup.', output: 'Claude Code CLI not detected on this machine. The bridge is running but could not find the claude command.' });
+          addLog('Claude Code: NOT FOUND');
         }
-
-        setSteps(prev => prev.map((s, idx) =>
-          idx === i ? {
-            ...s,
-            status: result.success ? 'done' : 'error',
-            output: result.error || result.stderr || result.stdout,
-          } : s
-        ));
-      } catch (e: any) {
-        setSteps(prev => prev.map((s, idx) =>
-          idx === i ? { ...s, status: 'error', output: e.message } : s
-        ));
       }
+    } catch (e: any) {
+      setStep(0, { status: 'error', output: e.message, friendlyDesc: 'Failed to check Claude Code status' });
+      addLog(`Claude Code check error: ${e.message}`);
     }
 
-    // Re-detect after all steps
-    setTimeout(() => runDetection(), 2000);
-  }, [detection, buildSteps, runDetection]);
+    // Small delay so UI updates are visible
+    await new Promise(r => setTimeout(r, 300));
 
-  // ─── Dialog confirm handler ─────────────────────────────────────────────
+    // ─── Step 2: Google Drive Workspace ───────────────────────────────────
+    setCurrentStepIdx(1);
+    setStep(1, { status: 'checking', elapsed: 0, friendlyDesc: 'Checking Google Drive and workspace folder...' });
+    addLog('Step 2/4: Checking Google Drive Workspace...');
 
-  const confirmDialog = useCallback(() => {
-    window.dispatchEvent(new Event('sb-dialog-confirm'));
-  }, []);
+    try {
+      const det = await detect();
+      if (det?.googleDrive.installed && det?.secondBrain.initialized) {
+        setStep(1, { status: 'done', detail: det.googleDrive.workspacePath || '', friendlyDesc: `Workspace found at ${det.googleDrive.workspacePath || 'Google Drive'}` });
+        addLog(`Workspace: found at ${det.googleDrive.workspacePath}`);
+      } else if (det?.googleDrive.installed && !det?.secondBrain.initialized) {
+        // Google Drive exists but no workspace — create it
+        setStep(1, { status: 'running', elapsed: 0, friendlyDesc: 'Google Drive found. Creating workspace folders (projects, notes, research, templates)...' });
+        addLog('Google Drive found but no workspace. Creating...');
+        const result = await setupAction('create-workspace');
+        if (result.success) {
+          setStep(1, { status: 'done', detail: result.workspacePath, friendlyDesc: `Workspace created at ${result.workspacePath}` });
+          addLog(`Workspace created at ${result.workspacePath}`);
+        } else {
+          setStep(1, { status: 'error', output: result.error || result.message, friendlyDesc: 'Failed to create workspace folders' });
+          addLog(`Workspace creation failed: ${result.error}`);
+        }
+      } else {
+        // Google Drive not found — try to create workspace anyway (bridge will report the error)
+        setStep(1, { status: 'running', elapsed: 0, friendlyDesc: 'Google Drive not detected. Attempting to create workspace...' });
+        addLog('Google Drive not detected. Attempting workspace creation...');
+        const result = await setupAction('create-workspace');
+        if (result.success) {
+          setStep(1, { status: 'done', detail: result.workspacePath, friendlyDesc: `Workspace created at ${result.workspacePath}` });
+          addLog(`Workspace created at ${result.workspacePath}`);
+        } else {
+          setStep(1, { status: 'error', output: result.message || result.error || 'Google Drive for Desktop not found', friendlyDesc: 'Google Drive for Desktop is not installed or not signed in. Install it from google.com/drive/download and re-run setup.' });
+          addLog(`Workspace failed: ${result.error || result.message}`);
+        }
+      }
+    } catch (e: any) {
+      setStep(1, { status: 'error', output: e.message, friendlyDesc: 'Failed to check Google Drive workspace' });
+      addLog(`Workspace check error: ${e.message}`);
+    }
+
+    await new Promise(r => setTimeout(r, 300));
+
+    // ─── Step 3: CLAUDE.md Configuration ──────────────────────────────────
+    setCurrentStepIdx(2);
+    setStep(2, { status: 'checking', elapsed: 0, friendlyDesc: 'Checking for CLAUDE.md configuration file...' });
+    addLog('Step 3/4: Checking CLAUDE.md...');
+
+    try {
+      const det = await detect();
+      if (det?.secondBrain.claudeMdExists) {
+        setStep(2, { status: 'done', friendlyDesc: 'CLAUDE.md configuration file found with slash commands' });
+        addLog('CLAUDE.md: found');
+      } else {
+        // Create it
+        setStep(2, { status: 'running', elapsed: 0, friendlyDesc: 'Creating CLAUDE.md with 6 pre-configured slash commands...' });
+        addLog('CLAUDE.md not found. Creating...');
+        const result = await setupAction('init-claudemd');
+        if (result.success) {
+          const path = result.path || '';
+          setStep(2, { status: 'done', detail: path, friendlyDesc: `CLAUDE.md created${path ? ` at ${path}` : ''} with all slash commands` });
+          addLog(`CLAUDE.md created at ${path}`);
+        } else {
+          setStep(2, { status: 'error', output: result.error || result.message, friendlyDesc: `Failed to create CLAUDE.md: ${result.message || result.error || 'Unknown error'}. Make sure the workspace folder exists first.` });
+          addLog(`CLAUDE.md creation failed: ${result.error || result.message}`);
+        }
+      }
+    } catch (e: any) {
+      setStep(2, { status: 'error', output: e.message, friendlyDesc: 'Failed to check CLAUDE.md configuration' });
+      addLog(`CLAUDE.md check error: ${e.message}`);
+    }
+
+    await new Promise(r => setTimeout(r, 300));
+
+    // ─── Step 4: Skills & Plugins ─────────────────────────────────────────
+    setCurrentStepIdx(3);
+    setStep(3, { status: 'checking', elapsed: 0, friendlyDesc: 'Checking installed skills and plugins...' });
+    addLog('Step 4/4: Checking Skills & Plugins...');
+
+    try {
+      const det = await detect();
+      if (det && det.skills.installed.length > 0) {
+        setStep(3, { status: 'done', detail: `${det.skills.installed.length} skills`, friendlyDesc: `${det.skills.installed.length} skills installed: ${det.skills.installed.slice(0, 5).join(', ')}${det.skills.installed.length > 5 ? '...' : ''}` });
+        addLog(`Skills: ${det.skills.installed.length} found`);
+      } else {
+        // First check if claude-templates is available
+        setStep(3, { status: 'running', elapsed: 0, friendlyDesc: 'Installing template manager (claude-templates)...' });
+        addLog('No skills found. Installing claude-templates first...');
+
+        const tmplResult = await setupAction('install-claude-templates');
+        if (tmplResult.success) {
+          addLog('claude-templates installed. Now installing skills...');
+          setStep(3, { status: 'running', friendlyDesc: 'Template manager installed. Now installing skills (tasks, deep-research, google-docs, calendar, and more)...' });
+
+          const skillsResult = await setupAction('install-skills');
+          if (skillsResult.success) {
+            addLog('Skills installed. Now installing plugins...');
+            setStep(3, { status: 'running', friendlyDesc: 'Skills installed. Now installing plugins (Google Docs, Sheets, Slides, Calendar connectors)...' });
+
+            const pluginsResult = await setupAction('install-plugins');
+            if (pluginsResult.success) {
+              setStep(3, { status: 'done', friendlyDesc: 'All skills and plugins installed successfully' });
+              addLog('Skills & plugins installed successfully');
+            } else {
+              // Skills worked but plugins failed — partial success
+              setStep(3, { status: 'done', detail: 'Skills OK, plugins had issues', friendlyDesc: 'Skills installed. Some plugins may need manual setup — run "claude-templates plugin install" in Terminal.' });
+              addLog(`Plugins install issue: ${pluginsResult.error || pluginsResult.stderr}`);
+            }
+          } else {
+            setStep(3, { status: 'error', output: skillsResult.error || skillsResult.stderr, friendlyDesc: 'Failed to install skills. Make sure claude-templates is working and try again.' });
+            addLog(`Skills install failed: ${skillsResult.error || skillsResult.stderr}`);
+          }
+        } else {
+          // claude-templates failed — try installing skills directly anyway
+          addLog(`claude-templates install failed: ${tmplResult.error || tmplResult.stderr}. Trying skills directly...`);
+          setStep(3, { status: 'running', friendlyDesc: 'Template manager install had issues. Trying to install skills directly...' });
+
+          const skillsResult = await setupAction('install-skills');
+          if (skillsResult.success) {
+            setStep(3, { status: 'done', friendlyDesc: 'Skills installed (template manager may need manual setup)' });
+            addLog('Skills installed despite template manager issue');
+          } else {
+            setStep(3, { status: 'error', output: `Template manager: ${tmplResult.error || tmplResult.stderr}\nSkills: ${skillsResult.error || skillsResult.stderr}`, friendlyDesc: 'Could not install skills. You may need to run "npm install -g claude-templates" manually in Terminal, then re-run setup.' });
+            addLog('Skills install failed completely');
+          }
+        }
+      }
+    } catch (e: any) {
+      setStep(3, { status: 'error', output: e.message, friendlyDesc: 'Failed to check or install skills' });
+      addLog(`Skills check error: ${e.message}`);
+    }
+
+    // ─── Done — re-detect to refresh dashboard ────────────────────────────
+    addLog('Setup complete. Re-scanning...');
+    await new Promise(r => setTimeout(r, 1000));
+    const finalDetect = await detect();
+    if (finalDetect) setDetection(finalDetect);
+    addLog(`Final scan: ${finalDetect?.summary.readyCount}/${finalDetect?.summary.totalRequired} ready`);
+
+  }, [addLog]);
 
   // ─── Copy command ───────────────────────────────────────────────────────
 
@@ -454,27 +443,31 @@ export function SecondBrainPanel() {
     );
   }
 
-  // ─── Installing ─────────────────────────────────────────────────────────
+  // ─── Installing (progress view) ────────────────────────────────────────
 
   if (phase === 'installing') {
-    const doneCount = steps.filter(s => s.status === 'done').length;
+    const doneCount = steps.filter(s => s.status === 'done' || s.status === 'skipped').length;
+    const errorCount = steps.filter(s => s.status === 'error').length;
     const totalCount = steps.length;
-    const pct = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
-    const currentStep = steps[currentStepIdx];
+    const finishedCount = doneCount + errorCount;
+    const allFinished = finishedCount === totalCount;
     const allDone = doneCount === totalCount;
-    const hasError = steps.some(s => s.status === 'error');
+    const pct = totalCount > 0 ? Math.round((finishedCount / totalCount) * 100) : 0;
+    const currentStep = steps[currentStepIdx];
 
     return (
       <div style={containerStyle}>
         {/* Header */}
         <div style={{ marginBottom: '24px' }}>
           <h2 style={{ fontSize: '22px', fontWeight: 800, color: 'var(--text-primary)', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-            {allDone ? '✅' : '⚡'} {allDone ? 'Setup Complete!' : 'Setting Up Second Brain'}
+            {allDone ? '✅' : allFinished ? '⚠️' : '⚡'} {allDone ? 'Setup Complete!' : allFinished ? 'Setup Finished with Issues' : 'Setting Up Second Brain'}
           </h2>
           <p style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>
             {allDone
-              ? 'Your Second Brain is ready to use. All components have been installed and configured.'
-              : `Step ${Math.min(currentStepIdx + 1, totalCount)} of ${totalCount} — ${currentStep?.label || 'Finishing up...'}`}
+              ? 'All 4 components are installed and configured. Your Second Brain is ready to use.'
+              : allFinished
+              ? `${doneCount} of ${totalCount} components ready. ${errorCount} had issues — see details below.`
+              : `Step ${Math.min(currentStepIdx + 1, totalCount)} of ${totalCount} — ${currentStep?.label || 'Processing...'}`}
           </p>
         </div>
 
@@ -482,15 +475,15 @@ export function SecondBrainPanel() {
         <div style={{ marginBottom: '24px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
             <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-              {doneCount} of {totalCount} completed
+              {doneCount} of {totalCount} completed{errorCount > 0 ? ` · ${errorCount} error${errorCount > 1 ? 's' : ''}` : ''}
             </span>
-            <span style={{ fontSize: '12px', color: allDone ? '#22c55e' : '#6366f1', fontWeight: 600 }}>{pct}%</span>
+            <span style={{ fontSize: '12px', color: allDone ? '#22c55e' : errorCount > 0 ? '#f59e0b' : '#6366f1', fontWeight: 600 }}>{pct}%</span>
           </div>
           <div style={{ height: '8px', borderRadius: '4px', background: 'var(--bg-primary)', overflow: 'hidden' }}>
             <div style={{
               height: '100%',
               width: `${pct}%`,
-              background: allDone ? 'linear-gradient(90deg, #22c55e, #16a34a)' : 'linear-gradient(90deg, #6366f1, #8b5cf6)',
+              background: allDone ? 'linear-gradient(90deg, #22c55e, #16a34a)' : errorCount > 0 ? 'linear-gradient(90deg, #f59e0b, #d97706)' : 'linear-gradient(90deg, #6366f1, #8b5cf6)',
               borderRadius: '4px',
               transition: 'width 0.5s ease',
             }} />
@@ -500,9 +493,9 @@ export function SecondBrainPanel() {
         {/* Steps list */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '24px' }}>
           {steps.map((step, i) => {
-            const isCurrent = i === currentStepIdx && !allDone;
-            const statusIcon = step.status === 'done' ? '✅' : step.status === 'error' ? '❌' : step.status === 'running' ? '⏳' : step.status === 'needs-action' ? '👆' : '○';
-            const borderColor = step.status === 'done' ? '#22c55e30' : step.status === 'error' ? '#ef444430' : step.status === 'running' ? '#6366f140' : step.status === 'needs-action' ? '#f59e0b40' : 'var(--border)';
+            const isCurrent = i === currentStepIdx && !allFinished;
+            const statusIcon = step.status === 'done' ? '✅' : step.status === 'skipped' ? '⏭️' : step.status === 'error' ? '❌' : step.status === 'running' ? '⏳' : step.status === 'checking' ? '🔍' : '○';
+            const borderColor = step.status === 'done' ? '#22c55e30' : step.status === 'error' ? '#ef444430' : (step.status === 'running' || step.status === 'checking') ? '#6366f140' : 'var(--border)';
             const bgColor = isCurrent ? 'var(--bg-primary)' : 'var(--bg-secondary)';
 
             return (
@@ -518,10 +511,15 @@ export function SecondBrainPanel() {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <span style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '14px' }}>{step.label}</span>
-                      {step.status === 'running' && step.elapsed != null && (
+                      {(step.status === 'running' || step.status === 'checking') && step.elapsed != null && (
                         <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', fontFamily: 'monospace' }}>{step.elapsed}s</span>
                       )}
-                      {step.status === 'running' && (
+                      {step.detail && step.status === 'done' && (
+                        <span style={{ fontSize: '11px', color: '#22c55e', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '300px' }}>
+                          {step.detail}
+                        </span>
+                      )}
+                      {(step.status === 'running' || step.status === 'checking') && (
                         <div style={{ width: '14px', height: '14px', border: '2px solid #6366f140', borderTopColor: '#6366f1', borderRadius: '50%', animation: 'spin 1s linear infinite', marginLeft: 'auto', flexShrink: 0 }} />
                       )}
                     </div>
@@ -533,7 +531,7 @@ export function SecondBrainPanel() {
 
                 {/* Error output */}
                 {step.status === 'error' && step.output && (
-                  <div style={{ marginTop: '10px', padding: '8px 12px', background: '#ef444410', borderRadius: '8px', fontSize: '11px', fontFamily: 'monospace', color: '#ef4444', maxHeight: '80px', overflow: 'auto' }}>
+                  <div style={{ marginTop: '10px', padding: '8px 12px', background: '#ef444410', borderRadius: '8px', fontSize: '11px', fontFamily: 'monospace', color: '#ef4444', maxHeight: '80px', overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
                     {step.output}
                   </div>
                 )}
@@ -544,73 +542,31 @@ export function SecondBrainPanel() {
 
         {/* Action buttons */}
         {allDone && (
-          <button onClick={() => { setPhase('dashboard'); runDetection(); }} style={{ padding: '10px 20px', borderRadius: '8px', border: 'none', background: '#22c55e', color: '#fff', fontSize: '14px', fontWeight: 600, cursor: 'pointer', width: '100%' }}>
+          <button onClick={() => { setPhase('dashboard'); runDetection(); }} style={{ padding: '12px 20px', borderRadius: '10px', border: 'none', background: '#22c55e', color: '#fff', fontSize: '14px', fontWeight: 600, cursor: 'pointer', width: '100%' }}>
             🎉 Go to Dashboard
           </button>
         )}
-        {hasError && !allDone && (
+        {allFinished && !allDone && (
           <div style={{ display: 'flex', gap: '10px' }}>
-            <button onClick={runInstall} style={{ padding: '8px 16px', borderRadius: '8px', border: 'none', background: '#6366f1', color: '#fff', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>
+            <button onClick={runInstall} style={{ flex: 1, padding: '10px 16px', borderRadius: '10px', border: 'none', background: '#6366f1', color: '#fff', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>
               🔄 Retry Setup
             </button>
-            <button onClick={() => setPhase('dashboard')} style={{ padding: '8px 16px', borderRadius: '8px', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>
+            <button onClick={() => { setPhase('dashboard'); runDetection(); }} style={{ flex: 1, padding: '10px 16px', borderRadius: '10px', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>
               ← Back to Dashboard
             </button>
           </div>
         )}
 
-        {/* ─── User Action Dialog (modal overlay) ─────────────────────────── */}
-        {dialogVisible && currentStep?.dialog && (
-          <div style={{
-            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999,
-            backdropFilter: 'blur(4px)',
-          }}>
-            <div style={{
-              background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '16px',
-              padding: '28px 32px', maxWidth: '440px', width: '90%', boxShadow: '0 20px 60px rgba(0,0,0,0.4)',
-            }}>
-              <div style={{ fontSize: '32px', textAlign: 'center', marginBottom: '16px' }}>
-                {currentStep.id === 'claude-code' ? '⚡' : '📁'}
-              </div>
-              <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)', textAlign: 'center', marginBottom: '10px' }}>
-                {currentStep.dialog.title}
-              </h3>
-              <p style={{ fontSize: '14px', color: 'var(--text-secondary)', textAlign: 'center', lineHeight: '1.6', marginBottom: '24px' }}>
-                {currentStep.dialog.message}
-              </p>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                {currentStep.dialog.actionUrl && (
-                  <a
-                    href={currentStep.dialog.actionUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{
-                      padding: '12px 20px', borderRadius: '10px', background: '#6366f1', color: '#fff',
-                      fontSize: '14px', fontWeight: 600, textAlign: 'center', textDecoration: 'none',
-                      display: 'block', transition: 'background 0.2s',
-                    }}
-                  >
-                    {currentStep.dialog.actionLabel} ↗
-                  </a>
-                )}
-                <button
-                  onClick={confirmDialog}
-                  style={{
-                    padding: '12px 20px', borderRadius: '10px', border: '1px solid var(--border)',
-                    background: 'var(--bg-primary)', color: 'var(--text-primary)',
-                    fontSize: '14px', fontWeight: 600, cursor: 'pointer', transition: 'all 0.2s',
-                  }}
-                >
-                  {currentStep.dialog.confirmLabel}
-                </button>
-              </div>
-
-              <p style={{ fontSize: '11px', color: 'var(--text-tertiary)', textAlign: 'center', marginTop: '14px' }}>
-                We'll automatically detect when you're done. You can also click the button above to continue manually.
-              </p>
+        {/* Setup log (collapsible) */}
+        {setupLog.length > 0 && (
+          <details style={{ marginTop: '16px' }}>
+            <summary style={{ fontSize: '12px', color: 'var(--text-tertiary)', cursor: 'pointer', userSelect: 'none' }}>
+              Setup log ({setupLog.length} entries)
+            </summary>
+            <div style={{ marginTop: '8px', padding: '10px 14px', background: 'var(--bg-primary)', borderRadius: '8px', maxHeight: '150px', overflow: 'auto', fontSize: '11px', fontFamily: 'monospace', color: 'var(--text-secondary)', lineHeight: '1.6' }}>
+              {setupLog.map((line, i) => <div key={i}>{line}</div>)}
             </div>
-          </div>
+          </details>
         )}
 
         <style>{`
@@ -671,8 +627,8 @@ export function SecondBrainPanel() {
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {[
-            { label: 'Claude Code', ready: detection?.claudeCode.installed ?? false, detail: detection?.claudeCode.version?.split('\n')[0]?.slice(0, 40), link: 'https://secondbrain-setup.manus.space' },
-            { label: 'Google Drive Workspace', ready: detection?.googleDrive.installed ?? false, detail: detection?.googleDrive.workspacePath },
+            { label: 'Claude Code', ready: detection?.claudeCode.installed ?? false, detail: detection?.claudeCode.version?.split('\n')[0]?.slice(0, 40) },
+            { label: 'Google Drive Workspace', ready: (detection?.googleDrive.installed && detection?.secondBrain.initialized) ?? false, detail: detection?.googleDrive.workspacePath },
             { label: 'CLAUDE.md Configuration', ready: detection?.secondBrain.claudeMdExists ?? false },
             { label: 'Skills & Plugins', ready: (detection?.skills.installed.length ?? 0) > 0, detail: detection?.skills.installed.slice(0, 5).join(', ') },
           ].map((item, i) => (
@@ -684,13 +640,10 @@ export function SecondBrainPanel() {
                 boxShadow: item.ready ? '0 0 6px #22c55e60' : 'none',
               }} />
               <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{item.label}</span>
-              {item.detail && (
+              {item.detail && item.ready && (
                 <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '250px' }}>
                   {item.detail}
                 </span>
-              )}
-              {!item.ready && item.link && (
-                <a href={item.link} target="_blank" rel="noopener noreferrer" style={{ fontSize: '11px', color: '#6366f1', marginLeft: 'auto' }}>Install →</a>
               )}
             </div>
           ))}
@@ -727,7 +680,6 @@ export function SecondBrainPanel() {
               background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '10px',
               padding: '14px 16px', cursor: 'pointer', transition: 'all 0.2s ease',
               display: 'flex', alignItems: 'flex-start', gap: '12px',
-              opacity: isFullyReady ? 1 : 0.6,
             }}
             onClick={() => copyCommand(cmd.command)}
             onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = '#6366f150'; (e.currentTarget as HTMLElement).style.background = 'var(--bg-primary)'; }}
