@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect, memo } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo, memo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useConnection } from '../../store/ConnectionContext';
@@ -371,47 +371,146 @@ const MessageBubble = memo(function MessageBubble({ message }: { message: Messag
   );
 });
 
-// ─── Waiting Tips ────────────────────────────────────────────────────────────
+// ─── Contextual Waiting Tips ─────────────────────────────────────────────────
 
-const WAITING_TIPS = [
-  { icon: '💡', text: 'Tip: Use Shift+Enter for multi-line prompts' },
-  { icon: '⚡', text: 'Tip: Be specific — "Summarize in 3 bullets" beats "Summarize this"' },
-  { icon: '🎯', text: 'Tip: Start with the output format you want: "Write a table comparing..."' },
-  { icon: '📎', text: 'Tip: Drag & drop images directly into the chat for visual analysis' },
-  { icon: '🔄', text: 'Tip: Click any suggestion chip below a response to keep the conversation going' },
-  { icon: '🧠', text: 'Tip: Enable extended thinking in Settings for complex reasoning tasks' },
-  { icon: '📋', text: 'Tip: Claude can format as Markdown tables, bullet lists, or numbered steps' },
-  { icon: '✂️', text: 'Tip: Ask "Make it shorter" or "Make it more formal" to refine any response' },
-  { icon: '🔑', text: 'Tip: Use Engineer mode for code generation with live preview' },
-  { icon: '📊', text: 'Tip: Paste raw data and ask for trends — Claude is great at pattern recognition' },
-  { icon: '🏗️', text: 'Tip: For long tasks, break them into steps: "First outline, then draft each section"' },
-  { icon: '🎨', text: 'Tip: Ask Claude to generate HTML artifacts for interactive visualizations' },
-  { icon: '⏱️', text: 'Fun fact: Claude processes ~80 tokens per second during generation' },
-  { icon: '🌐', text: 'Fun fact: Claude was trained by Anthropic with a focus on being helpful and harmless' },
-  { icon: '📝', text: 'Tip: You can edit and resend any previous message to get a different response' },
-  { icon: '🔍', text: 'Tip: Ask "What questions should I be asking?" when you\'re stuck' },
+const GENERAL_TIPS = [
+  { icon: '💡', text: 'Use Shift+Enter for multi-line prompts' },
+  { icon: '🔄', text: 'Click suggestion chips below responses to keep the conversation going' },
+  { icon: '🧠', text: 'Enable extended thinking in Settings for complex reasoning' },
+  { icon: '✂️', text: 'Ask "Make it shorter" or "More formal" to refine any response' },
+  { icon: '🔑', text: 'Switch to Engineer mode for code generation with live preview' },
+  { icon: '📝', text: 'You can edit and resend any previous message' },
+  { icon: '🔍', text: 'Try asking "What questions should I be asking?" when stuck' },
+  { icon: '📎', text: 'Drag & drop images directly into the chat' },
 ];
 
-function ThinkingTips() {
+const WRITING_TIPS = [
+  { icon: '✍️', text: 'Specify the tone: casual, professional, persuasive, empathetic' },
+  { icon: '📏', text: 'Set a target length: "Keep it under 100 words"' },
+  { icon: '🎯', text: 'Name the audience: "Write this for a VP" vs "for a new hire"' },
+  { icon: '📧', text: 'Ask for multiple versions to compare different approaches' },
+  { icon: '💬', text: 'Provide context: who, what, why — the more detail, the better' },
+  { icon: '🔄', text: 'Say "Make the CTA stronger" or "Soften the opening" to iterate' },
+];
+
+const DATA_TIPS = [
+  { icon: '📊', text: 'Ask for trends, outliers, or comparisons in your data' },
+  { icon: '📈', text: 'Request a specific format: "Show as a ranked table"' },
+  { icon: '🔢', text: 'Claude can calculate percentages, averages, and growth rates' },
+  { icon: '🎯', text: 'Ask "What should I do about this?" for actionable insights' },
+  { icon: '📋', text: 'Try "Simplify for executives" to get a high-level summary' },
+  { icon: '⚡', text: 'Paste CSV or table data directly — Claude parses it automatically' },
+];
+
+const CODE_TIPS = [
+  { icon: '💻', text: 'Specify the language and framework for more accurate code' },
+  { icon: '🐛', text: 'Paste error messages directly — Claude can debug them' },
+  { icon: '📖', text: 'Ask for code comments and explanations alongside the solution' },
+  { icon: '🧪', text: 'Request unit tests: "Add Jest tests for this function"' },
+  { icon: '🔧', text: 'Ask "Refactor this for readability" to improve existing code' },
+  { icon: '🎨', text: 'Claude can generate HTML artifacts with live preview' },
+];
+
+const PLANNING_TIPS = [
+  { icon: '🗓️', text: 'Ask Claude to break projects into phases with milestones' },
+  { icon: '⚖️', text: 'Request pros and cons for each option to compare approaches' },
+  { icon: '🎯', text: 'Specify constraints: timeline, budget, team size' },
+  { icon: '📋', text: 'Ask for a prioritized action list sorted by impact' },
+  { icon: '🏗️', text: 'Try "First outline, then draft each section" for long tasks' },
+  { icon: '💡', text: 'Ask "What am I missing?" to surface blind spots' },
+];
+
+function detectPromptCategory(text: string): 'writing' | 'data' | 'code' | 'planning' | 'general' {
+  const lower = text.toLowerCase();
+  if (/\b(email|draft|write|letter|message|memo|announce|blog|post|copy|subject line)\b/.test(lower)) return 'writing';
+  if (/\b(meeting notes|summary|summarize|review|hpm|self-review|feedback)\b/.test(lower)) return 'writing';
+  if (/\b(data|metric|number|chart|graph|csv|table|percent|growth|revenue|analytics|kpi|dashboard)\b/.test(lower)) return 'data';
+  if (/\b(code|function|bug|error|api|sql|python|javascript|typescript|react|html|css|debug|refactor|test)\b/.test(lower)) return 'code';
+  if (/\b(plan|strategy|brainstorm|idea|roadmap|project|prioritize|compare|decide|pros and cons|options)\b/.test(lower)) return 'planning';
+  return 'general';
+}
+
+const TIPS_BY_CATEGORY: Record<string, { icon: string; text: string }[]> = {
+  writing: WRITING_TIPS,
+  data: DATA_TIPS,
+  code: CODE_TIPS,
+  planning: PLANNING_TIPS,
+  general: GENERAL_TIPS,
+};
+
+// ─── TTFT History ────────────────────────────────────────────────────────────
+
+const TTFT_STORAGE_KEY = 'arcadia_ttft_history';
+const MAX_TTFT_SAMPLES = 20;
+
+function saveTtft(seconds: number) {
+  try {
+    const raw = localStorage.getItem(TTFT_STORAGE_KEY);
+    const history: number[] = raw ? JSON.parse(raw) : [];
+    history.push(seconds);
+    if (history.length > MAX_TTFT_SAMPLES) history.shift();
+    localStorage.setItem(TTFT_STORAGE_KEY, JSON.stringify(history));
+  } catch { /* ignore */ }
+}
+
+function getEstimatedTtft(): number | null {
+  try {
+    const raw = localStorage.getItem(TTFT_STORAGE_KEY);
+    const history: number[] = raw ? JSON.parse(raw) : [];
+    if (history.length < 2) return null;
+    // Use median for robustness against outliers
+    const sorted = [...history].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
+  } catch { return null; }
+}
+
+// ─── ThinkingTips Component ──────────────────────────────────────────────────
+
+function ThinkingTips({ promptText }: { promptText: string }) {
+  const category = useMemo(() => detectPromptCategory(promptText), [promptText]);
+  const tips = useMemo(() => {
+    const contextual = TIPS_BY_CATEGORY[category] || GENERAL_TIPS;
+    // Mix: 2 contextual, then 1 general, repeating
+    const mixed: { icon: string; text: string }[] = [];
+    let ci = 0, gi = 0;
+    for (let i = 0; i < 18; i++) {
+      if (i % 3 === 2) {
+        mixed.push(GENERAL_TIPS[gi % GENERAL_TIPS.length]);
+        gi++;
+      } else {
+        mixed.push(contextual[ci % contextual.length]);
+        ci++;
+      }
+    }
+    return mixed;
+  }, [category]);
+
   const [tipIndex, setTipIndex] = useState(0);
   const [fade, setFade] = useState(true);
-  const [startIndex] = useState(() => Math.floor(Math.random() * WAITING_TIPS.length));
+  const [startIndex] = useState(() => Math.floor(Math.random() * tips.length));
+  const estimatedTtft = useMemo(() => getEstimatedTtft(), []);
 
   useEffect(() => {
     const interval = setInterval(() => {
       setFade(false);
       setTimeout(() => {
-        setTipIndex(prev => (prev + 1) % WAITING_TIPS.length);
+        setTipIndex(prev => (prev + 1) % tips.length);
         setFade(true);
       }, 300);
     }, 4500);
     return () => clearInterval(interval);
-  }, []);
+  }, [tips.length]);
 
-  const tip = WAITING_TIPS[(startIndex + tipIndex) % WAITING_TIPS.length];
+  const tip = tips[(startIndex + tipIndex) % tips.length];
 
   return (
     <div className={styles.tipCarousel}>
+      {estimatedTtft && (
+        <div className={styles.tipEstimate}>
+          Usually responds in ~{estimatedTtft}s
+        </div>
+      )}
       <div className={styles.tipPulseBar}>
         <div className={styles.tipPulseTrack} />
       </div>
@@ -596,7 +695,9 @@ export function SimpleView() {
           if (!firstToken) {
             firstToken = true;
             clearInterval(elapsedTimer);
-            const ttftSec = ((Date.now() - sendStartTime) / 1000).toFixed(1);
+            const ttftMs = Date.now() - sendStartTime;
+            const ttftSec = (ttftMs / 1000).toFixed(1);
+            saveTtft(Math.round(ttftMs / 1000));
             setStep('thinking', 'done', `${ttftSec}s`);
             setStep('writing', 'active', 'Streaming...');
           }
@@ -847,7 +948,7 @@ export function SimpleView() {
                                     {activeStep.detail && <span className={styles.inlineStepDetail}>{activeStep.detail}</span>}
                                   </div>
                                 )}
-                                {isThinking && <ThinkingTips />}
+                                {isThinking && <ThinkingTips promptText={messages[messages.length - 1]?.content || ''} />}
                               </>
                             );
                           })()}
