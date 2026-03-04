@@ -1,10 +1,15 @@
 #!/usr/bin/env node
 /**
- * ArcadIA Bridge v3.1.0 — Local proxy connecting ArcadIA web app to Claude Code
+ * ArcadIA Bridge v3.2.0 — Local proxy connecting ArcadIA web app to Claude Code
  * 
  * Runs on localhost:8087 and forwards requests from the ArcadIA web app
  * to Claude Code CLI, which handles Meta internal authentication.
  * 
+ * v3.2.0:
+ * - Simplified setup: one-line command, no .sh download needed
+ * - Filtered scribecat/Meta internal stderr noise from console output
+ * - Added Manus domain support (*.manus.computer, *.manus.space)
+ *
  * v3.1.0:
  * - Removed auth token requirement (CORS is sufficient for localhost security)
  * - Fixed keepalive variable scoping crash in non-streaming/auto-fix paths
@@ -26,7 +31,7 @@ const os = require('os');
 
 const PORT = 8087;
 const HOST = '127.0.0.1';
-const VERSION = '3.1.0';
+const VERSION = '3.2.0';
 const TIMEOUT_MS = 180000; // 3 minute timeout
 const KEEPALIVE_INTERVAL_MS = 2000; // SSE keepalive every 2s
 
@@ -494,7 +499,8 @@ function handleMessages(req, res, body) {
     claude.stderr.on('data', (data) => {
       const errText = data.toString();
       stderrLines.push(errText);
-      if (!errText.includes('Claude Code at Meta') && !errText.includes('fburl.com')) {
+      // Filter out known noise: Meta internal scribecat logger, Claude Code branding
+      if (!errText.includes('Claude Code at Meta') && !errText.includes('fburl.com') && !errText.includes('scribe_cat.go') && !errText.includes('scribecat:')) {
         errorOutput += errText;
         console.log(`[${new Date().toISOString()}]   stderr: ${errText.trim()}`);
       }
@@ -602,7 +608,8 @@ function handleMessages(req, res, body) {
     claude.stderr.on('data', (data) => {
       const errText = data.toString();
       stderrLines.push(errText);
-      if (!errText.includes('Claude Code at Meta') && !errText.includes('fburl.com')) {
+      // Filter out known noise: Meta internal scribecat logger, Claude Code branding
+      if (!errText.includes('Claude Code at Meta') && !errText.includes('fburl.com') && !errText.includes('scribe_cat.go') && !errText.includes('scribecat:')) {
         errorOutput += errText;
         console.log(`[${new Date().toISOString()}]   stderr: ${errText.trim()}`);
       }

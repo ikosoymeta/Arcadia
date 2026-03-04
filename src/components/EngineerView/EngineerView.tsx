@@ -999,8 +999,9 @@ function ValidationPanel() {
       {/* Bridge status */}
       {bridgeOk === false && (
         <div className={styles.validateWarning}>
-          Bridge not detected or missing validation support. Start the bridge (v3.1.0+):
-          <code>node bridge/arcadia-bridge.js</code>
+          Bridge not detected. Run this in Terminal to connect:
+          <code>curl -sL https://raw.githubusercontent.com/ikosoymeta/Arcadia/main/bridge/setup.sh | bash</code>
+          <span style={{ fontSize: '11px', opacity: 0.7, marginLeft: '8px' }}>Already set up? Run: <code>node ~/.arcadia-bridge/arcadia-bridge.js</code></span>
         </div>
       )}
 
