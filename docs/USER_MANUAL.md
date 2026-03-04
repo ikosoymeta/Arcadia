@@ -1,6 +1,6 @@
 # ArcadIA Editor — User Manual
 
-**Version 3.4.1** | Last updated: March 2026
+**Version 3.5.0** | Last updated: March 2026
 
 ArcadIA Editor is a web-based interface for Claude AI, designed specifically for Meta employees. It connects to Claude Code on your laptop through a lightweight local bridge, so you get full Claude access with zero API keys and zero VPN required. This manual covers every feature, panel, and workflow available in the app.
 
@@ -13,17 +13,18 @@ ArcadIA Editor is a web-based interface for Claude AI, designed specifically for
 3. [Interface Modes](#3-interface-modes)
 4. [Simple Mode](#4-simple-mode)
 5. [Engineer Mode](#5-engineer-mode)
-6. [Sidebar & Conversations](#6-sidebar--conversations)
-7. [Settings](#7-settings)
-8. [Skills & Templates](#8-skills--templates)
-9. [Integrations](#9-integrations)
-10. [Analytics](#10-analytics)
-11. [Benchmark](#11-benchmark)
-12. [Code Workspace & Preview](#12-code-workspace--preview)
-13. [Team Panel](#13-team-panel)
-14. [Help & Support](#14-help--support)
-15. [Keyboard Shortcuts](#15-keyboard-shortcuts)
-16. [Troubleshooting](#16-troubleshooting)
+6. [Second Brain](#6-second-brain)
+7. [Sidebar & Conversations](#7-sidebar--conversations)
+8. [Settings](#8-settings)
+9. [Skills & Templates](#9-skills--templates)
+10. [Integrations](#10-integrations)
+11. [Analytics](#11-analytics)
+12. [Benchmark](#12-benchmark)
+13. [Code Workspace & Preview](#13-code-workspace--preview)
+14. [Team Panel](#14-team-panel)
+15. [Help & Support](#15-help--support)
+16. [Keyboard Shortcuts](#16-keyboard-shortcuts)
+17. [Troubleshooting](#17-troubleshooting)
 
 ---
 
@@ -32,9 +33,9 @@ ArcadIA Editor is a web-based interface for Claude AI, designed specifically for
 Getting started with ArcadIA takes about 60 seconds:
 
 1. **Open ArcadIA** in your browser at [https://ikosoymeta.github.io/Arcadia/](https://ikosoymeta.github.io/Arcadia/) or [https://arcadia.manus.space](https://arcadia.manus.space).
-2. **Run the bridge** (one-time setup). On your first visit, you will see a setup screen with a single command. Copy it and paste it into your terminal:
+2. **Run the bridge** (one-time setup). On your first visit, you will see a setup screen with a single command. Copy it and paste it into your **system Terminal** (not Claude Code's terminal):
 
-   **macOS / Linux (Terminal):**
+   **macOS / Linux (Terminal.app or iTerm):**
    ```bash
    curl -sL https://raw.githubusercontent.com/ikosoymeta/Arcadia/main/bridge/setup.sh | bash
    ```
@@ -43,6 +44,8 @@ Getting started with ArcadIA takes about 60 seconds:
    ```powershell
    irm https://raw.githubusercontent.com/ikosoymeta/Arcadia/main/bridge/setup.ps1 | iex
    ```
+
+   > **Important:** Paste the command into your system Terminal, not into Claude Code's terminal. Using Claude Code's terminal will trigger a security review that blocks the script.
 
 3. **Wait for the green dot.** Once the bridge is running, the sidebar will show a green "Active" indicator next to your connection name. ArcadIA auto-connects — no API keys, no VPN, no configuration.
 4. **Start chatting.** Click "+ New Chat" or pick one of the quick-start prompts on the welcome screen.
@@ -61,7 +64,7 @@ The bridge is a small Node.js service that runs locally on your computer (port 8
 Browser (ArcadIA)  ──HTTP──▶  localhost:8087 (Bridge)  ──stdin/stdout──▶  Claude Code CLI
 ```
 
-### Key features (v3.4.1)
+### Key features (v3.5.0)
 
 | Feature | Description |
 |---|---|
@@ -72,6 +75,7 @@ Browser (ArcadIA)  ──HTTP──▶  localhost:8087 (Bridge)  ──stdin/std
 | **TTFT estimate** | Tracks historical response times and shows "Usually responds in ~Xs" based on your averages |
 | **Auto port recovery** | Automatically kills stale processes on port 8087 before starting (uses `lsof` on macOS/Linux, `netstat` on Windows) |
 | **Graceful shutdown** | Properly cleans up all pool and child processes on Ctrl+C or system shutdown |
+| **Second Brain detection** | Scans your local machine for Second Brain components and supports automated setup |
 | **Context management** | Trims old messages to stay within Claude's context window |
 | **Streaming** | Real-time SSE streaming so you see tokens as they arrive |
 
@@ -147,10 +151,23 @@ When you open a new chat, you see a welcome screen with:
 
 When you send a message, the response bubble shows real-time progress directly in the chat:
 
-- **Connecting to Claude Code...** — Dispatching your request to the bridge
-- **Claude is thinking...** — Waiting for the first token (shows elapsed time)
+- **Claude is thinking...** — Waiting for the first token (shows elapsed time and estimated time based on your history)
 - **Writing response** — Streaming tokens in real-time
 - **Preparing results** — Extracting artifacts and code blocks
+
+### Contextual tips while waiting
+
+While Claude is thinking, the response bubble displays rotating tips matched to your prompt category:
+
+| Prompt Category | Example Tips |
+|---|---|
+| **Writing** (emails, docs) | "Specify the tone: casual, professional, or executive summary" |
+| **Data** (numbers, tables) | "Ask for trends, outliers, or comparisons to make data actionable" |
+| **Code** (programming) | "Include error handling requirements upfront to get production-ready code" |
+| **Meeting** (notes, agendas) | "Paste the raw transcript — Claude handles the formatting" |
+| **General** | "Break complex requests into numbered steps for better results" |
+
+Tips rotate every 4.5 seconds with a smooth crossfade animation. After 2+ requests, the bubble also shows **"Usually responds in ~Xs"** based on the median of your last 20 response times.
 
 ### Follow-up suggestions
 
@@ -204,7 +221,74 @@ Engineer mode includes built-in tools that Claude can use during conversations:
 
 ---
 
-## 6. Sidebar & Conversations
+## 6. Second Brain
+
+The Second Brain panel (🧠 icon in the sidebar) integrates with the [Second Brain](https://secondbrain-setup.manus.space) personal knowledge system. It detects your local setup, installs missing components automatically, and provides a command center for all Second Brain workflows.
+
+### What is Second Brain?
+
+Second Brain is an AI-powered personal knowledge system that combines Claude Code with Google Drive to create a persistent, organized workspace for your projects, notes, research, and daily workflows. It uses slash commands to automate recurring tasks like morning briefings, end-of-day summaries, and meeting preparation.
+
+### Automated setup
+
+When you open the Second Brain panel, it automatically scans your computer through the bridge and checks for:
+
+| Component | What it checks |
+|---|---|
+| **Claude Code** | Is the CLI installed? What version? |
+| **Google Drive** | Is Google Drive for Desktop installed and signed in? |
+| **Workspace** | Does the `claude/` folder exist in your Google Drive? |
+| **CLAUDE.md** | Is the configuration file with slash commands present? |
+| **Skills & Plugins** | Are Second Brain skills installed (tasks, deep-research, etc.)? |
+| **Optional: Wispr Flow** | Voice-to-text app for 3x faster input |
+| **Optional: Obsidian** | Local knowledge management app |
+
+A progress bar shows how many components are ready (e.g., "3 of 4 components ready").
+
+### Complete Setup button
+
+If any required components are missing, a **"Complete Setup — Install Everything Automatically"** button appears. Clicking it launches a fully automated installation wizard:
+
+1. **Real-time progress dialog** — Shows each step with status (waiting, running, done, needs action), friendly descriptions, and elapsed time
+2. **Automatic installation** — Creates workspace folders, installs skills and plugins, generates CLAUDE.md with all slash commands pre-configured
+3. **User prompts only when necessary** — If something truly requires your action (e.g., installing Google Drive for Desktop or Claude Code), a modal dialog appears with an action button and a "I've done this — continue" confirmation. The wizard auto-detects when you're done and advances to the next step
+4. **Re-scan after completion** — Automatically re-scans your system to verify everything installed correctly
+
+### Slash commands
+
+Once set up, the panel shows 6 pre-configured slash command cards:
+
+| Command | Description |
+|---|---|
+| **/daily-brief** | Morning briefing from your priorities, calendar, and recent activity |
+| **/eod** | End-of-day wrap-up — processes meeting notes, captures accomplishments, previews tomorrow |
+| **/eow** | End-of-week summary — compiles weekly accomplishments, captures PSC-worthy items, outlines next week |
+| **/prepare-meeting** | Research a person or topic and generate a structured meeting agenda |
+| **/add-context** | Paste any URL or text and it routes to the right project in your workspace |
+| **/deep-research** | Conduct thorough multi-source research on any topic with citations |
+
+Each card has a **Copy** button that copies the command to your clipboard for use in Claude Code.
+
+### Writing style guide
+
+The panel includes a section on setting up a personal writing style guide:
+1. Feed Claude 3-5 examples of your writing
+2. Ask it to generate a style guide
+3. Save the guide to your workspace
+
+This ensures Claude matches your tone and style across all writing tasks.
+
+### Optional add-ons
+
+| Add-on | Description | Status |
+|---|---|---|
+| **Wispr Flow** | Voice-to-text input (3x faster than typing) | Detected automatically |
+| **GClaude** | Chat with Second Brain via Google Chat | Manual setup |
+| **Obsidian** | Local knowledge management that syncs with your workspace | Detected automatically |
+
+---
+
+## 7. Sidebar & Conversations
 
 The left sidebar provides navigation and conversation management.
 
@@ -215,6 +299,7 @@ The left sidebar provides navigation and conversation management.
 | Chat | Chat | Main chat interface |
 | Code | Code Workspace | File explorer and code editor |
 | Skills | Skills | Reusable prompt templates |
+| 2nd Brain | Second Brain | AI knowledge system setup and commands |
 | Team | Team | Team pods and members |
 | Settings | Settings | Connection and app configuration |
 | Integrations | Integrations | Enable/disable tool integrations |
@@ -235,7 +320,7 @@ The left sidebar provides navigation and conversation management.
 
 ---
 
-## 7. Settings
+## 8. Settings
 
 The Settings panel lets you manage API connections and app preferences.
 
@@ -246,8 +331,8 @@ ArcadIA supports multiple connection types:
 | Type | Description |
 |---|---|
 | **Meta Corporate (LDAR)** | Auto-configured. Uses the local bridge + Claude Code. No API key needed. |
-| **Anthropic API** | Direct API connection. Requires your own Anthropic API key. |
-| **Custom Proxy** | Connect through a custom proxy URL (e.g., for team-shared endpoints). |
+| **Anthropic API** | Direct API connection. Requires an API key from console.anthropic.com. |
+| **AWS Bedrock** | Enterprise API through AWS. Requires access key, secret, and region. |
 
 ### Connection settings
 
@@ -273,7 +358,7 @@ For each connection, you can configure:
 
 ---
 
-## 8. Skills & Templates
+## 9. Skills & Templates
 
 Skills are reusable prompt templates that save time on recurring tasks.
 
@@ -301,7 +386,7 @@ Click a skill card, then "Copy Prompt". Paste it into a new chat and replace the
 
 ---
 
-## 9. Integrations
+## 10. Integrations
 
 Integrations give Claude access to external tools during your conversations. Enable or disable them in the Integrations panel.
 
@@ -319,7 +404,7 @@ When an integration is enabled, Claude can use those tools autonomously during y
 
 ---
 
-## 10. Analytics
+## 11. Analytics
 
 The Analytics panel provides usage statistics across all your conversations:
 
@@ -333,7 +418,7 @@ All analytics data is computed locally from your browser-stored conversations. N
 
 ---
 
-## 11. Benchmark
+## 12. Benchmark
 
 The Benchmark panel lets you test and compare Claude's performance across different tasks:
 
@@ -359,7 +444,7 @@ Run benchmarks to compare models, identify bottlenecks, and optimize your workfl
 
 ---
 
-## 12. Code Workspace & Preview
+## 13. Code Workspace & Preview
 
 ### Code Workspace
 A built-in file explorer and code editor. Browse project files, view code with syntax highlighting, and edit files directly. Connected to your local filesystem through the bridge.
@@ -374,7 +459,7 @@ Resize panels by dragging the borders between them. Your preferred widths are sa
 
 ---
 
-## 13. Team Panel
+## 14. Team Panel
 
 The Team panel lets you organize team members into pods:
 - Create and manage team pods
@@ -383,7 +468,7 @@ The Team panel lets you organize team members into pods:
 
 ---
 
-## 14. Help & Support
+## 15. Help & Support
 
 The Help panel (? icon in sidebar) contains a searchable FAQ covering every feature. Use the search bar to find answers quickly.
 
@@ -397,7 +482,7 @@ When reporting issues, include:
 
 ---
 
-## 15. Keyboard Shortcuts
+## 16. Keyboard Shortcuts
 
 | Shortcut | Action |
 |---|---|
@@ -407,11 +492,11 @@ When reporting issues, include:
 
 ---
 
-## 16. Troubleshooting
+## 17. Troubleshooting
 
 ### "Unable to connect" or no green dot
 
-The bridge is not running. Open your terminal and start it:
+The bridge is not running. Open your **system Terminal** (not Claude Code) and start it:
 
 **macOS / Linux:**
 ```bash
@@ -424,6 +509,10 @@ node "$env:USERPROFILE\.arcadia-bridge\arcadia-bridge.js"
 ```
 
 If you have not set it up yet, run the one-time setup (see [Quick Start](#1-quick-start)).
+
+### Setup command shows security warnings
+
+If you see a message like "I've reviewed the script. Here are the concerns..." — you pasted the setup command into **Claude Code's terminal** instead of your system Terminal. Open Terminal.app (macOS) or PowerShell (Windows) and paste the command there instead.
 
 ### Bridge is running but ArcadIA will not connect
 
@@ -440,6 +529,13 @@ netstat -ano | findstr :8087
 ```
 
 The bridge (v3.2.3+) automatically kills stale processes on startup, but if the issue persists, manually kill the process and restart.
+
+### Node.js not found
+
+If the setup script says "Node.js not found", install it:
+- **macOS:** Download from [https://nodejs.org](https://nodejs.org) (click the green LTS button), run the `.pkg` installer, then close and reopen Terminal
+- **Windows:** Download from [https://nodejs.org](https://nodejs.org), run the `.msi` installer, then close and reopen PowerShell
+- **Alternative (macOS):** Install Homebrew first (`/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`), then re-run the setup command — it will auto-install Node via Homebrew
 
 ### Claude Code is not installed
 
@@ -468,7 +564,11 @@ On either platform, re-run the setup command to reinstall (see [Quick Start](#1-
 
 ### Slow first response (~50s)
 
-The first request after bridge startup takes ~50 seconds because Claude Code needs to load Meta's authentication plugins. Subsequent requests should be much faster (~5-10s) thanks to the process pool in v3.4.0, which keeps two standby processes ready. If every request is slow, check your network connection and Claude Code installation. You can verify pool status via the health endpoint — look for `pool_status` entries where `ready: true`.
+The first request after bridge startup takes ~50 seconds because Claude Code needs to load Meta's authentication plugins. Subsequent requests should be much faster (~5-10s) thanks to the process pool in v3.4.0+, which keeps two standby processes ready. If every request is slow, check your network connection and Claude Code installation. You can verify pool status via the health endpoint — look for `pool_status` entries where `ready: true`.
+
+### Second Brain setup button does nothing
+
+Open browser DevTools (F12 → Console) and look for `[SecondBrain]` log messages. These show exactly what the detection found and what steps were built. If the log says "Built 0 steps", it means the detection thinks everything is installed but the summary disagrees — click "Re-scan" to refresh the detection, then try the button again.
 
 ### Connection diagnostics
 
