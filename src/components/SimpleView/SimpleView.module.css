@@ -928,13 +928,14 @@
   margin-top: 6px;
 }
 
-/* ─── Inline Progress (in response bubble) ────────────────────────────────── */
+/* ─── Inline Progress (in response bubble) ─────────────────────────────── */
 
 .inlineProgress {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 2px 0;
+  gap: 8px;
+  padding: 4px 0;
+  min-width: 280px;
 }
 
 .inlineStepDone {
@@ -966,6 +967,66 @@
   font-size: 13px;
   color: var(--accent);
   font-weight: 500;
+}
+
+/* ─── Tip Carousel (shown during thinking) ──────────────────────────── */
+
+.tipCarousel {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tipPulseBar {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--bg-tertiary);
+  overflow: hidden;
+  position: relative;
+}
+
+.tipPulseTrack {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: tipSlide 2.5s ease-in-out infinite;
+}
+
+@keyframes tipSlide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.tipContent {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.tipVisible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.tipHidden {
+  opacity: 0;
+  transform: translateY(4px);
+}
+
+.tipIcon {
+  font-size: 15px;
+  flex-shrink: 0;
+}
+
+.tipText {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-weight: 400;
+  line-height: 1.4;
 }
 
 .inlineSpinner {

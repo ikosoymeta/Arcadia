@@ -371,9 +371,57 @@ const MessageBubble = memo(function MessageBubble({ message }: { message: Messag
   );
 });
 
-// ─── Activity Feed ────────────────────────────────────────────────────────────
+// ─── Waiting Tips ────────────────────────────────────────────────────────────
 
-// ActivityFeed overlay removed — progress is now shown inline in the response bubble
+const WAITING_TIPS = [
+  { icon: '💡', text: 'Tip: Use Shift+Enter for multi-line prompts' },
+  { icon: '⚡', text: 'Tip: Be specific — "Summarize in 3 bullets" beats "Summarize this"' },
+  { icon: '🎯', text: 'Tip: Start with the output format you want: "Write a table comparing..."' },
+  { icon: '📎', text: 'Tip: Drag & drop images directly into the chat for visual analysis' },
+  { icon: '🔄', text: 'Tip: Click any suggestion chip below a response to keep the conversation going' },
+  { icon: '🧠', text: 'Tip: Enable extended thinking in Settings for complex reasoning tasks' },
+  { icon: '📋', text: 'Tip: Claude can format as Markdown tables, bullet lists, or numbered steps' },
+  { icon: '✂️', text: 'Tip: Ask "Make it shorter" or "Make it more formal" to refine any response' },
+  { icon: '🔑', text: 'Tip: Use Engineer mode for code generation with live preview' },
+  { icon: '📊', text: 'Tip: Paste raw data and ask for trends — Claude is great at pattern recognition' },
+  { icon: '🏗️', text: 'Tip: For long tasks, break them into steps: "First outline, then draft each section"' },
+  { icon: '🎨', text: 'Tip: Ask Claude to generate HTML artifacts for interactive visualizations' },
+  { icon: '⏱️', text: 'Fun fact: Claude processes ~80 tokens per second during generation' },
+  { icon: '🌐', text: 'Fun fact: Claude was trained by Anthropic with a focus on being helpful and harmless' },
+  { icon: '📝', text: 'Tip: You can edit and resend any previous message to get a different response' },
+  { icon: '🔍', text: 'Tip: Ask "What questions should I be asking?" when you\'re stuck' },
+];
+
+function ThinkingTips() {
+  const [tipIndex, setTipIndex] = useState(0);
+  const [fade, setFade] = useState(true);
+  const [startIndex] = useState(() => Math.floor(Math.random() * WAITING_TIPS.length));
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setFade(false);
+      setTimeout(() => {
+        setTipIndex(prev => (prev + 1) % WAITING_TIPS.length);
+        setFade(true);
+      }, 300);
+    }, 4500);
+    return () => clearInterval(interval);
+  }, []);
+
+  const tip = WAITING_TIPS[(startIndex + tipIndex) % WAITING_TIPS.length];
+
+  return (
+    <div className={styles.tipCarousel}>
+      <div className={styles.tipPulseBar}>
+        <div className={styles.tipPulseTrack} />
+      </div>
+      <div className={`${styles.tipContent} ${fade ? styles.tipVisible : styles.tipHidden}`}>
+        <span className={styles.tipIcon}>{tip.icon}</span>
+        <span className={styles.tipText}>{tip.text}</span>
+      </div>
+    </div>
+  );
+}
 
 // ─── Main SimpleView ──────────────────────────────────────────────────────────
 
@@ -508,20 +556,12 @@ export function SimpleView() {
     addMessage(convId, userMsg);
     trackMessage(userMsg, convId);
 
-    // Build activity steps — show connecting phase for Meta LDAR (bridge) connections
-    const isLdar = !!(activeConnection.baseUrl?.includes('localhost:8087'));
-    const steps: ActivityStep[] = isLdar
-      ? [
-          { id: 'connecting', label: 'Connecting to Claude Code...', status: 'active', icon: '🔌' },
-          { id: 'thinking', label: 'Claude is thinking...', status: 'pending', icon: '🧠' },
-          { id: 'writing', label: 'Writing response', status: 'pending', icon: '✍️' },
-          { id: 'artifacts', label: 'Preparing results', status: 'pending', icon: '📦' },
-        ]
-      : [
-          { id: 'thinking', label: 'Claude is thinking...', status: 'active', icon: '🧠' },
-          { id: 'writing', label: 'Writing response', status: 'pending', icon: '✍️' },
-          { id: 'artifacts', label: 'Preparing results', status: 'pending', icon: '📦' },
-        ];
+    // Build activity steps — unified for all connection types
+    const steps: ActivityStep[] = [
+      { id: 'thinking', label: 'Claude is thinking...', status: 'active', icon: '🧠' },
+      { id: 'writing', label: 'Writing response', status: 'pending', icon: '✍️' },
+      { id: 'artifacts', label: 'Preparing results', status: 'pending', icon: '📦' },
+    ];
     setActivitySteps(steps);
     // Progress shown inline in response bubble
 
@@ -531,31 +571,15 @@ export function SimpleView() {
     const controller = new AbortController();
     setAbortController(convId, controller);
 
-    // Elapsed time counter with phase-aware labels for LDAR connections
+    // Elapsed time counter
     const sendStartTime = Date.now();
     const elapsedTimer = setInterval(() => {
       const elapsed = Math.round((Date.now() - sendStartTime) / 1000);
-      if (isLdar) {
-        // Update the active step with elapsed time and phase-specific detail
-        setActivitySteps(prev => prev.map(s => {
-          if (s.id === 'connecting' && s.status === 'active') {
-            const phaseDetail = elapsed < 3 ? 'Dispatching to Claude Code...'
-              : elapsed < 15 ? 'Loading Meta auth & plugins...'
-              : `Waiting for response... ${elapsed}s`;
-            return { ...s, detail: phaseDetail };
-          }
-          if (s.id === 'thinking' && s.status === 'active') {
-            return { ...s, detail: `${elapsed}s elapsed` };
-          }
-          return s;
-        }));
-      } else {
-        setActivitySteps(prev => prev.map(s =>
-          s.id === 'thinking' && s.status === 'active'
-            ? { ...s, detail: `${elapsed}s elapsed` }
-            : s
-        ));
-      }
+      setActivitySteps(prev => prev.map(s =>
+        s.id === 'thinking' && s.status === 'active'
+          ? { ...s, detail: `${elapsed}s` }
+          : s
+      ));
     }, 1000);
 
     const allMessages = [...(conversation?.messages ?? []), userMsg];
@@ -573,13 +597,8 @@ export function SimpleView() {
             firstToken = true;
             clearInterval(elapsedTimer);
             const ttftSec = ((Date.now() - sendStartTime) / 1000).toFixed(1);
-            if (isLdar) {
-              setStep('connecting', 'done', 'Connected');
-              setStep('thinking', 'done', `${ttftSec}s`);
-            } else {
-              setStep('thinking', 'done', `${ttftSec}s`);
-            }
-            setStep('writing', 'active', 'Streaming response...');
+            setStep('thinking', 'done', `${ttftSec}s`);
+            setStep('writing', 'active', 'Streaming...');
           }
           appendStreamingText(convId!, chunk);
         },
@@ -811,6 +830,7 @@ export function SimpleView() {
                           {(() => {
                             const activeStep = activitySteps.find(s => s.status === 'active');
                             const doneSteps = activitySteps.filter(s => s.status === 'done');
+                            const isThinking = activeStep?.id === 'thinking';
                             return (
                               <>
                                 {doneSteps.map(s => (
@@ -827,6 +847,7 @@ export function SimpleView() {
                                     {activeStep.detail && <span className={styles.inlineStepDetail}>{activeStep.detail}</span>}
                                   </div>
                                 )}
+                                {isThinking && <ThinkingTips />}
                               </>
                             );
                           })()}
