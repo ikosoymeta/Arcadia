@@ -90,10 +90,11 @@ try {
 // ─── Verify Claude Code works ──────────────────────────────────────────────
 let claudeVersion = 'unknown';
 try {
-  claudeVersion = execSync(`"${CLAUDE_PATH}" --version 2>&1`, { encoding: 'utf-8', shell: true, timeout: 10000 }).trim();
+  claudeVersion = execSync(`"${CLAUDE_PATH}" --version 2>&1`, { encoding: 'utf-8', shell: true, timeout: 5000 }).trim();
   console.log(`  Claude Code version: ${claudeVersion}`);
 } catch (e) {
-  console.warn(`  ⚠ Could not get Claude Code version: ${e.message}`);
+  // Don't block startup on version check — Meta's Claude Code can be slow to respond
+  console.log(`  ℹ Skipping version check (will verify on first request)`);
 }
 
 // ─── Warm-up: pre-spawn claude to trigger auth/plugin loading ──────────────
@@ -890,7 +891,7 @@ const server = http.createServer((req, res) => {
   res.end(JSON.stringify({ error: 'Not found. Use POST /v1/messages' }));
 });
 
-server.listen(PORT, HOST, () => {
+function printBanner() {
   console.log('');
   console.log('  ╔══════════════════════════════════════════════════════════╗');
   console.log('  ║                                                          ║');
@@ -906,18 +907,44 @@ server.listen(PORT, HOST, () => {
   console.log('');
   console.log('  🔒 Security: CORS-restricted to localhost + GitHub Pages + Manus');
   console.log('');
+}
 
-  // Start warm-up after server is listening
+server.listen(PORT, HOST, () => {
+  printBanner();
   warmUp();
 });
 
 server.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
-    console.error(`\n  ✗ Port ${PORT} is already in use. Another bridge may be running.\n`);
+    console.log(`\n  ⚠ Port ${PORT} is in use. Attempting to take over...`);
+    // Try to kill the existing process on this port and retry
+    try {
+      const pid = execSync(`lsof -ti :${PORT} 2>/dev/null`, { encoding: 'utf-8', shell: true }).trim();
+      if (pid) {
+        console.log(`  Stopping old bridge (PID ${pid})...`);
+        execSync(`kill -9 ${pid}`, { shell: true });
+        // Wait a moment for the port to free up, then retry
+        setTimeout(() => {
+          server.listen(PORT, HOST, () => {
+            console.log(`  ✓ Took over port ${PORT} successfully!\n`);
+            printBanner();
+            warmUp();
+          });
+        }, 1000);
+      } else {
+        console.error(`  ✗ Port ${PORT} is in use but could not identify the process.\n`);
+        console.error(`  Try: lsof -ti :${PORT} | xargs kill -9\n`);
+        process.exit(1);
+      }
+    } catch (killErr) {
+      console.error(`  ✗ Could not free port ${PORT}: ${killErr.message}`);
+      console.error(`  Try manually: lsof -ti :${PORT} | xargs kill -9\n`);
+      process.exit(1);
+    }
   } else {
     console.error(`\n  ✗ Server error: ${err.message}\n`);
+    process.exit(1);
   }
-  process.exit(1);
 });
 
 process.on('SIGINT', () => {
