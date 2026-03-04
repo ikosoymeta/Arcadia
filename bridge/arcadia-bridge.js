@@ -48,6 +48,10 @@ const ALLOWED_ORIGINS = [
   'null', // For file:// origins
 ];
 
+// Dynamic CORS: also allow any *.manus.computer subdomain (for Manus-hosted deployments)
+const MANUS_ORIGIN_REGEX = /^https:\/\/[a-z0-9-]+\.(?:us1\.)?manus\.computer$/;
+const MANUS_SPACE_REGEX = /^https:\/\/[a-z0-9-]+\.manus\.space$/;
+
 // ─── Security: Command allowlist for /v1/validate ──────────────────────────
 const ALLOWED_COMMAND_PREFIXES = [
   'yarn lint', 'yarn typecheck', 'yarn test', 'yarn build', 'yarn check',
@@ -121,7 +125,7 @@ let avgResponseTime = 0;
 function setCorsHeaders(res, req) {
   const origin = req ? (req.headers.origin || '') : '';
   // Check if origin is in our allowlist
-  if (ALLOWED_ORIGINS.includes(origin)) {
+  if (ALLOWED_ORIGINS.includes(origin) || MANUS_ORIGIN_REGEX.test(origin) || MANUS_SPACE_REGEX.test(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
   } else if (!origin) {
     // No origin header (same-origin or non-browser request) — allow
@@ -893,7 +897,7 @@ server.listen(PORT, HOST, () => {
   console.log('  ║                                                          ║');
   console.log('  ╚══════════════════════════════════════════════════════════╝');
   console.log('');
-  console.log('  🔒 Security: CORS-restricted to localhost + GitHub Pages');
+  console.log('  🔒 Security: CORS-restricted to localhost + GitHub Pages + Manus');
   console.log('');
 
   // Start warm-up after server is listening
