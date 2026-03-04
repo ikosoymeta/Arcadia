@@ -373,26 +373,7 @@ const MessageBubble = memo(function MessageBubble({ message }: { message: Messag
 
 // ─── Activity Feed ────────────────────────────────────────────────────────────
 
-function ActivityFeed({ steps }: { steps: ActivityStep[] }) {
-  return (
-    <div className={styles.activityFeed}>
-      {steps.map(step => (
-        <div key={step.id} className={`${styles.activityStep} ${styles[`step_${step.status}`]}`}>
-          <div className={styles.stepIconWrap}>
-            {step.status === 'active' && <span className={styles.spinnerDot} />}
-            {step.status === 'done' && <span className={styles.stepCheck}>✓</span>}
-            {step.status === 'error' && <span className={styles.stepError}>✗</span>}
-            {step.status === 'pending' && <span className={styles.stepPending}>{step.icon}</span>}
-          </div>
-          <div className={styles.stepBody}>
-            <div className={styles.stepLabel}>{step.label}</div>
-            {step.detail && <div className={styles.stepDetail}>{step.detail}</div>}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
+// ActivityFeed overlay removed — progress is now shown inline in the response bubble
 
 // ─── Main SimpleView ──────────────────────────────────────────────────────────
 
@@ -408,7 +389,7 @@ export function SimpleView() {
   const [input, setInput] = useState('');
   const [images, setImages] = useState<ImageAttachment[]>([]);
   const [activitySteps, setActivitySteps] = useState<ActivityStep[]>([]);
-  const [showActivity, setShowActivity] = useState(false);
+  // showActivity removed — progress is now inline in the response bubble
   const [error, setError] = useState('');
   const [followUps, setFollowUps] = useState<string[]>([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -542,7 +523,7 @@ export function SimpleView() {
           { id: 'artifacts', label: 'Preparing results', status: 'pending', icon: '📦' },
         ];
     setActivitySteps(steps);
-    setShowActivity(true);
+    // Progress shown inline in response bubble
 
     setStreaming(convId, true);
     setShowThinkingLive(false);
@@ -635,12 +616,12 @@ export function SimpleView() {
       // Generate contextual follow-up suggestions
       setFollowUps(getFollowUpSuggestions(result.content));
 
-      setTimeout(() => setShowActivity(false), 2000);
+      // Progress auto-clears when streaming ends
     } catch (err: unknown) {
       clearInterval(elapsedTimer);
       if (err instanceof Error && err.name === 'AbortError') {
         setActivitySteps(prev => prev.map(s => s.status === 'active' ? { ...s, status: 'error', detail: 'Stopped' } : s));
-        setTimeout(() => setShowActivity(false), 1500);
+        // Progress auto-clears when streaming ends
       } else {
         const msg = err instanceof Error ? err.message : 'Unknown error';
         setError(msg);
@@ -824,7 +805,36 @@ export function SimpleView() {
                   {debouncedStreamingText ? (
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>{debouncedStreamingText}</ReactMarkdown>
                   ) : (
-                    <span className={styles.typingDots}><span /><span /><span /></span>
+                    <div className={styles.inlineProgress}>
+                      {activitySteps.length > 0 ? (
+                        <>
+                          {(() => {
+                            const activeStep = activitySteps.find(s => s.status === 'active');
+                            const doneSteps = activitySteps.filter(s => s.status === 'done');
+                            return (
+                              <>
+                                {doneSteps.map(s => (
+                                  <div key={s.id} className={styles.inlineStepDone}>
+                                    <span className={styles.inlineCheck}>✓</span>
+                                    <span>{s.label.replace('...', '')}</span>
+                                    {s.detail && <span className={styles.inlineStepTime}>{s.detail}</span>}
+                                  </div>
+                                ))}
+                                {activeStep && (
+                                  <div className={styles.inlineStepActive}>
+                                    <span className={styles.inlineSpinner} />
+                                    <span>{activeStep.label}</span>
+                                    {activeStep.detail && <span className={styles.inlineStepDetail}>{activeStep.detail}</span>}
+                                  </div>
+                                )}
+                              </>
+                            );
+                          })()}
+                        </>
+                      ) : (
+                        <span className={styles.typingDots}><span /><span /><span /></span>
+                      )}
+                    </div>
                   )}
                 </div>
               </div>
@@ -833,13 +843,6 @@ export function SimpleView() {
           </div>
         )}
       </div>
-
-      {/* Activity feed overlay */}
-      {showActivity && activitySteps.length > 0 && (
-        <div className={styles.activityOverlay}>
-          <ActivityFeed steps={activitySteps} />
-        </div>
-      )}
 
       {/* Error banner */}
       {error && (

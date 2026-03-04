@@ -1015,6 +1015,64 @@
   margin-top: 6px;
 }
 
+/* ─── Inline Progress (in response bubble) ────────────────────────────────── */
+
+.inlineProgress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 2px 0;
+}
+
+.inlineStepDone {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  opacity: 0.7;
+}
+
+.inlineCheck {
+  color: var(--success, #22c55e);
+  font-weight: 700;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.inlineStepTime {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-left: auto;
+}
+
+.inlineStepActive {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.inlineSpinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--accent);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  display: block;
+  flex-shrink: 0;
+}
+
+.inlineStepDetail {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-weight: 400;
+  margin-left: 4px;
+}
+
 /* ─── Typing dots ──────────────────────────────────────────────────────────── */
 
 .typingDots {
