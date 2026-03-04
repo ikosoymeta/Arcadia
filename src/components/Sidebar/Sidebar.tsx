@@ -327,6 +327,7 @@ export function Sidebar({ viewMode, onViewChange, collapsed, onToggleCollapse }:
     { mode: 'skills', icon: '⚡', label: 'Skills' },
     { mode: 'team', icon: '👥', label: 'Team' },
     { mode: 'settings', icon: '⚙', label: 'Settings' },
+    { mode: 'secondbrain', icon: '🧠', label: '2nd Brain' },
     { mode: 'integrations', icon: '🔌', label: 'Integrations' },
     { mode: 'analytics', icon: '📈', label: 'Analytics' },
     { mode: 'benchmarks', icon: '📊', label: 'Bench' },

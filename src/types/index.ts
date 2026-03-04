@@ -335,7 +335,7 @@ export interface WebVitalsResult {
   inp?: number;
 }
 
-export type ViewMode = 'chat' | 'settings' | 'benchmarks' | 'code-workspace' | 'skills' | 'team' | 'help' | 'integrations' | 'analytics';
+export type ViewMode = 'chat' | 'settings' | 'benchmarks' | 'code-workspace' | 'skills' | 'team' | 'help' | 'integrations' | 'analytics' | 'secondbrain';
 
 export interface FileNode {
   name: string;

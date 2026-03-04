@@ -951,6 +951,316 @@ function handleMessages(req, res, body) {
   }
 }
 
+// ─── Second Brain detection endpoint ──────────────────────────────────────
+
+function handleSecondBrainDetect(req, res) {
+  setCorsHeaders(res, req);
+  
+  const checks = {
+    claudeCode: { installed: false, version: null, path: null },
+    googleDrive: { installed: false, workspacePath: null },
+    secondBrain: { initialized: false, claudeMdExists: false },
+    claudeTemplates: { installed: false },
+    skills: { installed: [] },
+    obsidian: { installed: false },
+    wisprFlow: { installed: false },
+    platform: process.platform,
+  };
+
+  const promises = [];
+
+  // 1. Check Claude Code
+  promises.push(new Promise(resolve => {
+    try {
+      const cmd = IS_WIN ? 'where claude' : 'which claude';
+      const claudePath = execSync(cmd, { encoding: 'utf-8', timeout: 5000 }).trim().split('\n')[0];
+      checks.claudeCode.path = claudePath;
+      checks.claudeCode.installed = true;
+      try {
+        const ver = execSync('claude --version', { encoding: 'utf-8', timeout: 10000 }).trim();
+        checks.claudeCode.version = ver;
+      } catch { /* version check failed but claude exists */ }
+    } catch { /* claude not found */ }
+    resolve();
+  }));
+
+  // 2. Check Google Drive workspace
+  promises.push(new Promise(resolve => {
+    try {
+      const home = process.env.HOME || os.homedir();
+      const username = process.env.USER || os.userInfo().username;
+      let drivePaths;
+      if (IS_WIN) {
+        drivePaths = [
+          `${home}\\Google Drive\\My Drive\\claude`,
+          `G:\\My Drive\\claude`,
+          `${home}\\GoogleDrive\\My Drive\\claude`,
+        ];
+      } else {
+        drivePaths = [
+          `${home}/Library/CloudStorage/GoogleDrive-${username}@meta.com/My Drive/claude`,
+          `${home}/Google Drive/My Drive/claude`,
+          `${home}/gdrive/claude`,
+        ];
+      }
+      const fs = require('fs');
+      for (const p of drivePaths) {
+        if (fs.existsSync(p)) {
+          checks.googleDrive.installed = true;
+          checks.googleDrive.workspacePath = p;
+          // Check for CLAUDE.md
+          if (fs.existsSync(`${p}/CLAUDE.md`) || fs.existsSync(`${p}/.claude/CLAUDE.md`)) {
+            checks.secondBrain.initialized = true;
+            checks.secondBrain.claudeMdExists = true;
+          }
+          break;
+        }
+      }
+    } catch { /* drive check failed */ }
+    resolve();
+  }));
+
+  // 3. Check claude-templates
+  promises.push(new Promise(resolve => {
+    try {
+      const cmd = IS_WIN ? 'where claude-templates' : 'which claude-templates';
+      execSync(cmd, { encoding: 'utf-8', timeout: 5000 });
+      checks.claudeTemplates.installed = true;
+    } catch { /* not found */ }
+    resolve();
+  }));
+
+  // 4. Check installed skills
+  promises.push(new Promise(resolve => {
+    try {
+      const home = process.env.HOME || os.homedir();
+      const fs = require('fs');
+      const skillsDir = `${home}/.claude/skills`;
+      if (fs.existsSync(skillsDir)) {
+        const dirs = fs.readdirSync(skillsDir).filter(d => {
+          try { return fs.statSync(`${skillsDir}/${d}`).isDirectory(); } catch { return false; }
+        });
+        checks.skills.installed = dirs;
+      }
+    } catch { /* skills check failed */ }
+    resolve();
+  }));
+
+  // 5. Check Obsidian
+  promises.push(new Promise(resolve => {
+    try {
+      if (IS_WIN) {
+        execSync('where obsidian', { encoding: 'utf-8', timeout: 5000 });
+        checks.obsidian.installed = true;
+      } else {
+        const fs = require('fs');
+        checks.obsidian.installed = fs.existsSync('/Applications/Obsidian.app') ||
+          fs.existsSync(`${process.env.HOME}/Applications/Obsidian.app`);
+      }
+    } catch { /* not found */ }
+    resolve();
+  }));
+
+  // 6. Check Wispr Flow / SuperWhisper
+  promises.push(new Promise(resolve => {
+    try {
+      const fs = require('fs');
+      if (IS_WIN) {
+        // Check common Windows paths
+        checks.wisprFlow.installed = false; // TODO: Windows path
+      } else {
+        checks.wisprFlow.installed = 
+          fs.existsSync('/Applications/Wispr Flow.app') ||
+          fs.existsSync('/Applications/SuperWhisper.app') ||
+          fs.existsSync(`${process.env.HOME}/Applications/Wispr Flow.app`) ||
+          fs.existsSync(`${process.env.HOME}/Applications/SuperWhisper.app`);
+      }
+    } catch { /* not found */ }
+    resolve();
+  }));
+
+  Promise.all(promises).then(() => {
+    // Calculate overall readiness
+    const components = [
+      { name: 'Claude Code', ready: checks.claudeCode.installed },
+      { name: 'Google Drive', ready: checks.googleDrive.installed },
+      { name: 'Second Brain Workspace', ready: checks.secondBrain.initialized },
+      { name: 'Skills & Plugins', ready: checks.skills.installed.length > 0 },
+    ];
+    const readyCount = components.filter(c => c.ready).length;
+    const totalRequired = components.length;
+
+    const result = {
+      ...checks,
+      summary: {
+        readyCount,
+        totalRequired,
+        fullyReady: readyCount === totalRequired,
+        components,
+      },
+      timestamp: new Date().toISOString(),
+    };
+
+    console.log(`[${new Date().toISOString()}] 🧠 Second Brain detect: ${readyCount}/${totalRequired} ready`);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(result));
+  });
+}
+
+// ─── Second Brain setup endpoint ─────────────────────────────────────────
+
+const SB_ALLOWED_COMMANDS = [
+  'claude-templates skill',
+  'claude-templates plugin',
+  'claude --version',
+  'brew install',
+  'brew install --cask',
+  'node --version',
+  'npm --version',
+];
+
+function handleSecondBrainSetup(req, res, body) {
+  setCorsHeaders(res, req);
+
+  let payload;
+  try {
+    payload = JSON.parse(body);
+  } catch {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Invalid JSON body' }));
+    return;
+  }
+
+  const { action, command } = payload;
+
+  if (action === 'install-skills') {
+    const cmd = 'claude-templates skill tasks,deep-research,google-docs,google-docs-fast-reader,google-sheets,google-slides-presentation,calendar,create-wiki,gchat install';
+    console.log(`[${new Date().toISOString()}] 🧠 Second Brain: Installing skills...`);
+
+    const proc = spawn(cmd, [], {
+      cwd: process.env.HOME || os.homedir(),
+      env: { ...process.env },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      shell: true,
+    });
+
+    let stdout = '';
+    let stderr = '';
+    proc.stdout.on('data', d => { stdout += d.toString(); });
+    proc.stderr.on('data', d => { stderr += d.toString(); });
+
+    const timeout = setTimeout(() => proc.kill('SIGTERM'), 120000);
+
+    proc.on('close', code => {
+      clearTimeout(timeout);
+      console.log(`[${new Date().toISOString()}] 🧠 Skills install: code=${code}`);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        success: code === 0,
+        action: 'install-skills',
+        stdout: stdout.slice(-3000),
+        stderr: stderr.slice(-3000),
+        exitCode: code,
+      }));
+    });
+
+    proc.on('error', err => {
+      clearTimeout(timeout);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    });
+    return;
+  }
+
+  if (action === 'install-plugins') {
+    const cmd = 'claude-templates plugin tasks,deep-research,google-docs,google-docs-fast-reader,google-sheets,google-slides-presentation,calendar,create-wiki,gchat install';
+    console.log(`[${new Date().toISOString()}] 🧠 Second Brain: Installing plugins...`);
+
+    const proc = spawn(cmd, [], {
+      cwd: process.env.HOME || os.homedir(),
+      env: { ...process.env },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      shell: true,
+    });
+
+    let stdout = '';
+    let stderr = '';
+    proc.stdout.on('data', d => { stdout += d.toString(); });
+    proc.stderr.on('data', d => { stderr += d.toString(); });
+
+    const timeout = setTimeout(() => proc.kill('SIGTERM'), 120000);
+
+    proc.on('close', code => {
+      clearTimeout(timeout);
+      console.log(`[${new Date().toISOString()}] 🧠 Plugins install: code=${code}`);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        success: code === 0,
+        action: 'install-plugins',
+        stdout: stdout.slice(-3000),
+        stderr: stderr.slice(-3000),
+        exitCode: code,
+      }));
+    });
+
+    proc.on('error', err => {
+      clearTimeout(timeout);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    });
+    return;
+  }
+
+  if (action === 'run-command' && command) {
+    // Only allow safe commands
+    const allowed = SB_ALLOWED_COMMANDS.some(prefix => command.trim().startsWith(prefix));
+    if (!allowed) {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: `Command not allowed: ${command}` }));
+      return;
+    }
+
+    const proc = spawn(command, [], {
+      cwd: process.env.HOME || os.homedir(),
+      env: { ...process.env },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      shell: true,
+    });
+
+    let stdout = '';
+    let stderr = '';
+    proc.stdout.on('data', d => { stdout += d.toString(); });
+    proc.stderr.on('data', d => { stderr += d.toString(); });
+
+    const timeout = setTimeout(() => proc.kill('SIGTERM'), 60000);
+
+    proc.on('close', code => {
+      clearTimeout(timeout);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        success: code === 0,
+        action: 'run-command',
+        command,
+        stdout: stdout.slice(-3000),
+        stderr: stderr.slice(-3000),
+        exitCode: code,
+      }));
+    });
+
+    proc.on('error', err => {
+      clearTimeout(timeout);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    });
+    return;
+  }
+
+  res.writeHead(400, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ 
+    error: 'Unknown action. Use: install-skills, install-plugins, or run-command',
+  }));
+}
+
 // ─── Validation endpoint: run lint/typecheck/test commands ─────────────────
 
 const VALIDATE_TIMEOUT_MS = 60000;
@@ -1162,6 +1472,18 @@ const server = http.createServer((req, res) => {
     let body = '';
     req.on('data', chunk => { body += chunk; });
     req.on('end', () => handleValidate(req, res, body));
+    return;
+  }
+
+  if (req.method === 'GET' && req.url === '/v1/secondbrain/detect') {
+    handleSecondBrainDetect(req, res);
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/v1/secondbrain/setup') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => handleSecondBrainSetup(req, res, body));
     return;
   }
 

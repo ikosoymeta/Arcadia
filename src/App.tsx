@@ -21,6 +21,7 @@ const HelpPanel = lazy(() => import('./components/Help/HelpPanel').then(m => ({ 
 const IntegrationsPanel = lazy(() => import('./components/Integrations/IntegrationsPanel').then(m => ({ default: m.IntegrationsPanel })));
 const PreviewPanel = lazy(() => import('./components/Preview/PreviewPanel').then(m => ({ default: m.PreviewPanel })));
 const AnalyticsPanel = lazy(() => import('./components/Analytics/AnalyticsPanel').then(m => ({ default: m.AnalyticsPanel })));
+const SecondBrainPanel = lazy(() => import('./components/SecondBrain/SecondBrainPanel').then(m => ({ default: m.SecondBrainPanel })));
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const PREVIEW_MIN = 200;
@@ -285,6 +286,11 @@ function App() {
               {viewMode === 'analytics' && (
                 <div className={styles.fullWidth}>
                   <Suspense fallback={<LoadingFallback />}><AnalyticsPanel /></Suspense>
+                </div>
+              )}
+              {viewMode === 'secondbrain' && (
+                <div className={styles.fullWidth}>
+                  <Suspense fallback={<LoadingFallback />}><SecondBrainPanel /></Suspense>
                 </div>
               )}
             </div>
