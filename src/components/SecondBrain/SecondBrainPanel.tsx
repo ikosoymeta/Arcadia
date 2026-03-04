@@ -146,7 +146,9 @@ export function SecondBrainPanel() {
 
   const buildSteps = useCallback((det: DetectionResult): SetupStep[] => {
     const plan: SetupStep[] = [];
+    console.log('[SecondBrain] Building steps from detection:', JSON.stringify(det.summary));
 
+    // Step 1: Claude Code
     if (!det.claudeCode.installed) {
       plan.push({
         id: 'claude-code',
@@ -163,6 +165,7 @@ export function SecondBrainPanel() {
       });
     }
 
+    // Step 2: Google Drive
     if (!det.googleDrive.installed) {
       plan.push({
         id: 'google-drive',
@@ -177,8 +180,10 @@ export function SecondBrainPanel() {
           confirmLabel: 'Google Drive is running — continue',
         },
       });
-    } else if (!det.secondBrain.claudeMdExists) {
-      // Drive exists but no workspace folder — we can create it automatically
+    }
+
+    // Step 3: Create workspace folders (only if Drive exists but no workspace)
+    if (det.googleDrive.installed && !det.secondBrain.initialized) {
       plan.push({
         id: 'create-workspace',
         label: 'Create workspace folders',
@@ -187,6 +192,7 @@ export function SecondBrainPanel() {
       });
     }
 
+    // Step 4: Template manager
     if (!det.claudeTemplates.installed) {
       plan.push({
         id: 'claude-templates',
@@ -196,24 +202,17 @@ export function SecondBrainPanel() {
       });
     }
 
+    // Step 5: Skills
     if (det.skills.installed.length === 0) {
       plan.push({
         id: 'install-skills',
-        label: 'Install skills',
-        friendlyDesc: 'Adding capabilities: tasks, deep-research, Google Docs, Sheets, Slides, Calendar, and more. This may take 1-2 minutes.',
+        label: 'Install skills & plugins',
+        friendlyDesc: 'Adding capabilities and connecting Claude to your Google Workspace apps (Docs, Sheets, Slides, Calendar). This may take 1-2 minutes.',
         status: 'waiting',
       });
     }
 
-    if (det.skills.installed.length === 0) {
-      plan.push({
-        id: 'install-plugins',
-        label: 'Install plugins',
-        friendlyDesc: 'Connecting Claude to your Google Workspace apps (Docs, Sheets, Slides, Calendar). This may take 1-2 minutes.',
-        status: 'waiting',
-      });
-    }
-
+    // Step 6: CLAUDE.md
     if (!det.secondBrain.claudeMdExists) {
       plan.push({
         id: 'init-claudemd',
@@ -223,6 +222,18 @@ export function SecondBrainPanel() {
       });
     }
 
+    // Fallback: if summary says not ready but we couldn't identify specific missing steps,
+    // add a generic re-initialize step
+    if (plan.length === 0 && !det.summary.fullyReady) {
+      plan.push({
+        id: 'reinitialize',
+        label: 'Re-initialize Second Brain',
+        friendlyDesc: 'Some components need attention. Running a full re-initialization to ensure everything is properly configured.',
+        status: 'waiting',
+      });
+    }
+
+    console.log('[SecondBrain] Built', plan.length, 'steps:', plan.map(s => s.id).join(', '));
     return plan;
   }, []);
 
@@ -320,12 +331,17 @@ export function SecondBrainPanel() {
             result = await setupAction('install-skills');
             break;
 
-          case 'install-plugins':
-            result = await setupAction('install-plugins');
-            break;
-
           case 'init-claudemd':
             result = await setupAction('init-claudemd');
+            break;
+
+          case 'reinitialize':
+            // Run full re-init: create workspace + init claudemd
+            result = await setupAction('create-workspace');
+            if (result.success) {
+              const r2 = await setupAction('init-claudemd');
+              if (!r2.success) result = r2;
+            }
             break;
 
           default:
