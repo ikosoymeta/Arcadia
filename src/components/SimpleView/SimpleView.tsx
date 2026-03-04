@@ -12,31 +12,34 @@ import styles from './SimpleView.module.css';
 // ─── Quick suggestion prompts ─────────────────────────────────────────────────
 
 const SUGGESTIONS = [
-  { icon: '📋', label: 'HPM Self-Review', prompt: 'Help me draft my HPM self-review for this half. I\'m a software engineer. Include sections for Impact, Execution, and Collaboration. Ask me clarifying questions about my projects and accomplishments before writing the draft.' },
-  { icon: '📝', label: 'Write a design doc', prompt: 'Help me write a technical design document. Include sections for: Problem Statement, Proposed Solution, Architecture Overview, Data Model, API Design, Rollout Plan, and Open Questions. Start by asking me what the feature is about.' },
-  { icon: '💻', label: 'Write a React component', prompt: 'Write a React component in TypeScript with hooks. It should be a reusable data table with sorting, filtering, and pagination. Include proper types and follow Meta\'s coding conventions.' },
-  { icon: '🐛', label: 'Debug help', prompt: 'Help me debug an issue. I\'ll describe the symptoms and share relevant code. Walk me through a systematic debugging approach and suggest potential fixes.' },
-  { icon: '📊', label: 'Presto query', prompt: 'Help me write a Presto SQL query to analyze user engagement metrics. I need to aggregate daily active users, session duration, and retention rates from our events table, broken down by platform.' },
-  { icon: '✍️', label: 'Peer review draft', prompt: 'Help me write a thoughtful peer review for a colleague. I want to highlight their strengths, provide constructive feedback, and suggest growth areas. Ask me about their contributions first.' },
+  { icon: '📋', label: 'Meeting notes', prompt: 'Help me turn rough meeting notes into a clean summary. I\'ll paste my notes and you organize them into: Key Decisions, Action Items (with owners and due dates), and Open Questions. Keep it concise and ready to share.' },
+  { icon: '📧', label: 'Draft an email', prompt: 'Help me write a professional email. Ask me who it\'s to, the purpose, and key points I want to cover. Keep it clear, concise, and action-oriented.' },
+  { icon: '📊', label: 'Summarize data', prompt: 'Help me make sense of data. I\'ll paste numbers, a table, or describe metrics, and you summarize the key takeaways, trends, and what actions I should consider. Present insights in plain language.' },
+  { icon: '🎯', label: 'Project status update', prompt: 'Help me write a project status update. Ask me about the project name, what was accomplished this week, blockers, next steps, and any risks. Format it as a clean status report ready to share with stakeholders.' },
+  { icon: '📝', label: 'HPM Self-Review', prompt: 'Help me draft my HPM self-review for this half. Ask me about my role, key projects, and accomplishments. Then write a draft with sections for Impact, Execution, and Collaboration.' },
+  { icon: '💡', label: 'Brainstorm ideas', prompt: 'Help me brainstorm. I\'ll describe a challenge or opportunity, and you generate a range of creative solutions and approaches. Organize them by effort level (quick wins vs. bigger bets) so I can prioritize.' },
 ];
 
 // ─── Follow-up suggestions based on response type ─────────────────────────────
 
 function getFollowUpSuggestions(content: string): string[] {
   const lower = content.toLowerCase();
-  if (lower.includes('```html') || lower.includes('landing page') || lower.includes('website')) {
-    return ['Add a dark mode toggle', 'Make it mobile responsive', 'Add animations', 'Add a pricing section'];
+  if (lower.includes('action item') || lower.includes('meeting') || lower.includes('notes')) {
+    return ['Add a timeline', 'Make it shorter', 'Format as a table', 'Add priority levels'];
   }
-  if (lower.includes('```python') || lower.includes('```javascript') || lower.includes('```typescript')) {
-    return ['Add error handling', 'Write unit tests for this', 'Optimize for performance', 'Add documentation'];
+  if (lower.includes('email') || lower.includes('draft') || lower.includes('message')) {
+    return ['Make it more concise', 'Make the tone friendlier', 'Add a call to action', 'Make it more formal'];
   }
-  if (lower.includes('email') || lower.includes('write') || lower.includes('draft')) {
-    return ['Make it more formal', 'Make it shorter', 'Add bullet points', 'Translate to Spanish'];
+  if (lower.includes('status') || lower.includes('update') || lower.includes('report')) {
+    return ['Add risk assessment', 'Make it executive-friendly', 'Add metrics', 'Shorten to 3 bullet points'];
   }
-  if (lower.includes('explain') || lower.includes('how') || lower.includes('what is')) {
-    return ['Give me a practical example', 'Go deeper on this', 'Explain like I\'m 5', 'What are the downsides?'];
+  if (lower.includes('brainstorm') || lower.includes('idea') || lower.includes('solution')) {
+    return ['Rank by impact', 'Add pros and cons', 'Create an action plan', 'Which is the quick win?'];
   }
-  return ['Tell me more', 'Give me an example', 'How do I use this?', 'What are alternatives?'];
+  if (lower.includes('data') || lower.includes('metric') || lower.includes('number') || lower.includes('chart')) {
+    return ['What are the key takeaways?', 'Compare to last period', 'What should I do about this?', 'Simplify for executives'];
+  }
+  return ['Make it shorter', 'Give me an example', 'Explain in simpler terms', 'What should I do next?'];
 }
 
 // ─── Bridge Setup Prompt ─────────────────────────────────────────────────────
