@@ -52,9 +52,9 @@ const SLASH_COMMANDS = [
 // ─── Add-ons ────────────────────────────────────────────────────────────────
 
 const ADDONS = [
-  { id: 'wispr-flow', name: 'Wispr Flow / SuperWhisper', icon: '🎙️', description: 'Voice-to-text that\'s 3x faster than typing. Speak naturally and it transcribes into any app.', setupUrl: 'https://www.wispr.com/', detectionKey: 'wisprFlow' as const },
-  { id: 'gclaude', name: 'GClaude', icon: '💬', description: 'Chat with your Second Brain via Google Chat. Send messages to the Bunny "gclaude" bot.', setupUrl: null, detectionKey: null },
-  { id: 'obsidian', name: 'Obsidian', icon: '📓', description: 'Local knowledge management app that syncs with your Second Brain for offline access.', setupUrl: 'https://obsidian.md/', detectionKey: 'obsidian' as const },
+  { id: 'wispr-flow', name: 'Wispr Flow / SuperWhisper', icon: '🎙️', description: 'Voice-to-text that\'s 3x faster than typing. Speak naturally and it transcribes into any app.', setupUrl: 'https://www.wispr.com/', detectionKey: 'wisprFlow' as const, skillKey: null as string | null, installAction: 'install-addon' as const },
+  { id: 'gclaude', name: 'GClaude', icon: '💬', description: 'Chat with your Second Brain via Google Chat. Send messages to the Bunny "gclaude" bot.', setupUrl: 'https://chat.google.com', detectionKey: null, skillKey: 'gchat' as string | null, installAction: 'install-gchat-skill' as const },
+  { id: 'obsidian', name: 'Obsidian', icon: '📓', description: 'Local knowledge management app that syncs with your Second Brain for offline access.', setupUrl: 'https://obsidian.md/', detectionKey: 'obsidian' as const, skillKey: null as string | null, installAction: 'install-addon' as const },
 ];
 
 // ─── The 4 fixed setup steps ────────────────────────────────────────────────
@@ -688,20 +688,34 @@ Output ONLY the style guide in clean Markdown. Start with a title "# Writing Sty
     setAddonInstalling(addonId);
     setAddonError(prev => ({ ...prev, [addonId]: '' }));
     try {
+      // Find the addon config to determine install method
+      const addon = ADDONS.find(a => a.id === addonId);
+      const action = addon?.installAction || 'install-addon';
+
+      // For skill-based add-ons (gchat), install via claude-templates
+      const body = action === 'install-gchat-skill'
+        ? { action: 'install-skills' }  // Installs all skills including gchat
+        : { action: 'install-addon', addon: addonId };
+
       const response = await fetch(`${BRIDGE}/v1/secondbrain/setup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'install-addon', addon: addonId }),
+        body: JSON.stringify(body),
       });
       const data = await response.json();
       if (data.success) {
         // Re-detect to update status
         softDetect();
       } else {
-        setAddonError(prev => ({ ...prev, [addonId]: data.stderr || data.error || 'Install failed' }));
+        // Provide user-friendly error messages
+        const rawError = data.stderr || data.error || 'Install failed';
+        const friendlyError = rawError.includes('not found') || rawError.includes('command not found')
+          ? `Could not install automatically. Please install manually${addon?.setupUrl ? ` from ${addon.setupUrl}` : ''}.`
+          : rawError.length > 200 ? rawError.slice(-200) : rawError;
+        setAddonError(prev => ({ ...prev, [addonId]: friendlyError }));
       }
     } catch (e: any) {
-      setAddonError(prev => ({ ...prev, [addonId]: e.message }));
+      setAddonError(prev => ({ ...prev, [addonId]: `Connection error: ${e.message}. Is the bridge running?` }));
     } finally {
       setAddonInstalling(null);
     }
@@ -1447,8 +1461,11 @@ Output ONLY the style guide in clean Markdown. Start with a title "# Writing Sty
         <div id="addons-section" style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '12px', marginTop: '24px' }}>Optional Add-ons</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
           {ADDONS.map(addon => {
+            // Detection: check detectionKey (wispr, obsidian) OR skillKey in skills list (gchat)
             const detected = addon.detectionKey ? (detection as any)?.[addon.detectionKey] : null;
-            const isInstalled = typeof detected === 'object' && detected !== null ? detected.installed : typeof detected === 'boolean' ? detected : false;
+            const detectedViaApp = typeof detected === 'object' && detected !== null ? detected.installed : typeof detected === 'boolean' ? detected : false;
+            const detectedViaSkill = addon.skillKey ? ((detection as any)?.skills?.installed || []).includes(addon.skillKey) : false;
+            const isInstalled = detectedViaApp || detectedViaSkill;
             const isThisInstalling = addonInstalling === addon.id;
             const thisError = addonError[addon.id];
             return (
@@ -1484,7 +1501,7 @@ Output ONLY the style guide in clean Markdown. Start with a title "# Writing Sty
                           {isThisInstalling ? 'Installing...' : 'Install Automatically'}
                         </button>
                         {addon.setupUrl && (
-                          <a href={addon.setupUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>or install manually →</a>
+                          <a href={addon.setupUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>or set up manually →</a>
                         )}
                       </div>
                     )}
