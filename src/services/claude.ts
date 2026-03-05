@@ -390,6 +390,10 @@ export interface SendMessageOptions {
   tools?: ToolDefinition[];
   enableThinking?: boolean;
   thinkingBudget?: number;
+  effort?: 'max' | 'high' | 'medium' | 'low';
+  maxTokensOverride?: number;
+  temperatureOverride?: number;
+  enableCaching?: boolean;
   onToken?: (text: string) => void;
   onThinking?: (text: string) => void;
   onToolCall?: (tool: ToolUseBlock) => void;
@@ -413,7 +417,7 @@ export interface SendMessageResult {
 }
 
 export async function sendMessage(opts: SendMessageOptions): Promise<SendMessageResult> {
-  const { connection, messages, systemPrompt, tools, enableThinking, thinkingBudget, onToken, onThinking, onToolCall, signal } = opts;
+  const { connection, messages, systemPrompt, tools, enableThinking, thinkingBudget, effort, maxTokensOverride, temperatureOverride, enableCaching, onToken, onThinking, onToolCall, signal } = opts;
 
   const endpoint = buildEndpoint(connection);
   const headers = buildHeaders(connection);
@@ -438,13 +442,29 @@ export async function sendMessage(opts: SendMessageOptions): Promise<SendMessage
   // Build request body
   const body: Record<string, unknown> = {
     model: connection.model,
-    max_tokens: connection.maxTokens || 4096,
+    max_tokens: maxTokensOverride ?? connection.maxTokens ?? 4096,
     messages: convertMessages(trimmedMessages),
     stream: true,
   };
 
+  // Apply temperature override if provided
+  const temp = temperatureOverride ?? connection.temperature;
+  if (temp !== undefined && temp !== null) body.temperature = temp;
+
   if (system) body.system = system;
   if (tools && tools.length > 0) body.tools = tools;
+
+  // Prompt caching: automatically cache conversation prefix for faster TTFT
+  const useCaching = enableCaching ?? connection.enableCaching ?? true;
+  if (useCaching) {
+    body.cache_control = { type: 'ephemeral' };
+  }
+
+  // Effort parameter: control token spend for speed vs quality tradeoff
+  const effortLevel = effort ?? connection.effort;
+  if (effortLevel && effortLevel !== 'high') {
+    body.output_config = { effort: effortLevel };
+  }
 
   const useThinking = enableThinking ?? connection.enableThinking;
   if (useThinking) {

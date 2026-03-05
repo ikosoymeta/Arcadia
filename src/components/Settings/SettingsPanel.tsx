@@ -28,6 +28,8 @@ export function SettingsPanel() {
     temperature: 0.7,
     enableThinking: false,
     thinkingBudget: 10000,
+    effort: 'medium' as 'max' | 'high' | 'medium' | 'low',
+    enableCaching: true,
   });
   const [testResult, setTestResult] = useState<{ id: string; success: boolean } | null>(null);
   const [testing, setTesting] = useState<string | null>(null);
@@ -36,7 +38,7 @@ export function SettingsPanel() {
   const selectedModelInfo = getModelInfo(formData.model);
 
   const resetForm = () => {
-    setFormData({ label: '', apiKey: '', baseUrl: '', model: 'claude-sonnet-4-6', maxTokens: 8096, temperature: 0.7, enableThinking: false, thinkingBudget: 10000 });
+    setFormData({ label: '', apiKey: '', baseUrl: '', model: 'claude-sonnet-4-6', maxTokens: 8096, temperature: 0.7, enableThinking: false, thinkingBudget: 10000, effort: 'medium' as 'max' | 'high' | 'medium' | 'low', enableCaching: true });
     setConnectionType('apikey');
     setShowForm(false);
     setEditingId(null);
@@ -58,6 +60,8 @@ export function SettingsPanel() {
         baseUrl: connectionType === 'proxy' ? formData.baseUrl : undefined,
         enableThinking: formData.enableThinking,
         thinkingBudget: formData.thinkingBudget,
+        effort: formData.effort,
+        enableCaching: formData.enableCaching,
       });
     } else {
       addConnection({
@@ -69,6 +73,8 @@ export function SettingsPanel() {
         baseUrl: connectionType === 'proxy' ? formData.baseUrl : undefined,
         enableThinking: formData.enableThinking,
         thinkingBudget: formData.thinkingBudget,
+        effort: formData.effort,
+        enableCaching: formData.enableCaching,
       });
     }
     resetForm();
@@ -86,6 +92,8 @@ export function SettingsPanel() {
       temperature: conn.temperature,
       enableThinking: conn.enableThinking ?? false,
       thinkingBudget: conn.thinkingBudget ?? 10000,
+      effort: conn.effort ?? 'medium',
+      enableCaching: conn.enableCaching ?? true,
     });
     setConnectionType(conn.baseUrl ? 'proxy' : 'apikey');
     setEditingId(id);
@@ -142,6 +150,8 @@ export function SettingsPanel() {
                     <div className={styles.connModel}>
                       {mInfo?.label ?? conn.model}
                       {conn.enableThinking && <span style={{ color: '#a78bfa', marginLeft: '6px' }}>🧠 Thinking ON</span>}
+                      {conn.effort && conn.effort !== 'high' && <span style={{ color: '#fbbf24', marginLeft: '6px' }}>⚡ {conn.effort}</span>}
+                      {conn.enableCaching !== false && <span style={{ color: '#34d399', marginLeft: '6px' }}>🗄️ Cached</span>}
                       {conn.baseUrl
                         ? ` · ${conn.baseUrl}`
                         : conn.apiKey
@@ -364,6 +374,39 @@ export function SettingsPanel() {
                     Fixed at 1.0 when thinking is enabled.
                   </div>
                 )}
+              </div>
+            </div>
+
+            {/* Effort & Caching - Performance controls */}
+            <div className={styles.row}>
+              <div className={styles.field}>
+                <label className={styles.label}>⚡ Effort Level: {formData.effort}</label>
+                <select
+                  className={styles.input}
+                  value={formData.effort}
+                  onChange={e => setFormData(p => ({ ...p, effort: e.target.value as 'max' | 'high' | 'medium' | 'low' }))}
+                >
+                  <option value="low">Low — fastest, concise responses</option>
+                  <option value="medium">Medium — balanced (recommended)</option>
+                  <option value="high">High — thorough, default behavior</option>
+                  <option value="max">Max — deepest reasoning (Opus only)</option>
+                </select>
+                <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
+                  Lower effort = faster responses, fewer tokens. Terminal always uses "low".
+                </div>
+              </div>
+              <div className={styles.field}>
+                <label className={styles.label} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <input
+                    type="checkbox"
+                    checked={formData.enableCaching}
+                    onChange={e => setFormData(p => ({ ...p, enableCaching: e.target.checked }))}
+                  />
+                  🗄️ Prompt Caching
+                </label>
+                <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
+                  Caches conversation prefix for faster TTFT. Cache hits cost 90% less.
+                </div>
               </div>
             </div>
 

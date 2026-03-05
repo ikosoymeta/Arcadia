@@ -292,6 +292,8 @@ export interface Connection {
   baseUrl?: string;
   enableThinking?: boolean;
   thinkingBudget?: number;
+  effort?: 'max' | 'high' | 'medium' | 'low';
+  enableCaching?: boolean;
 }
 
 export interface BenchmarkResult {

@@ -138,7 +138,10 @@ function Terminal() {
       const result = await sendMessage({
         connection: activeConnection,
         messages: conversationRef.current,
-        systemPrompt: 'You are Claude, responding in a terminal interface. Be concise and use plain text formatting. The user may ask follow-up questions that reference previous messages in this conversation.',
+        systemPrompt: 'Terminal mode. Be brief and direct. Plain text only. No markdown formatting.',
+        effort: 'low',
+        maxTokensOverride: 2048,
+        temperatureOverride: 0.3,
         onToken: (chunk: string) => {
           accumulated += chunk;
           const currentText = accumulated;
@@ -149,8 +152,9 @@ function Terminal() {
 
       // Final update with complete content
       const finalText = result.content || accumulated;
+      const ttftStr = result.ttft ? ` | TTFT: ${result.ttft}ms` : '';
       const tokenInfo = result.inputTokens || result.outputTokens
-        ? `\n\n[tokens: ${result.inputTokens ?? '?'} in / ${result.outputTokens ?? '?'} out | ${conversationRef.current.length} msgs in memory${result.totalTime ? ` | ${(result.totalTime / 1000).toFixed(1)}s` : ''}]`
+        ? `\n\n[tokens: ${result.inputTokens ?? '?'} in / ${result.outputTokens ?? '?'} out | ${conversationRef.current.length} msgs in memory${result.totalTime ? ` | ${(result.totalTime / 1000).toFixed(1)}s` : ''}${ttftStr} | effort: low]`
         : '';
       setLines(prev => prev.map(l => l.id === responseId ? { ...l, text: finalText + tokenInfo } : l));
 
