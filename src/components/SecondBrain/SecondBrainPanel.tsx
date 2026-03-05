@@ -73,11 +73,22 @@ const BRIDGE = 'http://127.0.0.1:8087';
 async function detect(): Promise<DetectionResult | null> {
   try {
     const c = new AbortController();
-    const t = setTimeout(() => c.abort(), 10000);
+    const t = setTimeout(() => c.abort(), 30000); // 30s — claude --version can take 10-15s on Meta machines
+    console.log('[SecondBrain] Fetching detect from', `${BRIDGE}/v1/secondbrain/detect`);
     const r = await fetch(`${BRIDGE}/v1/secondbrain/detect`, { signal: c.signal });
     clearTimeout(t);
-    return r.ok ? await r.json() : null;
-  } catch { return null; }
+    if (!r.ok) {
+      console.error('[SecondBrain] detect response not ok:', r.status, r.statusText);
+      return null;
+    }
+    const data = await r.json();
+    console.log('[SecondBrain] detect result:', JSON.stringify(data?.summary));
+    console.log('[SecondBrain] full detect:', JSON.stringify(data));
+    return data;
+  } catch (e: any) {
+    console.error('[SecondBrain] detect error:', e.message);
+    return null;
+  }
 }
 
 async function setupAction(action: string, command?: string): Promise<any> {
@@ -241,11 +252,18 @@ export function SecondBrainPanel() {
   // ─── Detection ──────────────────────────────────────────────────────────
 
   const runDetection = useCallback(async () => {
+    console.log('[SecondBrain] runDetection started');
     setPhase('detecting');
     const connected = await checkBridge();
+    console.log('[SecondBrain] bridge connected:', connected);
     setBridgeConnected(connected);
     if (!connected) { setPhase('dashboard'); return; }
     const result = await detect();
+    console.log('[SecondBrain] detection result summary:', result?.summary);
+    console.log('[SecondBrain] claudeCode:', result?.claudeCode);
+    console.log('[SecondBrain] googleDrive:', result?.googleDrive);
+    console.log('[SecondBrain] secondBrain:', result?.secondBrain);
+    console.log('[SecondBrain] skills:', result?.skills);
     setDetection(result);
     setBridgeConnected(true);
     setPhase('dashboard');
