@@ -303,10 +303,11 @@ function renderMarkdown(text: string): React.ReactNode {
       if (inCodeBlock) {
         elements.push(
           <pre key={`code-${i}`} style={{ background: '#1e1e2e', border: '1px solid #313244', borderRadius: '8px', padding: '12px 16px', fontSize: '12px', fontFamily: 'monospace', color: '#cdd6f4', overflow: 'auto', margin: '8px 0', lineHeight: '1.5' }}>
-            <code>{codeBuffer.join('\n')}</code>
+            <code className={codeLang ? `language-${codeLang}` : ''}>{codeBuffer.join('\n')}</code>
           </pre>
         );
         codeBuffer = [];
+        codeLang = '';
         inCodeBlock = false;
       } else {
         inCodeBlock = true;
