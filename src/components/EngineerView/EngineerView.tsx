@@ -1742,8 +1742,7 @@ function CodeTab() {
 
 function FilesTab() {
   const { artifacts } = usePreview();
-  const { conversations, activeConversationId } = useChat();
-  const activeConvo = conversations.find(c => c.id === activeConversationId);
+  const { conversations } = useChat();
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 

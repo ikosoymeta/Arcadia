@@ -43,13 +43,7 @@ export function SettingsPanel() {
   const [bridgeUrlInput, setBridgeUrlInput] = useState(() => getRemoteBridgeConfig().url);
   const autoTestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [copiedCmd, setCopiedCmd] = useState(false);
-
-  const handleBridgeToggle = (enabled: boolean) => {
-    const updated = { ...remoteBridge, enabled };
-    setRemoteBridge(updated);
-    setRemoteBridgeConfig(updated);
-    setBridgeTestResult(null);
-  };
+  const [bridgePlatform, setBridgePlatform] = useState<'mac' | 'windows'>('mac');
 
   const handleBridgeUrlInput = (raw: string) => {
     setBridgeUrlInput(raw);
@@ -100,8 +94,19 @@ export function SettingsPanel() {
     setBridgeTestResult(null);
   };
 
-  const copyBridgeCommand = () => {
-    navigator.clipboard.writeText('cd ~/Arcadia && node bridge/arcadia-bridge.js --host 0.0.0.0');
+  const bridgeCommands = {
+    mac: {
+      download: `curl -sL https://raw.githubusercontent.com/ikosoymeta/Arcadia/main/bridge/arcadia-bridge.js -o ~/arcadia-bridge.js`,
+      run: `node ~/arcadia-bridge.js --host 0.0.0.0`,
+    },
+    windows: {
+      download: `curl -sL https://raw.githubusercontent.com/ikosoymeta/Arcadia/main/bridge/arcadia-bridge.js -o %USERPROFILE%\\arcadia-bridge.js`,
+      run: `node %USERPROFILE%\\arcadia-bridge.js --host 0.0.0.0`,
+    },
+  };
+
+  const copyBridgeCommand = (cmd: string) => {
+    navigator.clipboard.writeText(cmd);
     setCopiedCmd(true);
     setTimeout(() => setCopiedCmd(false), 2000);
   };
@@ -561,20 +566,60 @@ export function SettingsPanel() {
                 Access your Second Brain from a remote machine (e.g., Mac laptop, OnDemand devserver). Just enter the address and we'll connect automatically.
               </p>
 
-              {/* Step 1: Start bridge on remote */}
+              {/* Step 1: Download & run bridge on remote */}
               <div style={{ padding: '12px 14px', borderRadius: '10px', background: 'var(--bg-primary)', border: '1px solid var(--border)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
                   <span style={{ width: '22px', height: '22px', borderRadius: '50%', background: '#6366f120', color: '#818cf8', fontSize: '12px', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>1</span>
-                  <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>Start the bridge on your remote machine</span>
+                  <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>Download & start the bridge on your remote machine</span>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <code style={{ flex: 1, display: 'block', padding: '8px 10px', background: 'var(--bg-secondary)', borderRadius: '6px', fontFamily: 'monospace', fontSize: '12px', color: '#a78bfa', userSelect: 'all' }}>
-                    cd ~/Arcadia && node bridge/arcadia-bridge.js --host 0.0.0.0
-                  </code>
-                  <button onClick={copyBridgeCommand} style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: copiedCmd ? '#22c55e' : 'var(--text-secondary)', cursor: 'pointer', fontSize: '12px', fontWeight: 500, whiteSpace: 'nowrap', minWidth: '60px' }}>
-                    {copiedCmd ? '✓ Copied' : 'Copy'}
-                  </button>
+
+                {/* Platform tabs */}
+                <div style={{ display: 'flex', gap: '4px', marginBottom: '10px' }}>
+                  {(['mac', 'windows'] as const).map(p => (
+                    <button key={p} onClick={() => setBridgePlatform(p)} style={{
+                      padding: '5px 14px', borderRadius: '6px', fontSize: '12px', fontWeight: 600, cursor: 'pointer',
+                      border: bridgePlatform === p ? '1px solid #818cf850' : '1px solid var(--border)',
+                      background: bridgePlatform === p ? '#818cf818' : 'transparent',
+                      color: bridgePlatform === p ? '#818cf8' : 'var(--text-tertiary)',
+                    }}>
+                      {p === 'mac' ? '🍎 Mac / Linux' : '🪟 Windows'}
+                    </button>
+                  ))}
                 </div>
+
+                {/* Prerequisites */}
+                <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginBottom: '8px', lineHeight: '1.5' }}>
+                  <strong style={{ color: 'var(--text-secondary)' }}>Prerequisites:</strong> Node.js 18+ and Claude Code CLI installed on the remote machine.
+                  {bridgePlatform === 'windows' && <span> On Windows, use PowerShell or Command Prompt.</span>}
+                </div>
+
+                {/* Step 1a: Download */}
+                <div style={{ marginBottom: '8px' }}>
+                  <div style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 600, marginBottom: '4px' }}>① Download the bridge (one-time):</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <code style={{ flex: 1, display: 'block', padding: '7px 10px', background: 'var(--bg-secondary)', borderRadius: '6px', fontFamily: 'monospace', fontSize: '11px', color: '#a78bfa', userSelect: 'all', wordBreak: 'break-all', lineHeight: '1.4' }}>
+                      {bridgeCommands[bridgePlatform].download}
+                    </code>
+                    <button onClick={() => copyBridgeCommand(bridgeCommands[bridgePlatform].download)} style={{ padding: '5px 10px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '11px', fontWeight: 500, whiteSpace: 'nowrap' }}>Copy</button>
+                  </div>
+                </div>
+
+                {/* Step 1b: Run */}
+                <div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 600, marginBottom: '4px' }}>② Start the bridge:</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <code style={{ flex: 1, display: 'block', padding: '7px 10px', background: 'var(--bg-secondary)', borderRadius: '6px', fontFamily: 'monospace', fontSize: '11px', color: '#a78bfa', userSelect: 'all', lineHeight: '1.4' }}>
+                      {bridgeCommands[bridgePlatform].run}
+                    </code>
+                    <button onClick={() => copyBridgeCommand(bridgeCommands[bridgePlatform].run)} style={{ padding: '5px 10px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: copiedCmd ? '#22c55e' : 'var(--text-secondary)', cursor: 'pointer', fontSize: '11px', fontWeight: 500, whiteSpace: 'nowrap' }}>
+                      {copiedCmd ? '✓' : 'Copy'}
+                    </button>
+                  </div>
+                </div>
+
+                <p style={{ fontSize: '10px', color: 'var(--text-tertiary)', margin: '8px 0 0', lineHeight: '1.5' }}>
+                  💡 The bridge is a single file with zero dependencies — just Node.js built-ins. It works on Mac, Linux, and Windows.
+                </p>
               </div>
 
               {/* Step 2: Enter URL */}

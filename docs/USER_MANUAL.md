@@ -336,27 +336,52 @@ Windows PC (ArcadIA in browser)  ──HTTP──▶  Remote machine:8087 (Bridg
 
 **Setup steps:**
 
-1. **On the remote machine**, start the bridge with the `--host 0.0.0.0` flag to accept connections from other devices:
+The bridge is a **standalone single file** with zero npm dependencies — it only requires Node.js. You do **not** need to clone the Arcadia repository on the remote machine.
 
-   ```bash
-   cd ~/Arcadia && node bridge/arcadia-bridge.js --host 0.0.0.0
-   ```
+**Step 1: Download and start the bridge on the remote machine**
 
-   Alternatively, if the bridge is already running as a LaunchAgent, you may need to modify the launch configuration to bind to `0.0.0.0` instead of `127.0.0.1`.
+Choose the instructions for your remote machine's operating system:
 
-2. **Find the remote machine's IP address or hostname.** For an OnDemand devserver, this is typically the devserver hostname. For a Mac on the same network, use `ifconfig` to find the local IP.
+**Mac / Linux:**
 
-3. **In ArcadIA on your Windows PC**, go to **Settings** (gear icon in the sidebar) and scroll down to the **Remote Second Brain** section.
+```bash
+# Download the bridge (one-time)
+curl -sL https://raw.githubusercontent.com/ikosoymeta/Arcadia/main/bridge/arcadia-bridge.js -o ~/arcadia-bridge.js
 
-4. **Enable the toggle** "Use remote bridge instead of localhost".
+# Start the bridge (run each time)
+node ~/arcadia-bridge.js --host 0.0.0.0
+```
 
-5. **Enter the remote bridge URL**, for example:
-   - `http://192.168.1.50:8087` (local network IP)
-   - `http://my-devserver.corp.example.com:8087` (corporate hostname)
+**Windows (PowerShell or Command Prompt):**
 
-6. **Click "Test"** to verify the connection. A green checkmark with latency indicates success.
+```powershell
+# Download the bridge (one-time)
+curl -sL https://raw.githubusercontent.com/ikosoymeta/Arcadia/main/bridge/arcadia-bridge.js -o %USERPROFILE%\arcadia-bridge.js
 
-7. **Navigate to the Second Brain panel** (🧠 icon). It should now detect and display the remote machine's Second Brain setup, including all slash commands, workspace status, and add-ons.
+# Start the bridge (run each time)
+node %USERPROFILE%\arcadia-bridge.js --host 0.0.0.0
+```
+
+The `--host 0.0.0.0` flag is required so the bridge accepts connections from other machines (not just localhost).
+
+Alternatively, if you already have the Arcadia repo cloned on the remote machine, you can run:
+```bash
+cd ~/Arcadia && node bridge/arcadia-bridge.js --host 0.0.0.0
+```
+
+**Step 2: Connect from ArcadIA**
+
+1. **Find the remote machine's IP address or hostname.** For an OnDemand devserver, this is typically the devserver hostname. For a Mac on the same network, use `ifconfig` (Mac/Linux) or `ipconfig` (Windows) to find the local IP.
+
+2. **In ArcadIA**, go to **Settings** (gear icon in the sidebar) and scroll down to the **Remote Second Brain** section.
+
+3. **Enter the hostname or IP** in the address field. ArcadIA automatically adds `http://` and port `:8087` for you. Examples:
+   - `192.168.1.50` (local network IP)
+   - `my-devserver.corp.example.com` (corporate hostname)
+
+4. **Click "Connect"** or just wait — ArcadIA auto-tests the connection after you stop typing. A green success message confirms the connection, and remote mode activates automatically.
+
+5. **Navigate to the Second Brain panel** (🧠 icon). It should now detect and display the remote machine's Second Brain setup, including all slash commands, workspace status, and add-ons.
 
 **Using Second Brain remotely:**
 
@@ -441,13 +466,15 @@ For each connection, you can configure:
 
 ### Remote Second Brain
 
-The Settings panel includes a **Remote Second Brain** section at the bottom for Windows users who have Second Brain running on a remote machine. This section lets you:
+The Settings panel includes a **Remote Second Brain** section at the bottom for users who have Second Brain running on a remote machine. This section provides:
 
-1. **Enable/disable** the remote bridge with a toggle checkbox
-2. **Enter the remote bridge URL** (e.g., `http://devserver:8087`)
-3. **Test the connection** with a one-click test button that reports latency
+1. **Platform-specific instructions** — Switch between Mac/Linux and Windows tabs to see the correct download and run commands for the bridge
+2. **One-click copy** — Copy the download command and run command with a single click
+3. **Auto-connect** — Enter the remote machine's hostname or IP, and ArcadIA automatically tests the connection after you stop typing. If successful, remote mode activates immediately
+4. **Connection status** — Shows bridge version, platform, and latency when connected
+5. **Disconnect** — One-click button to disconnect and revert to local bridge
 
-When enabled, all bridge communication across the entire app (Second Brain panel, chat, terminal, integrations) is redirected to the remote URL. When disabled, it reverts to `localhost:8087`. See the [Remote Second Brain](#remote-second-brain-windows-users) section under Second Brain for full setup instructions.
+The bridge is a **standalone single file** (no npm install needed) that you download directly to the remote machine. See the [Remote Second Brain](#remote-second-brain-windows-users) section under Second Brain for full setup instructions.
 
 ### Available models
 
