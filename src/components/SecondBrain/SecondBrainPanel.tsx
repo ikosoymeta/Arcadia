@@ -116,6 +116,177 @@ async function checkBridge(): Promise<boolean> {
   } catch { return false; }
 }
 
+// ─── Download helpers ───────────────────────────────────────────────────────
+
+function downloadFile(content: string, filename: string, mimeType: string = 'text/plain') {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function detectContentType(content: string): { type: 'html' | 'markdown' | 'code' | 'text'; ext: string; mime: string; label: string } {
+  const trimmed = content.trim();
+  // Full HTML document
+  if (trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html') || (trimmed.includes('<head') && trimmed.includes('<body'))) {
+    return { type: 'html', ext: '.html', mime: 'text/html', label: 'HTML' };
+  }
+  // HTML fragment with significant tags
+  if (/<(div|table|style|script|canvas|svg|section|article|main|header|footer)[\s>]/i.test(trimmed) && trimmed.split('<').length > 5) {
+    return { type: 'html', ext: '.html', mime: 'text/html', label: 'HTML' };
+  }
+  // Markdown with headers, lists, or code blocks
+  if (/^#{1,3}\s/m.test(trimmed) || /^[\-\*]\s/m.test(trimmed) || /^```/m.test(trimmed)) {
+    return { type: 'markdown', ext: '.md', mime: 'text/markdown', label: 'Markdown' };
+  }
+  return { type: 'text', ext: '.txt', mime: 'text/plain', label: 'Text' };
+}
+
+function extractHtmlBlocks(content: string): string[] {
+  const blocks: string[] = [];
+  const htmlBlockRegex = /```html\n([\s\S]*?)```/g;
+  let match;
+  while ((match = htmlBlockRegex.exec(content)) !== null) {
+    blocks.push(match[1].trim());
+  }
+  return blocks;
+}
+
+function generateFilename(command: string | null, ext: string): string {
+  const base = command ? command.replace(/^\//,'').replace(/\s+/g, '-') : 'output';
+  const date = new Date().toISOString().slice(0, 10);
+  return `${base}-${date}${ext}`;
+}
+
+// ─── Download Menu Component ──────────────────────────────────────────────
+
+function DownloadMenu({ messages, activeCommand }: { messages: ChatMessage[]; activeCommand: string | null }) {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    if (open) document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  // Gather all assistant content
+  const assistantContent = messages.filter(m => m.role === 'assistant').map(m => m.content).join('\n\n');
+  if (!assistantContent.trim()) return null;
+
+  const contentInfo = detectContentType(assistantContent);
+  const htmlBlocks = extractHtmlBlocks(assistantContent);
+  const hasHtmlBlocks = htmlBlocks.length > 0;
+
+  const downloadOptions: { label: string; icon: string; action: () => void }[] = [];
+
+  // Always offer markdown download
+  downloadOptions.push({
+    label: `Download as Markdown`,
+    icon: '📄',
+    action: () => {
+      downloadFile(assistantContent, generateFilename(activeCommand, '.md'), 'text/markdown');
+      setOpen(false);
+    },
+  });
+
+  // If content IS HTML or contains HTML blocks, offer HTML download
+  if (contentInfo.type === 'html') {
+    downloadOptions.push({
+      label: 'Download as HTML',
+      icon: '🌐',
+      action: () => {
+        downloadFile(assistantContent, generateFilename(activeCommand, '.html'), 'text/html');
+        setOpen(false);
+      },
+    });
+  }
+  if (hasHtmlBlocks) {
+    htmlBlocks.forEach((block, i) => {
+      const suffix = htmlBlocks.length > 1 ? `-${i + 1}` : '';
+      downloadOptions.push({
+        label: `Download HTML artifact${suffix}`,
+        icon: '📊',
+        action: () => {
+          // Wrap in a full HTML document if it's a fragment
+          const fullHtml = block.includes('<html') ? block : `<!DOCTYPE html>\n<html><head><meta charset="utf-8"><title>${activeCommand || 'Artifact'}</title><style>body{font-family:system-ui,-apple-system,sans-serif;margin:20px;background:#fff;color:#1a1a1a}</style></head><body>\n${block}\n</body></html>`;
+          downloadFile(fullHtml, generateFilename(activeCommand, `${suffix}.html`), 'text/html');
+          setOpen(false);
+        },
+      });
+    });
+  }
+
+  // Plain text fallback
+  downloadOptions.push({
+    label: 'Download as Plain Text',
+    icon: '📝',
+    action: () => {
+      downloadFile(assistantContent, generateFilename(activeCommand, '.txt'), 'text/plain');
+      setOpen(false);
+    },
+  });
+
+  // If only one real option (markdown), just show a simple button
+  if (downloadOptions.length <= 2) {
+    return (
+      <button
+        onClick={downloadOptions[0].action}
+        title="Download output"
+        style={{ fontSize: '11px', color: 'var(--text-tertiary)', background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px', display: 'flex', alignItems: 'center', gap: '4px' }}
+      >
+        ⬇ Download
+      </button>
+    );
+  }
+
+  return (
+    <div ref={menuRef} style={{ position: 'relative' }}>
+      <button
+        onClick={() => setOpen(!open)}
+        title="Download output"
+        style={{ fontSize: '11px', color: 'var(--text-tertiary)', background: open ? 'var(--bg-secondary)' : 'none', border: 'none', cursor: 'pointer', padding: '4px 8px', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}
+      >
+        ⬇ Download
+      </button>
+      {open && (
+        <div style={{
+          position: 'absolute', top: '100%', right: 0, marginTop: '4px',
+          background: 'var(--bg-secondary)', border: '1px solid var(--border)',
+          borderRadius: '8px', padding: '4px', minWidth: '200px', zIndex: 100,
+          boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
+        }}>
+          {downloadOptions.map((opt, i) => (
+            <button
+              key={i}
+              onClick={opt.action}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '8px', width: '100%',
+                padding: '8px 12px', fontSize: '12px', color: 'var(--text-primary)',
+                background: 'none', border: 'none', cursor: 'pointer', borderRadius: '6px',
+                textAlign: 'left',
+              }}
+              onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-primary)')}
+              onMouseLeave={e => (e.currentTarget.style.background = 'none')}
+            >
+              <span>{opt.icon}</span>
+              <span>{opt.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Simple markdown-ish rendering ──────────────────────────────────────────
 
 function renderMarkdown(text: string): React.ReactNode {
@@ -238,8 +409,22 @@ export function SecondBrainPanel() {
   const [previewInput, setPreviewInput] = useState('');
   const [activeCommand, setActiveCommand] = useState<string | null>(null);
   const [previewPhase, setPreviewPhase] = useState<string>(''); // connecting, authenticating, streaming
+  const [previewElapsed, setPreviewElapsed] = useState(0);
   const previewEndRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const previewTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // ─── Style Guide state ──────────────────────────────────────────────────
+  const [styleGuideOpen, setStyleGuideOpen] = useState(false);
+  const [styleGuideInput, setStyleGuideInput] = useState('');
+  const [styleGuideResult, setStyleGuideResult] = useState<string | null>(null);
+  const [styleGuideAnalyzing, setStyleGuideAnalyzing] = useState(false);
+  const [styleGuideSaved, setStyleGuideSaved] = useState(false);
+  const [styleGuideError, setStyleGuideError] = useState<string | null>(null);
+
+  // ─── Add-on install state ───────────────────────────────────────────────
+  const [addonInstalling, setAddonInstalling] = useState<string | null>(null);
+  const [addonError, setAddonError] = useState<Record<string, string>>({});
 
   // ─── Helper: add log line ────────────────────────────────────────────────
 
@@ -314,6 +499,10 @@ export function SecondBrainPanel() {
 
     setPreviewStreaming(true);
     setPreviewPhase('connecting');
+    setPreviewElapsed(0);
+    // Start elapsed timer
+    if (previewTimerRef.current) clearInterval(previewTimerRef.current);
+    previewTimerRef.current = setInterval(() => setPreviewElapsed(prev => prev + 1), 1000);
 
     // Add empty assistant message that we'll stream into
     setPreviewMessages(prev => [...prev, { role: 'assistant', content: '' }]);
@@ -397,9 +586,125 @@ export function SecondBrainPanel() {
     } finally {
       setPreviewStreaming(false);
       setPreviewPhase('');
+      if (previewTimerRef.current) { clearInterval(previewTimerRef.current); previewTimerRef.current = null; }
       abortRef.current = null;
     }
   }, []);
+
+  // ─── Analyze Writing Style Guide ────────────────────────────────────────
+
+  const analyzeStyleGuide = useCallback(async () => {
+    if (!styleGuideInput.trim() || styleGuideInput.trim().length < 50) {
+      setStyleGuideError('Please paste at least one substantial writing sample (50+ characters).');
+      return;
+    }
+    setStyleGuideAnalyzing(true);
+    setStyleGuideError(null);
+    setStyleGuideResult(null);
+    setStyleGuideSaved(false);
+
+    const systemPrompt = `You are a writing style analyst. The user will provide examples of their writing. Analyze the writing style thoroughly and produce a detailed style guide in Markdown format that can be used by an AI assistant to match this person's writing style in future outputs.
+
+The style guide should cover:
+- **Tone & Voice**: formal/informal, direct/conversational, etc.
+- **Sentence Structure**: average length, complexity, use of fragments
+- **Vocabulary Level**: technical jargon, simple words, domain-specific terms
+- **Formatting Preferences**: bullet points vs paragraphs, headers, emphasis
+- **Common Patterns**: recurring phrases, transitions, opening/closing styles
+- **Punctuation & Grammar**: Oxford comma, em dashes, semicolons, etc.
+- **Perspective**: first person, third person, passive/active voice
+- **Emotional Register**: enthusiastic, measured, analytical, casual
+
+Output ONLY the style guide in clean Markdown. Start with a title "# Writing Style Guide" and organize into clear sections.`;
+
+    try {
+      const response = await fetch(`${BRIDGE}/v1/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [{ role: 'user', content: `Here are examples of my writing. Please analyze my style and create a comprehensive style guide:\n\n${styleGuideInput}` }],
+          system: systemPrompt,
+          stream: true,
+        }),
+      });
+
+      if (!response.ok) throw new Error(`Bridge returned ${response.status}`);
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('No response body');
+      const decoder = new TextDecoder();
+      let fullText = '';
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const event = JSON.parse(line.slice(6));
+            if (event.type === 'content_block_delta' && event.delta?.text) {
+              fullText += event.delta.text;
+              setStyleGuideResult(fullText); // live update
+            }
+          } catch { /* skip non-JSON lines */ }
+        }
+      }
+
+      if (!fullText) throw new Error('Empty response from Claude');
+      setStyleGuideResult(fullText);
+    } catch (e: any) {
+      setStyleGuideError(e.message || 'Failed to analyze writing style');
+    } finally {
+      setStyleGuideAnalyzing(false);
+    }
+  }, [styleGuideInput]);
+
+  const saveStyleGuide = useCallback(async () => {
+    if (!styleGuideResult) return;
+    try {
+      const response = await fetch(`${BRIDGE}/v1/secondbrain/setup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'save-to-workspace', filename: 'STYLE_GUIDE.md', content: styleGuideResult }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setStyleGuideSaved(true);
+      } else {
+        setStyleGuideError(`Failed to save: ${data.error}`);
+      }
+    } catch (e: any) {
+      setStyleGuideError(`Failed to save: ${e.message}`);
+    }
+  }, [styleGuideResult]);
+
+  // ─── Install Add-on ──────────────────────────────────────────────────────
+
+  const installAddon = useCallback(async (addonId: string) => {
+    setAddonInstalling(addonId);
+    setAddonError(prev => ({ ...prev, [addonId]: '' }));
+    try {
+      const response = await fetch(`${BRIDGE}/v1/secondbrain/setup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'install-addon', addon: addonId }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        // Re-detect to update status
+        softDetect();
+      } else {
+        setAddonError(prev => ({ ...prev, [addonId]: data.stderr || data.error || 'Install failed' }));
+      }
+    } catch (e: any) {
+      setAddonError(prev => ({ ...prev, [addonId]: e.message }));
+    } finally {
+      setAddonInstalling(null);
+    }
+  }, [softDetect]);
 
   // ─── Execute slash command ─────────────────────────────────────────────
 
@@ -628,13 +933,16 @@ export function SecondBrainPanel() {
               </code>
             )}
           </div>
-          {hasMessages && (
-            <button
-              onClick={() => { setPreviewMessages([]); setActiveCommand(null); if (abortRef.current) abortRef.current.abort(); }}
-              style={{ fontSize: '11px', color: 'var(--text-tertiary)', background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px' }}
-            >
-              Clear
-            </button>
+          {hasMessages && !previewStreaming && (
+            <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+              <DownloadMenu messages={previewMessages} activeCommand={activeCommand} />
+              <button
+                onClick={() => { setPreviewMessages([]); setActiveCommand(null); if (abortRef.current) abortRef.current.abort(); }}
+                style={{ fontSize: '11px', color: 'var(--text-tertiary)', background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px' }}
+              >
+                Clear
+              </button>
+            </div>
           )}
         </div>
 
@@ -669,12 +977,27 @@ export function SecondBrainPanel() {
                       ) : previewStreaming ? (
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 0' }}>
                           <div style={{ width: '14px', height: '14px', border: '2px solid #6366f140', borderTopColor: '#6366f1', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
-                          <span style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
-                            {previewPhase === 'connecting' ? 'Connecting to Claude...'
-                              : previewPhase === 'authenticating' ? 'Authenticating...'
-                              : previewPhase === 'waiting' ? 'Waiting for response...'
-                              : 'Thinking...'}
-                          </span>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                            <span style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
+                              {previewPhase === 'connecting' ? 'Connecting to Claude...'
+                                : previewPhase === 'authenticating' ? 'Authenticating...'
+                                : previewPhase === 'waiting' ? 'Waiting for response...'
+                                : previewPhase === 'streaming' ? 'Streaming...'
+                                : 'Processing...'}
+                              {previewElapsed > 0 && ` (${Math.floor(previewElapsed / 60)}:${(previewElapsed % 60).toString().padStart(2, '0')})`}
+                            </span>
+                            {previewElapsed > 10 && previewPhase !== 'streaming' && (
+                              <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', opacity: 0.7 }}>
+                                Slash commands can take 2–5 min while Claude reads your workspace
+                              </span>
+                            )}
+                          </div>
+                          <button
+                            onClick={() => { if (abortRef.current) abortRef.current.abort(); }}
+                            style={{ fontSize: '11px', color: '#ef4444', background: 'none', border: '1px solid #ef444440', borderRadius: '4px', padding: '2px 8px', cursor: 'pointer', marginLeft: '8px' }}
+                          >
+                            Cancel
+                          </button>
                         </div>
                       ) : null}
                     </div>
@@ -979,17 +1302,128 @@ export function SecondBrainPanel() {
 
         {/* Writing Style Guide */}
         <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '12px', marginTop: '24px' }}>Writing Style Guide</div>
-        <div style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '12px', padding: '16px 20px', display: 'flex', alignItems: 'flex-start', gap: '14px' }}>
-          <div style={{ fontSize: '28px' }}>✍️</div>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '14px', marginBottom: '4px' }}>Personalize Your Writing Style</div>
-            <div style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: '1.6', marginBottom: '10px' }}>
-              Feed Claude 3-5 examples of your writing and ask it to generate a style guide. Save it to your workspace.
-            </div>
-            <div style={{ padding: '8px 12px', background: 'var(--bg-primary)', borderRadius: '6px', fontFamily: 'monospace', fontSize: '11px', color: 'var(--text-primary)', lineHeight: '1.5' }}>
-              "Here are 5 examples of my writing. Analyze my style and create a style guide I can save."
+        <div style={{ background: 'var(--bg-secondary)', border: `1px solid ${styleGuideSaved ? '#22c55e30' : 'var(--border)'}`, borderRadius: '12px', padding: '16px 20px' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '14px' }}>
+            <div style={{ fontSize: '28px' }}>✍️</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '14px', marginBottom: '4px' }}>Personalize Your Writing Style</div>
+              <div style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: '1.6', marginBottom: '10px' }}>
+                Paste 3–5 examples of your writing below. Claude will analyze your style and create a personalized guide that Second Brain uses to match your tone in all future output.
+              </div>
+              {!styleGuideOpen && !styleGuideResult && (
+                <button
+                  onClick={() => setStyleGuideOpen(true)}
+                  style={{ fontSize: '12px', color: '#fff', background: '#6366f1', border: 'none', borderRadius: '6px', padding: '6px 14px', cursor: 'pointer', fontWeight: 600 }}
+                >
+                  Create Style Guide
+                </button>
+              )}
+              {styleGuideSaved && (
+                <div style={{ fontSize: '12px', color: '#22c55e', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span>✓</span> Style guide saved to your workspace (STYLE_GUIDE.md)
+                </div>
+              )}
             </div>
           </div>
+
+          {/* Expandable input area */}
+          {styleGuideOpen && !styleGuideResult && (
+            <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: '1px solid var(--border)' }}>
+              <textarea
+                value={styleGuideInput}
+                onChange={e => setStyleGuideInput(e.target.value)}
+                placeholder={'Paste your writing samples here. Include 3–5 examples from emails, docs, Workplace posts, or any writing that represents your style.\n\nExample 1:\n"Hey team, quick update on the project..."\n\nExample 2:\n"Following up on our discussion yesterday..."'}
+                style={{
+                  width: '100%',
+                  minHeight: '180px',
+                  padding: '12px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border)',
+                  background: 'var(--bg-primary)',
+                  color: 'var(--text-primary)',
+                  fontSize: '12px',
+                  lineHeight: '1.6',
+                  resize: 'vertical',
+                  fontFamily: 'inherit',
+                }}
+              />
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '10px' }}>
+                <button
+                  onClick={analyzeStyleGuide}
+                  disabled={styleGuideAnalyzing || styleGuideInput.trim().length < 50}
+                  style={{
+                    fontSize: '12px',
+                    color: '#fff',
+                    background: styleGuideAnalyzing || styleGuideInput.trim().length < 50 ? '#64748b' : '#6366f1',
+                    border: 'none',
+                    borderRadius: '6px',
+                    padding: '8px 18px',
+                    cursor: styleGuideAnalyzing ? 'wait' : 'pointer',
+                    fontWeight: 600,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                  }}
+                >
+                  {styleGuideAnalyzing && <div style={{ width: '12px', height: '12px', border: '2px solid #fff4', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />}
+                  {styleGuideAnalyzing ? 'Analyzing... (this may take 2–3 min)' : 'Analyze My Style'}
+                </button>
+                <button
+                  onClick={() => { setStyleGuideOpen(false); setStyleGuideInput(''); setStyleGuideError(null); }}
+                  style={{ fontSize: '12px', color: 'var(--text-secondary)', background: 'none', border: '1px solid var(--border)', borderRadius: '6px', padding: '6px 14px', cursor: 'pointer' }}
+                >
+                  Cancel
+                </button>
+                <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
+                  {styleGuideInput.trim().length < 50 ? `${50 - styleGuideInput.trim().length} more characters needed` : `${styleGuideInput.trim().length} characters`}
+                </span>
+              </div>
+              {styleGuideError && (
+                <div style={{ fontSize: '11px', color: '#ef4444', marginTop: '8px', padding: '6px 10px', background: '#ef44440a', borderRadius: '6px' }}>{styleGuideError}</div>
+              )}
+            </div>
+          )}
+
+          {/* Result display */}
+          {styleGuideResult && (
+            <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+                <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)' }}>Generated Style Guide</span>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  {!styleGuideSaved && (
+                    <button
+                      onClick={saveStyleGuide}
+                      style={{ fontSize: '11px', color: '#fff', background: '#22c55e', border: 'none', borderRadius: '5px', padding: '4px 12px', cursor: 'pointer', fontWeight: 600 }}
+                    >
+                      Save to Workspace
+                    </button>
+                  )}
+                  <button
+                    onClick={() => { setStyleGuideResult(null); setStyleGuideOpen(true); setStyleGuideSaved(false); }}
+                    style={{ fontSize: '11px', color: 'var(--text-secondary)', background: 'none', border: '1px solid var(--border)', borderRadius: '5px', padding: '4px 12px', cursor: 'pointer' }}
+                  >
+                    Redo
+                  </button>
+                </div>
+              </div>
+              <div style={{
+                maxHeight: '300px',
+                overflowY: 'auto',
+                padding: '12px',
+                background: 'var(--bg-primary)',
+                borderRadius: '8px',
+                border: '1px solid var(--border)',
+                fontSize: '12px',
+                lineHeight: '1.7',
+                color: 'var(--text-primary)',
+              }}>
+                {renderMarkdown(styleGuideResult)}
+              </div>
+              {styleGuideError && (
+                <div style={{ fontSize: '11px', color: '#ef4444', marginTop: '8px' }}>{styleGuideError}</div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Add-ons */}
@@ -998,6 +1432,8 @@ export function SecondBrainPanel() {
           {ADDONS.map(addon => {
             const detected = addon.detectionKey ? (detection as any)?.[addon.detectionKey] : null;
             const isInstalled = typeof detected === 'object' && detected !== null ? detected.installed : typeof detected === 'boolean' ? detected : false;
+            const isThisInstalling = addonInstalling === addon.id;
+            const thisError = addonError[addon.id];
             return (
               <div key={addon.id} style={{ background: isInstalled ? '#22c55e08' : 'var(--bg-secondary)', border: `1px solid ${isInstalled ? '#22c55e30' : 'var(--border)'}`, borderRadius: '12px', padding: '14px 18px' }}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
@@ -1008,8 +1444,35 @@ export function SecondBrainPanel() {
                       <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '20px', background: isInstalled ? '#22c55e18' : '#64748b18', color: isInstalled ? '#22c55e' : '#64748b', fontWeight: 600 }}>{isInstalled ? '✓ Detected' : 'Not installed'}</span>
                     </div>
                     <div style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: '1.5' }}>{addon.description}</div>
-                    {!isInstalled && addon.setupUrl && (
-                      <a href={addon.setupUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: '11px', color: '#6366f1', marginTop: '4px', display: 'inline-block' }}>Install →</a>
+                    {!isInstalled && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px' }}>
+                        <button
+                          onClick={() => installAddon(addon.id)}
+                          disabled={isThisInstalling || addonInstalling !== null}
+                          style={{
+                            fontSize: '11px',
+                            color: '#fff',
+                            background: isThisInstalling ? '#64748b' : '#6366f1',
+                            border: 'none',
+                            borderRadius: '5px',
+                            padding: '4px 12px',
+                            cursor: isThisInstalling ? 'wait' : 'pointer',
+                            fontWeight: 600,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '5px',
+                          }}
+                        >
+                          {isThisInstalling && <div style={{ width: '10px', height: '10px', border: '2px solid #fff4', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />}
+                          {isThisInstalling ? 'Installing...' : 'Install Automatically'}
+                        </button>
+                        {addon.setupUrl && (
+                          <a href={addon.setupUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>or install manually →</a>
+                        )}
+                      </div>
+                    )}
+                    {thisError && (
+                      <div style={{ fontSize: '11px', color: '#ef4444', marginTop: '4px', padding: '4px 8px', background: '#ef44440a', borderRadius: '4px' }}>{thisError}</div>
                     )}
                   </div>
                 </div>

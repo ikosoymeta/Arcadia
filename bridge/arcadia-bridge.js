@@ -39,7 +39,8 @@ const PORT = 8087;
 const HOST = '127.0.0.1';
 const VERSION = '3.4.2';
 const IS_WIN = process.platform === 'win32';
-const TIMEOUT_MS = 180000; // 3 minute timeout
+const TIMEOUT_MS = 180000; // 3 minute timeout for regular messages
+const SLASH_CMD_TIMEOUT_MS = 600000; // 10 minute timeout for slash commands
 const KEEPALIVE_INTERVAL_MS = 2000; // SSE keepalive every 2s
 
 // ─── Child process tracking ──────────────────────────────────────────────
@@ -588,6 +589,11 @@ function handleMessages(req, res, body) {
   const systemPrompt = payload.system || '';
   const stream = payload.stream === true;
 
+  // Detect slash commands — they need special handling (longer timeout, --cwd to workspace)
+  const lastUserMsg = messages.filter(m => m.role === 'user').pop();
+  const lastUserText = lastUserMsg ? extractText(lastUserMsg.content).trim() : '';
+  const isSlashCommand = /^\/(daily-brief|eod|eow|prepare-meeting|add-context|deep-research)/.test(lastUserText);
+
   // Apply context window management
   const trimmedMessages = trimMessages(messages);
   const fullPrompt = buildPrompt(trimmedMessages, systemPrompt);
@@ -607,21 +613,48 @@ function handleMessages(req, res, body) {
   console.log(`[${new Date().toISOString()}] → #${reqNum} Request: model=${model}, tokens=${maxTokens}, stream=${stream}${trimNote}`);
   console.log(`[${new Date().toISOString()}]   Prompt: ${fullPrompt.slice(0, 120)}${fullPrompt.length > 120 ? '...' : ''}`);
 
-  // Try to use a pre-spawned process from the pool for instant dispatch
+  // For slash commands, spawn a fresh process with --cwd pointing to workspace
+  // so Claude reads the CLAUDE.md and has access to skills/plugins
   let claude;
-  const poolProc = takeFromPool();
-  if (poolProc) {
-    claude = poolProc;
-  } else {
-    // No pool process available — spawn fresh with optimized flags
-    const args = getClaudeArgs(model);
-    console.log(`[${new Date().toISOString()}]   Spawning: ${CLAUDE_PATH} ${args.join(' ')} (no pool process available)`);
+  const effectiveTimeout = isSlashCommand ? SLASH_CMD_TIMEOUT_MS : TIMEOUT_MS;
+
+  if (isSlashCommand) {
+    // Find the workspace directory
+    const home = process.env.HOME || '/Users/' + process.env.USER;
+    const gDrivePaths = findGoogleDrivePaths(home);
+    let workspaceCwd = home; // fallback
+    for (const p of gDrivePaths) {
+      const wsPath = `${p}/My Drive/claude`;
+      try { if (require('fs').existsSync(wsPath)) { workspaceCwd = wsPath; break; } } catch {}
+    }
+
+    const args = ['-p', '--no-session-persistence'];
+    if (model) args.push('--model', model);
+    console.log(`[${new Date().toISOString()}]   🧠 Slash command detected: ${lastUserText.slice(0, 40)}`);
+    console.log(`[${new Date().toISOString()}]   Spawning with --cwd ${workspaceCwd} (timeout: ${effectiveTimeout / 1000}s)`);
     claude = spawn(CLAUDE_PATH, args, {
       env: { ...process.env },
+      cwd: workspaceCwd,
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: false,
     });
     activeChildren.add(claude);
+  } else {
+    // Regular messages: use pool for speed
+    const poolProc = takeFromPool();
+    if (poolProc) {
+      claude = poolProc;
+    } else {
+      // No pool process available — spawn fresh with optimized flags
+      const args = getClaudeArgs(model);
+      console.log(`[${new Date().toISOString()}]   Spawning: ${CLAUDE_PATH} ${args.join(' ')} (no pool process available)`);
+      claude = spawn(CLAUDE_PATH, args, {
+        env: { ...process.env },
+        stdio: ['pipe', 'pipe', 'pipe'],
+        shell: false,
+      });
+      activeChildren.add(claude);
+    }
   }
 
   // Track child process for cleanup on shutdown
@@ -651,14 +684,14 @@ function handleMessages(req, res, body) {
   let keepalive = null; // SSE keepalive interval (set in streaming mode)
   let headerFlushTimer = null; // Timeout to flush buffered header data
 
-  // Set timeout
+  // Set timeout (longer for slash commands)
   const timeout = setTimeout(() => {
     if (!killed) {
       killed = true;
       claude.kill('SIGTERM');
-      console.error(`[${new Date().toISOString()}] ✗ #${reqNum} Request timed out after ${TIMEOUT_MS / 1000}s`);
+      console.error(`[${new Date().toISOString()}] ✗ #${reqNum} Request timed out after ${effectiveTimeout / 1000}s${isSlashCommand ? ' (slash command)' : ''}`);
     }
-  }, TIMEOUT_MS);
+  }, effectiveTimeout);
 
   // Clean up on done
   function cleanup() {
@@ -1521,6 +1554,109 @@ function handleSecondBrainSetup(req, res, body) {
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: err.message }));
     });
+    return;
+  }
+
+  // ─── Install add-ons ──────────────────────────────────────────────
+  if (action === 'install-addon') {
+    const addon = payload.addon;
+    console.log(`[${new Date().toISOString()}] 🧠 Second Brain: Installing add-on: ${addon}`);
+
+    let cmd;
+    let description;
+    switch (addon) {
+      case 'wispr-flow':
+        cmd = 'brew install --cask wispr-flow 2>&1';
+        description = 'Wispr Flow (voice-to-text)';
+        break;
+      case 'obsidian':
+        cmd = 'brew install --cask obsidian 2>&1';
+        description = 'Obsidian (knowledge management)';
+        break;
+      case 'gclaude':
+        cmd = 'npm install -g gclaude 2>&1 || pip3 install gclaude 2>&1';
+        description = 'GClaude (Google Chat integration)';
+        break;
+      default:
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: `Unknown add-on: ${addon}. Use: wispr-flow, obsidian, gclaude` }));
+        return;
+    }
+
+    const proc = spawn(cmd, [], {
+      cwd: home,
+      env: { ...process.env },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      shell: true,
+    });
+
+    let stdout = '';
+    let stderr = '';
+    proc.stdout.on('data', d => { stdout += d.toString(); });
+    proc.stderr.on('data', d => { stderr += d.toString(); });
+
+    const timeout = setTimeout(() => proc.kill('SIGTERM'), 300000); // 5 min for brew installs
+
+    proc.on('close', code => {
+      clearTimeout(timeout);
+      console.log(`[${new Date().toISOString()}] 🧠 Add-on ${addon} install: code=${code}`);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        success: code === 0,
+        action: 'install-addon',
+        addon,
+        description,
+        stdout: stdout.slice(-3000),
+        stderr: stderr.slice(-3000),
+        exitCode: code,
+      }));
+    });
+
+    proc.on('error', err => {
+      clearTimeout(timeout);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    });
+    return;
+  }
+
+  // ─── Save file to workspace ───────────────────────────────────────
+  if (action === 'save-to-workspace') {
+    const filename = payload.filename;
+    const content = payload.content;
+    console.log(`[${new Date().toISOString()}] 🧠 Second Brain: Saving ${filename} to workspace...`);
+
+    if (!filename || !content) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Missing filename or content' }));
+      return;
+    }
+
+    // Sanitize filename (no path traversal)
+    const safeName = filename.replace(/[\/\\]/g, '_').replace(/\.\./g, '');
+
+    try {
+      let workspacePath = null;
+      const drivePaths = findGoogleDrivePaths(home, username, 'claude');
+      for (const p of drivePaths) {
+        if (fs.existsSync(p)) { workspacePath = p; break; }
+      }
+
+      if (!workspacePath) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Workspace not found. Run setup first.' }));
+        return;
+      }
+
+      const filePath = `${workspacePath}/${safeName}`;
+      fs.writeFileSync(filePath, content, 'utf-8');
+      console.log(`[${new Date().toISOString()}] 🧠 Saved: ${filePath}`);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, action: 'save-to-workspace', path: filePath }));
+    } catch (err) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: err.message }));
+    }
     return;
   }
 
