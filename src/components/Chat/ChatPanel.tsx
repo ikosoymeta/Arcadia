@@ -435,6 +435,9 @@ export function ChatPanel({ sidebarCollapsed, onExpandSidebar }: ChatPanelProps)
             {chatMode === 'cowork' && ' | Cowork mode'}
           </div>
         )}
+        <div style={{ fontSize: '10px', color: 'var(--text-tertiary)', textAlign: 'center', padding: '4px 0 2px', opacity: 0.7 }}>
+          Do not submit any sensitive information or <a href="https://www.internalfb.com/support/home/people/about-meta/privacy-programs/privacy-review-process#when-a-project-needs-a-privacy-review" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)', textDecoration: 'underline' }}>User Data</a> into ArcadIA.
+        </div>
       </div>
     </div>
   );

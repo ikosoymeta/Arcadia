@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useConnection } from '../../store/ConnectionContext';
 import { useChat } from '../../store/ChatContext';
-import { sendMessage, detectErrorInContent } from '../../services/claude';
+import { sendMessage, detectErrorInContent, type SendMessageResult } from '../../services/claude';
 import { trackMessage } from '../../services/analytics';
 import type { Message, Artifact, ImageAttachment, ToolUseBlock } from '../../types';
 import { CLAUDE_MODELS } from '../../types';
@@ -598,6 +598,11 @@ export function SimpleView() {
   const [isDragging, setIsDragging] = useState(false);
   const [showModelSelector, setShowModelSelector] = useState(false);
   const [showThinkingLive, setShowThinkingLive] = useState(false);
+
+  // ─── Preloaded prompt response cache ──────────────────────────────────────
+  const preloadCacheRef = useRef<Map<string, { result: SendMessageResult; timestamp: number }>>(new Map());
+  const [preloadStatus, setPreloadStatus] = useState<Map<string, 'loading' | 'ready' | 'error'>>(new Map());
+  const preloadAbortRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesAreaRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -654,6 +659,53 @@ export function SimpleView() {
     setActivitySteps(prev => prev.map(s => s.id === id ? { ...s, status, detail: detail ?? s.detail } : s));
   }, []);
 
+  // ─── Preload suggestion responses in background ──────────────────────────
+  useEffect(() => {
+    if (!activeConnection || conversation?.messages?.length) return; // Only preload on empty chat
+    // Abort any previous preload batch
+    if (preloadAbortRef.current) preloadAbortRef.current.abort();
+    const controller = new AbortController();
+    preloadAbortRef.current = controller;
+    const CACHE_TTL = 10 * 60 * 1000; // 10 min
+
+    const preloadOne = async (prompt: string) => {
+      // Skip if already cached and fresh
+      const cached = preloadCacheRef.current.get(prompt);
+      if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+        setPreloadStatus(prev => new Map(prev).set(prompt, 'ready'));
+        return;
+      }
+      setPreloadStatus(prev => new Map(prev).set(prompt, 'loading'));
+      try {
+        const result = await sendMessage({
+          connection: activeConnection,
+          messages: [{ id: 'preload', role: 'user', content: prompt, timestamp: Date.now(), model: activeConnection.model }] as Message[],
+          enableThinking: false,
+          signal: controller.signal,
+        });
+        if (!controller.signal.aborted) {
+          preloadCacheRef.current.set(prompt, { result, timestamp: Date.now() });
+          setPreloadStatus(prev => new Map(prev).set(prompt, 'ready'));
+        }
+      } catch {
+        if (!controller.signal.aborted) {
+          setPreloadStatus(prev => new Map(prev).set(prompt, 'error'));
+        }
+      }
+    };
+
+    // Stagger requests to avoid overwhelming the API (300ms apart)
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    SUGGESTIONS.forEach((s, i) => {
+      timers.push(setTimeout(() => preloadOne(s.prompt), i * 300));
+    });
+
+    return () => {
+      controller.abort();
+      timers.forEach(clearTimeout);
+    };
+  }, [activeConnection, conversation?.messages?.length]); // Re-preload when connection changes or chat is cleared
+
   const handleSend = useCallback(async (overrideText?: string) => {
     const text = (overrideText ?? input).trim();
     if (!text && images.length === 0) return;
@@ -687,6 +739,27 @@ export function SimpleView() {
     setInput('');
     setImages([]);
     setFollowUps([]);
+
+    // ─── Check preload cache for instant response ─────────────────────────
+    const cached = preloadCacheRef.current.get(text);
+    if (cached && images.length === 0 && Date.now() - cached.timestamp < 10 * 60 * 1000) {
+      const userMsg: Message = { id: crypto.randomUUID(), role: 'user', content: text, timestamp: Date.now(), model: activeConnection.model };
+      addMessage(convId, userMsg);
+      trackMessage(userMsg, convId);
+      const assistantMsg: Message = {
+        id: crypto.randomUUID(), role: 'assistant', content: cached.result.content, timestamp: Date.now(),
+        inputTokens: cached.result.inputTokens, outputTokens: cached.result.outputTokens,
+        artifacts: cached.result.artifacts, thinkingText: cached.result.thinkingText,
+        model: activeConnection.model,
+      };
+      addMessage(convId, assistantMsg);
+      trackMessage(assistantMsg, convId);
+      setFollowUps(getFollowUpSuggestions(cached.result.content));
+      // Remove from cache after use (one-time)
+      preloadCacheRef.current.delete(text);
+      setPreloadStatus(prev => { const m = new Map(prev); m.delete(text); return m; });
+      return;
+    }
 
     // Build user message
     const userMsg: Message = {
@@ -941,16 +1014,21 @@ export function SimpleView() {
               </div>
             )}
             <div className={styles.suggestions}>
-              {SUGGESTIONS.map(s => (
-                <button
-                  key={s.label}
-                  className={styles.suggestionBtn}
-                  onClick={() => handleSend(s.prompt)}
-                >
-                  <span className={styles.suggestionIcon}>{s.icon}</span>
-                  <span>{s.label}</span>
-                </button>
-              ))}
+              {SUGGESTIONS.map(s => {
+                const status = preloadStatus.get(s.prompt);
+                return (
+                  <button
+                    key={s.label}
+                    className={`${styles.suggestionBtn} ${status === 'ready' ? styles.suggestionReady : ''}`}
+                    onClick={() => handleSend(s.prompt)}
+                  >
+                    <span className={styles.suggestionIcon}>{s.icon}</span>
+                    <span>{s.label}</span>
+                    {status === 'ready' && <span className={styles.preloadDot} title="Response preloaded — instant reply">⚡</span>}
+                    {status === 'loading' && <span className={styles.preloadSpinner} title="Preloading response..." />}
+                  </button>
+                );
+              })}
             </div>
           </div>
         ) : (
@@ -1098,6 +1176,9 @@ export function SimpleView() {
         </div>
         <div className={styles.inputHint}>
           Enter to send · Shift+Enter for new line · Drag & drop images
+        </div>
+        <div className={styles.privacyDisclaimer}>
+          Do not submit any sensitive information or <a href="https://www.internalfb.com/support/home/people/about-meta/privacy-programs/privacy-review-process#when-a-project-needs-a-privacy-review" target="_blank" rel="noopener noreferrer">User Data</a> into ArcadIA.
         </div>
       </div>
     </div>
