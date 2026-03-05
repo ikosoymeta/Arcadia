@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useConnection } from '../../store/ConnectionContext';
 import { CLAUDE_MODELS, getModelInfo } from '../../types';
+import { getRemoteBridgeConfig, setRemoteBridgeConfig, testBridgeConnection, type RemoteBridgeConfig } from '../../services/bridge';
 import styles from './Settings.module.css';
 
 type ConnectionType = 'apikey' | 'proxy';
@@ -34,6 +35,34 @@ export function SettingsPanel() {
   const [testResult, setTestResult] = useState<{ id: string; success: boolean } | null>(null);
   const [testing, setTesting] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+
+  // Remote Bridge state
+  const [remoteBridge, setRemoteBridge] = useState<RemoteBridgeConfig>(() => getRemoteBridgeConfig());
+  const [bridgeTestResult, setBridgeTestResult] = useState<{ ok: boolean; latency: number; error?: string } | null>(null);
+  const [bridgeTesting, setBridgeTesting] = useState(false);
+
+  const handleBridgeToggle = (enabled: boolean) => {
+    const updated = { ...remoteBridge, enabled };
+    setRemoteBridge(updated);
+    setRemoteBridgeConfig(updated);
+    setBridgeTestResult(null);
+  };
+
+  const handleBridgeUrlChange = (url: string) => {
+    const updated = { ...remoteBridge, url };
+    setRemoteBridge(updated);
+    setRemoteBridgeConfig(updated);
+    setBridgeTestResult(null);
+  };
+
+  const handleBridgeTest = async () => {
+    if (!remoteBridge.url.trim()) return;
+    setBridgeTesting(true);
+    setBridgeTestResult(null);
+    const result = await testBridgeConnection(remoteBridge.url.trim().replace(/\/+$/, ''));
+    setBridgeTestResult(result);
+    setBridgeTesting(false);
+  };
 
   const selectedModelInfo = getModelInfo(formData.model);
 
@@ -449,6 +478,88 @@ export function SettingsPanel() {
           ) : (
             <div style={{ fontSize: '13px', color: 'var(--text-tertiary)', textAlign: 'center', padding: '12px 0' }}>
               No active connection. Add one above to start chatting.
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Remote Second Brain Bridge */}
+      <div className={styles.section} style={{ background: 'var(--bg-secondary)', borderRadius: '14px', border: '1px solid var(--border)', marginTop: '16px' }}>
+        <div className={styles.sectionTitle} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span>🧠 Remote Second Brain</span>
+          <span style={{ fontSize: '10px', padding: '2px 8px', borderRadius: '20px', background: remoteBridge.enabled ? '#22c55e18' : '#64748b18', color: remoteBridge.enabled ? '#22c55e' : '#64748b', fontWeight: 600 }}>
+            {remoteBridge.enabled ? 'Enabled' : 'Disabled'}
+          </span>
+        </div>
+        <div style={{ padding: '12px 16px' }}>
+          <p style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: '1.6', marginBottom: '12px' }}>
+            For Windows users with Second Brain running on a remote machine (e.g., OnDemand devserver).
+            Configure the remote bridge URL to access your Second Brain from this device.
+          </p>
+
+          {/* Enable toggle */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
+            <label style={{ fontSize: '13px', color: 'var(--text-primary)', fontWeight: 500, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <input
+                type="checkbox"
+                checked={remoteBridge.enabled}
+                onChange={e => handleBridgeToggle(e.target.checked)}
+                style={{ accentColor: '#6366f1', width: '16px', height: '16px' }}
+              />
+              Use remote bridge instead of localhost
+            </label>
+          </div>
+
+          {/* URL input (shown when enabled) */}
+          {remoteBridge.enabled && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div>
+                <label className={styles.label}>Remote Bridge URL</label>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <input
+                    className={styles.input}
+                    value={remoteBridge.url}
+                    onChange={e => handleBridgeUrlChange(e.target.value)}
+                    placeholder="http://your-devserver.example.com:8087"
+                    style={{ flex: 1 }}
+                  />
+                  <button
+                    className={styles.primaryBtn}
+                    onClick={handleBridgeTest}
+                    disabled={bridgeTesting || !remoteBridge.url.trim()}
+                    style={{ whiteSpace: 'nowrap', minWidth: '80px' }}
+                  >
+                    {bridgeTesting ? 'Testing...' : 'Test'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Test result */}
+              {bridgeTestResult && (
+                <div style={{
+                  fontSize: '12px',
+                  padding: '8px 12px',
+                  borderRadius: '8px',
+                  background: bridgeTestResult.ok ? '#22c55e10' : '#ef444410',
+                  border: `1px solid ${bridgeTestResult.ok ? '#22c55e30' : '#ef444430'}`,
+                  color: bridgeTestResult.ok ? '#22c55e' : '#ef4444',
+                  fontWeight: 500,
+                }}>
+                  {bridgeTestResult.ok
+                    ? `✓ Connected successfully (${bridgeTestResult.latency}ms latency)`
+                    : `✗ ${bridgeTestResult.error || 'Connection failed'}`}
+                </div>
+              )}
+
+              {/* Help text */}
+              <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', lineHeight: '1.6', padding: '8px 12px', background: 'var(--bg-primary)', borderRadius: '8px' }}>
+                <strong style={{ color: 'var(--text-secondary)' }}>Setup:</strong> Run the ArcadIA Bridge on your remote machine:
+                <code style={{ display: 'block', marginTop: '4px', padding: '6px 8px', background: 'var(--bg-secondary)', borderRadius: '4px', fontFamily: 'monospace', fontSize: '11px' }}>
+                  cd ~/Arcadia && node bridge/arcadia-bridge.js --host 0.0.0.0
+                </code>
+                <div style={{ marginTop: '6px' }}>Then enter the URL above (e.g., <code>http://devserver-hostname:8087</code>).</div>
+                <div style={{ marginTop: '4px' }}>The bridge must be accessible from this device. If using an OD devserver, ensure port 8087 is forwarded.</div>
+              </div>
             </div>
           )}
         </div>

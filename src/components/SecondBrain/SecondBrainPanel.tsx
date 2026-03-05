@@ -68,14 +68,17 @@ const SETUP_STEPS: Omit<SetupStep, 'status'>[] = [
 
 // ─── Bridge API ─────────────────────────────────────────────────────────────
 
-const BRIDGE = 'http://127.0.0.1:8087';
+import { getBridgeUrl } from '../../services/bridge';
+
+// Dynamic bridge URL — reads from localStorage (remote) or defaults to localhost
+function BRIDGE() { return getBridgeUrl(); }
 
 async function detect(): Promise<DetectionResult | null> {
   try {
     const c = new AbortController();
     const t = setTimeout(() => c.abort(), 30000); // 30s — claude --version can take 10-15s on Meta machines
-    console.log('[SecondBrain] Fetching detect from', `${BRIDGE}/v1/secondbrain/detect`);
-    const r = await fetch(`${BRIDGE}/v1/secondbrain/detect`, { signal: c.signal });
+    console.log('[SecondBrain] Fetching detect from', `${BRIDGE()}/v1/secondbrain/detect`);
+    const r = await fetch(`${BRIDGE()}/v1/secondbrain/detect`, { signal: c.signal });
     clearTimeout(t);
     if (!r.ok) {
       console.error('[SecondBrain] detect response not ok:', r.status, r.statusText);
@@ -95,7 +98,7 @@ async function setupAction(action: string, command?: string): Promise<any> {
   try {
     const c = new AbortController();
     const t = setTimeout(() => c.abort(), 180000);
-    const r = await fetch(`${BRIDGE}/v1/secondbrain/setup`, {
+    const r = await fetch(`${BRIDGE()}/v1/secondbrain/setup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action, command }),
@@ -110,7 +113,7 @@ async function checkBridge(): Promise<boolean> {
   try {
     const c = new AbortController();
     const t = setTimeout(() => c.abort(), 3000);
-    const r = await fetch(`${BRIDGE}/health`, { signal: c.signal });
+    const r = await fetch(`${BRIDGE()}/health`, { signal: c.signal });
     clearTimeout(t);
     return r.ok;
   } catch { return false; }
@@ -509,7 +512,7 @@ export function SecondBrainPanel() {
     setPreviewMessages(prev => [...prev, { role: 'assistant', content: '' }]);
 
     try {
-      const response = await fetch(`${BRIDGE}/v1/messages`, {
+      const response = await fetch(`${BRIDGE()}/v1/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -619,7 +622,7 @@ The style guide should cover:
 Output ONLY the style guide in clean Markdown. Start with a title "# Writing Style Guide" and organize into clear sections.`;
 
     try {
-      const response = await fetch(`${BRIDGE}/v1/messages`, {
+      const response = await fetch(`${BRIDGE()}/v1/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -666,7 +669,7 @@ Output ONLY the style guide in clean Markdown. Start with a title "# Writing Sty
   const saveStyleGuide = useCallback(async () => {
     if (!styleGuideResult) return;
     try {
-      const response = await fetch(`${BRIDGE}/v1/secondbrain/setup`, {
+      const response = await fetch(`${BRIDGE()}/v1/secondbrain/setup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'save-to-workspace', filename: 'STYLE_GUIDE.md', content: styleGuideResult }),
@@ -697,7 +700,7 @@ Output ONLY the style guide in clean Markdown. Start with a title "# Writing Sty
         ? { action: 'install-skills' }  // Installs all skills including gchat
         : { action: 'install-addon', addon: addonId };
 
-      const response = await fetch(`${BRIDGE}/v1/secondbrain/setup`, {
+      const response = await fetch(`${BRIDGE()}/v1/secondbrain/setup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),

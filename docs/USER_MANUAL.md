@@ -1,6 +1,6 @@
 # ArcadIA Editor — User Manual
 
-**Version 3.5.0** | Last updated: March 2026
+**Version 3.6.0** | Last updated: March 2026
 
 ArcadIA Editor is a web-based interface for Claude AI, designed specifically for Meta employees. It connects to Claude Code on your laptop through a lightweight local bridge, so you get full Claude access with zero API keys and zero VPN required. This manual covers every feature, panel, and workflow available in the app.
 
@@ -13,9 +13,12 @@ ArcadIA Editor is a web-based interface for Claude AI, designed specifically for
 3. [Interface Modes](#3-interface-modes)
 4. [Simple Mode](#4-simple-mode)
 5. [Engineer Mode](#5-engineer-mode)
+   - [Terminal Tab — Commands, Claude, & Second Brain](#terminal-tab)
 6. [Second Brain](#6-second-brain)
+   - [Remote Second Brain (Windows Users)](#remote-second-brain-windows-users)
 7. [Sidebar & Conversations](#7-sidebar--conversations)
 8. [Settings](#8-settings)
+   - [Remote Second Brain Configuration](#remote-second-brain)
 9. [Skills & Templates](#9-skills--templates)
 10. [Integrations](#10-integrations)
 11. [Analytics](#11-analytics)
@@ -208,7 +211,32 @@ An autonomous code quality system inspired by the GSD Auto-Worker pattern. It ru
 Every API request and response logged with timestamps, raw JSON, token counts, and timing metrics. Useful for debugging prompts and understanding Claude's behavior.
 
 ### Terminal tab
-An interactive terminal emulator with command history. Runs commands locally through the bridge on your machine.
+An interactive terminal emulator with command history and built-in Claude integration. Any input that is not a recognized built-in command is automatically sent to Claude as a prompt, with the response streamed token-by-token into the terminal output.
+
+**Built-in commands:**
+
+| Command | Description |
+|---|---|
+| `help` | Show all available commands |
+| `ls` | List files in the current directory |
+| `pwd` | Print working directory |
+| `cat <file>` | Display file contents |
+| `clear` | Clear the terminal screen |
+| `stop` | Cancel an active Claude response mid-stream |
+| `reset` | Clear conversation memory (start fresh context) |
+| `memory` | Show current conversation memory stats |
+| `brain <command>` | Send a slash command or query to Second Brain (e.g., `brain /daily-brief`) |
+
+**Conversation memory:** The terminal maintains a rolling conversation history so Claude remembers context across commands within the same session. Each user prompt and Claude response is accumulated, enabling multi-turn conversations. Use `reset` to clear memory and start fresh, or `memory` to see how many messages are stored.
+
+**Claude integration:** When you type a natural language question or request (e.g., "explain this error" or "write a Python script for..."), it is sent directly to Claude. The response streams in real-time with a thinking indicator showing elapsed time. After completion, token counts, response time, TTFT, and effort level are displayed.
+
+**Second Brain from Terminal:** The `brain` command routes queries to your Second Brain instance via the bridge. For example:
+- `brain /daily-brief` — Run your morning briefing
+- `brain /eod` — End-of-day summary
+- `brain summarize my open threads` — Natural language query to Second Brain
+
+This works with both local and remote bridge connections (see [Remote Second Brain](#remote-second-brain-windows-users)).
 
 ### Debug tab
 Raw debug console showing internal state, connection diagnostics, and error traces.
@@ -288,6 +316,71 @@ This ensures Claude matches your tone and style across all writing tasks.
 
 The **"Install Automatically"** button in the Second Brain panel detects your OS and runs the appropriate package manager command (`brew` on macOS, `winget` on Windows). You can also install these manually using the commands above.
 
+### Remote Second Brain (Windows users)
+
+If you are a Windows user with Second Brain configured and running on a remote machine (such as a Mac laptop or an OnDemand devserver), you can access it from ArcadIA on your Windows PC without needing a local Second Brain installation. This is an **additional option** that does not replace the standard local setup.
+
+**How it works:**
+
+The ArcadIA Bridge on your remote machine exposes the same HTTP API that ArcadIA uses locally. By configuring a remote bridge URL in Settings, ArcadIA redirects all bridge communication (health checks, detection, messages, setup) to the remote machine instead of `localhost:8087`.
+
+```
+Windows PC (ArcadIA in browser)  ──HTTP──▶  Remote machine:8087 (Bridge)  ──▶  Claude Code + Second Brain
+```
+
+**Prerequisites:**
+
+1. Second Brain must be fully set up on the remote machine (Claude Code installed, Google Drive workspace configured, CLAUDE.md present)
+2. The ArcadIA Bridge must be running on the remote machine with network access enabled
+3. The remote machine must be reachable from your Windows PC (same network, VPN, or port forwarding)
+
+**Setup steps:**
+
+1. **On the remote machine**, start the bridge with the `--host 0.0.0.0` flag to accept connections from other devices:
+
+   ```bash
+   cd ~/Arcadia && node bridge/arcadia-bridge.js --host 0.0.0.0
+   ```
+
+   Alternatively, if the bridge is already running as a LaunchAgent, you may need to modify the launch configuration to bind to `0.0.0.0` instead of `127.0.0.1`.
+
+2. **Find the remote machine's IP address or hostname.** For an OnDemand devserver, this is typically the devserver hostname. For a Mac on the same network, use `ifconfig` to find the local IP.
+
+3. **In ArcadIA on your Windows PC**, go to **Settings** (gear icon in the sidebar) and scroll down to the **Remote Second Brain** section.
+
+4. **Enable the toggle** "Use remote bridge instead of localhost".
+
+5. **Enter the remote bridge URL**, for example:
+   - `http://192.168.1.50:8087` (local network IP)
+   - `http://my-devserver.corp.example.com:8087` (corporate hostname)
+
+6. **Click "Test"** to verify the connection. A green checkmark with latency indicates success.
+
+7. **Navigate to the Second Brain panel** (🧠 icon). It should now detect and display the remote machine's Second Brain setup, including all slash commands, workspace status, and add-ons.
+
+**Using Second Brain remotely:**
+
+Once configured, all Second Brain features work identically to a local setup:
+
+- Slash command cards in the Second Brain panel execute on the remote machine
+- The Terminal `brain` command routes to the remote bridge (e.g., `brain /daily-brief`)
+- Style guide analysis and add-on installation run on the remote machine
+- Chat messages in Simple and Engineer mode go through the remote bridge
+
+**Switching between local and remote:**
+
+You can toggle the remote bridge on and off in Settings at any time. When disabled, ArcadIA reverts to `localhost:8087` (your local bridge). This makes it easy to switch between using your local machine and a remote server.
+
+**Troubleshooting remote connections:**
+
+| Issue | Solution |
+|---|---|
+| "Connection timed out" | Verify the remote machine is reachable: `ping <hostname>`. Check that port 8087 is not blocked by a firewall. |
+| "Connection refused" | Ensure the bridge is running on the remote machine with `--host 0.0.0.0`. Check with `curl http://<remote>:8087/health`. |
+| "CORS error" in browser console | The bridge (v3.5.0+) includes CORS headers by default. If using an older version, update the bridge. |
+| High latency (>500ms) | Expected for remote connections over VPN. Consider using a devserver geographically closer to you. |
+| Second Brain panel shows "Bridge Not Connected" | Make sure the toggle in Settings is enabled and the URL is correct. Click "Retry Connection" in the panel. |
+
 ---
 
 ## 7. Sidebar & Conversations
@@ -345,6 +438,16 @@ For each connection, you can configure:
 - **Temperature** — Response creativity (0.0 = deterministic, 1.0 = creative)
 - **Extended thinking** — Enable Claude's chain-of-thought reasoning (Sonnet 4+ and Opus 4+ only)
 - **Thinking budget** — Token budget for extended thinking (default: 10,000)
+
+### Remote Second Brain
+
+The Settings panel includes a **Remote Second Brain** section at the bottom for Windows users who have Second Brain running on a remote machine. This section lets you:
+
+1. **Enable/disable** the remote bridge with a toggle checkbox
+2. **Enter the remote bridge URL** (e.g., `http://devserver:8087`)
+3. **Test the connection** with a one-click test button that reports latency
+
+When enabled, all bridge communication across the entire app (Second Brain panel, chat, terminal, integrations) is redirected to the remote URL. When disabled, it reverts to `localhost:8087`. See the [Remote Second Brain](#remote-second-brain-windows-users) section under Second Brain for full setup instructions.
 
 ### Available models
 

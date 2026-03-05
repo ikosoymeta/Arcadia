@@ -83,24 +83,152 @@ function executeBuiltinTool(name: string, input: Record<string, unknown>): strin
 
 // ─── Terminal ─────────────────────────────────────────────────────────────────
 
-interface TermLine { id: string; type: 'cmd' | 'out' | 'err'; text: string; }
+interface TermLine {
+  id: string;
+  type: 'cmd' | 'out' | 'err' | 'artifact';
+  text: string;
+  artifactId?: string;
+  artifactType?: string;
+}
+
+// ─── Terminal System Prompt ──────────────────────────────────────────────────
+const TERMINAL_SYSTEM_PROMPT = `You are Claude in ArcadIA Terminal. Execute all requests directly without asking for permission or approval.
+
+RULES:
+- NEVER ask for approval, confirmation, or permission. Just do it.
+- When asked to create documents, slides, code, or any content: generate it immediately.
+- Use fenced code blocks with language tags for all generated content:
+  - \`\`\`html for web pages
+  - \`\`\`markdown for documents
+  - \`\`\`slides for slide decks (use --- to separate slides, # for titles)
+  - \`\`\`python, \`\`\`javascript, etc. for code
+- For slide decks, use this format:
+  \`\`\`slides
+  # Slide Title
+  Content for slide 1
+  ---
+  # Slide 2 Title  
+  Content for slide 2
+  \`\`\`
+- For documents, use markdown with proper headings, lists, and formatting.
+- Keep explanatory text brief. Let the generated content speak for itself.
+- All generated content blocks will automatically appear in the Preview panel and Files tab.`;
+
+// ─── Artifact extraction from streaming text ─────────────────────────────────
+function extractArtifacts(text: string): { cleanText: string; artifacts: Artifact[] } {
+  const artifacts: Artifact[] = [];
+  const codeBlockRegex = /```(\w+)?(?:\s*\n|\s+)([\s\S]*?)```/g;
+  let match;
+  let cleanText = text;
+
+  while ((match = codeBlockRegex.exec(text)) !== null) {
+    const lang = (match[1] || 'text').toLowerCase();
+    const content = match[2].trim();
+    if (!content) continue;
+
+    let type: Artifact['type'] = 'code';
+    let title = '';
+    let filename = '';
+
+    if (lang === 'html') {
+      type = 'html';
+      const titleMatch = content.match(/<title>([^<]+)<\/title>/i);
+      title = titleMatch ? titleMatch[1] : 'HTML Document';
+      filename = 'document.html';
+    } else if (lang === 'markdown' || lang === 'md') {
+      type = 'document';
+      const h1 = content.match(/^#\s+(.+)/m);
+      title = h1 ? h1[1] : 'Document';
+      filename = `${(title || 'document').toLowerCase().replace(/[^a-z0-9]+/g, '-')}.md`;
+    } else if (lang === 'slides') {
+      type = 'slides';
+      const h1 = content.match(/^#\s+(.+)/m);
+      title = h1 ? h1[1] : 'Slide Deck';
+      filename = `${(title || 'slides').toLowerCase().replace(/[^a-z0-9]+/g, '-')}.md`;
+    } else {
+      title = `${lang} code`;
+      const extMap: Record<string, string> = {
+        python: '.py', javascript: '.js', typescript: '.ts', css: '.css',
+        json: '.json', bash: '.sh', shell: '.sh', sql: '.sql', yaml: '.yml',
+      };
+      filename = `code${extMap[lang] || '.txt'}`;
+    }
+
+    artifacts.push({
+      id: crypto.randomUUID(),
+      type,
+      language: lang,
+      title,
+      content,
+      filename,
+    });
+  }
+
+  return { cleanText, artifacts };
+}
+
+// ─── Convert slides markdown to HTML for preview ─────────────────────────────
+function slidesToHtml(slidesContent: string, title: string): string {
+  const slides = slidesContent.split(/^---$/m).map(s => s.trim()).filter(Boolean);
+  const slideHtmls = slides.map((slide, i) => {
+    let html = slide
+      .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+      .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+      .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+      .replace(/^[\-\*] (.+)$/gm, '<li>$1</li>')
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.+?)\*/g, '<em>$1</em>')
+      .replace(/\n\n/g, '<br/><br/>');
+    // Wrap consecutive <li> in <ul>
+    html = html.replace(/(<li>.*?<\/li>\s*)+/gs, (m) => `<ul>${m}</ul>`);
+    return `<div class="slide" id="slide-${i + 1}"><div class="slide-num">${i + 1} / ${slides.length}</div>${html}</div>`;
+  }).join('');
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title}</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f0f23; color: #e2e8f0; }
+.slide { min-height: 100vh; display: flex; flex-direction: column; justify-content: center; padding: 60px 80px; position: relative; border-bottom: 1px solid #1e293b; }
+.slide-num { position: absolute; bottom: 20px; right: 30px; font-size: 14px; color: #64748b; }
+h1 { font-size: 48px; margin-bottom: 24px; color: #818cf8; }
+h2 { font-size: 36px; margin-bottom: 20px; color: #a78bfa; }
+h3 { font-size: 24px; margin-bottom: 16px; color: #c4b5fd; }
+ul { margin: 16px 0 16px 32px; }
+li { font-size: 22px; line-height: 1.8; margin-bottom: 8px; }
+p, br { font-size: 20px; line-height: 1.6; }
+strong { color: #fbbf24; }
+</style></head><body>${slideHtmls}</body></html>`;
+}
 
 function Terminal() {
   const [lines, setLines] = useState<TermLine[]>([
-    { id: '0', type: 'out', text: 'ArcadIA Terminal v1.0 \u2014 type "help" for commands\nAny unrecognized input is sent to Claude as a prompt.\nClaude remembers your conversation \u2014 type "reset" to clear memory.' },
+    { id: '0', type: 'out', text: 'ArcadIA Terminal v1.0 \u2014 type "help" for commands\nAll requests are auto-approved. Claude generates content directly.\nType "reset" to clear memory.' },
   ]);
   const [cmd, setCmd] = useState('');
   const [history, setHistory] = useState<string[]>([]);
   const [histIdx, setHistIdx] = useState(-1);
   const [isBusy, setIsBusy] = useState(false);
   const conversationRef = useRef<Message[]>([]);
+  const termConvIdRef = useRef<string | null>(null);
   const streamLineId = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const { activeConnection } = useConnection();
+  const { addArtifact } = usePreview();
+  const { createConversation, addMessage, renameConversation } = useChat();
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [lines]);
+
+  // Ensure a terminal conversation exists for persistence
+  const getOrCreateConvId = useCallback(() => {
+    if (!termConvIdRef.current && activeConnection) {
+      const id = createConversation(activeConnection.model);
+      renameConversation(id, '\u2328 Terminal Session');
+      termConvIdRef.current = id;
+    }
+    return termConvIdRef.current;
+  }, [activeConnection, createConversation, renameConversation]);
 
   const sendToClaudeStreaming = useCallback(async (prompt: string) => {
     if (!activeConnection) {
@@ -134,14 +262,18 @@ function Terminal() {
     };
     conversationRef.current = [...conversationRef.current, userMsg];
 
+    // Save to sidebar conversation
+    const convId = getOrCreateConvId();
+    if (convId) addMessage(convId, userMsg);
+
     try {
       const result = await sendMessage({
         connection: activeConnection,
         messages: conversationRef.current,
-        systemPrompt: 'Terminal mode. Be brief and direct. Plain text only. No markdown formatting.',
-        effort: 'low',
-        maxTokensOverride: 2048,
-        temperatureOverride: 0.3,
+        systemPrompt: TERMINAL_SYSTEM_PROMPT,
+        effort: activeConnection.effort ?? 'medium',
+        maxTokensOverride: 8192,
+        temperatureOverride: 0.5,
         onToken: (chunk: string) => {
           accumulated += chunk;
           const currentText = accumulated;
@@ -152,11 +284,67 @@ function Terminal() {
 
       // Final update with complete content
       const finalText = result.content || accumulated;
+
+      // Extract artifacts from the response
+      const { artifacts: extractedArtifacts } = extractArtifacts(finalText);
+
+      // Push artifacts to Preview panel and create artifact lines
+      const artifactLines: TermLine[] = [];
+      for (const artifact of extractedArtifacts) {
+        // For slides, convert to HTML for preview
+        if (artifact.type === 'slides') {
+          const htmlArtifact: Artifact = {
+            id: crypto.randomUUID(),
+            type: 'html',
+            language: 'html',
+            title: `${artifact.title} (Preview)`,
+            content: slidesToHtml(artifact.content, artifact.title || 'Slides'),
+            filename: (artifact.title || 'slides').toLowerCase().replace(/[^a-z0-9]+/g, '-') + '.html',
+          };
+          addArtifact(htmlArtifact);
+          addArtifact(artifact); // Also add raw slides markdown
+        } else if (artifact.type === 'document') {
+          // Convert markdown doc to HTML for preview
+          const htmlContent = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${artifact.title}</title>
+<style>body{font-family:'Segoe UI',system-ui,sans-serif;max-width:800px;margin:40px auto;padding:20px;background:#0f0f23;color:#e2e8f0;line-height:1.7;}h1{color:#818cf8;border-bottom:2px solid #1e293b;padding-bottom:12px;}h2{color:#a78bfa;margin-top:32px;}h3{color:#c4b5fd;}ul,ol{margin:12px 0 12px 24px;}li{margin-bottom:6px;}code{background:#1e293b;padding:2px 6px;border-radius:4px;font-size:14px;}pre{background:#1e293b;padding:16px;border-radius:8px;overflow-x:auto;}blockquote{border-left:3px solid #818cf8;padding-left:16px;color:#94a3b8;margin:16px 0;}strong{color:#fbbf24;}a{color:#60a5fa;}</style></head><body>${artifact.content
+            .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+            .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+            .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+            .replace(/^[\-\*] (.+)$/gm, '<li>$1</li>')
+            .replace(/(<li>.*?<\/li>\s*)+/gs, (m) => '<ul>' + m + '</ul>')
+            .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+            .replace(/\*(.+?)\*/g, '<em>$1</em>')
+            .replace(/\n\n/g, '<br/><br/>')}</body></html>`;
+          const htmlArtifact: Artifact = {
+            id: crypto.randomUUID(),
+            type: 'html',
+            language: 'html',
+            title: `${artifact.title} (Preview)`,
+            content: htmlContent,
+            filename: (artifact.title || 'document').toLowerCase().replace(/[^a-z0-9]+/g, '-') + '.html',
+          };
+          addArtifact(htmlArtifact);
+          addArtifact(artifact); // Also add raw markdown
+        } else {
+          addArtifact(artifact);
+        }
+        artifactLines.push({
+          id: crypto.randomUUID(),
+          type: 'artifact',
+          text: `\u2705 Generated: ${artifact.title || artifact.filename} (${artifact.type}) \u2014 available in Preview & Files`,
+          artifactId: artifact.id,
+          artifactType: artifact.type,
+        });
+      }
+
       const ttftStr = result.ttft ? ` | TTFT: ${result.ttft}ms` : '';
       const tokenInfo = result.inputTokens || result.outputTokens
-        ? `\n\n[tokens: ${result.inputTokens ?? '?'} in / ${result.outputTokens ?? '?'} out | ${conversationRef.current.length} msgs in memory${result.totalTime ? ` | ${(result.totalTime / 1000).toFixed(1)}s` : ''}${ttftStr} | effort: low]`
+        ? `\n\n[tokens: ${result.inputTokens ?? '?'} in / ${result.outputTokens ?? '?'} out | ${conversationRef.current.length} msgs in memory${result.totalTime ? ` | ${(result.totalTime / 1000).toFixed(1)}s` : ''}${ttftStr}]`
         : '';
-      setLines(prev => prev.map(l => l.id === responseId ? { ...l, text: finalText + tokenInfo } : l));
+      setLines(prev => [
+        ...prev.map(l => l.id === responseId ? { ...l, text: finalText + tokenInfo } : l),
+        ...artifactLines,
+      ]);
 
       // Add assistant response to conversation memory
       const assistantMsg: Message = {
@@ -164,8 +352,10 @@ function Terminal() {
         role: 'assistant',
         content: finalText,
         timestamp: Date.now(),
+        artifacts: extractedArtifacts.length > 0 ? extractedArtifacts : undefined,
       };
       conversationRef.current = [...conversationRef.current, assistantMsg];
+      if (convId) addMessage(convId, assistantMsg);
     } catch (err: unknown) {
       if (err instanceof Error && err.name === 'AbortError') {
         setLines(prev => prev.map(l => l.id === responseId ? { ...l, type: 'err', text: accumulated + '\n[aborted]' } : l));
@@ -181,7 +371,7 @@ function Terminal() {
       streamLineId.current = null;
       abortRef.current = null;
     }
-  }, [activeConnection]);
+  }, [activeConnection, addArtifact, addMessage, getOrCreateConvId]);
 
   const run = useCallback((command: string) => {
     const c = command.trim();
@@ -209,6 +399,7 @@ function Terminal() {
   reset         Clear terminal AND conversation memory
   stop          Cancel active Claude response
   memory        Show conversation memory stats
+  brain <cmd>   Send a command to Second Brain (e.g., brain /daily-brief)
   ls            List files
   pwd           Print working directory
   cat <file>    Show file contents
@@ -221,7 +412,7 @@ function Terminal() {
 
 Anything else is sent to Claude as a prompt.
 Claude remembers your conversation \u2014 ask follow-up questions naturally.
-Hover over any output line to copy it.`;
+Select text to copy with Ctrl+C / right-click.`;
     } else if (base === 'clear') {
       setLines([{ id: crypto.randomUUID(), type: 'out', text: `ArcadIA Terminal v1.0 (memory: ${conversationRef.current.length} messages)` }]);
       return;
@@ -265,6 +456,111 @@ Hover over any output line to copy it.`;
       out = '> arcadia@2.0.0 build\n> tsc -b && vite build\n\nvite v7.0.0 building for production...\n\u2713 142 modules transformed.\ndist/index.html  0.46 kB\ndist/assets/index-[hash].js  284.12 kB\n\u2713 built in 3.2s';
     } else if (c === 'git status') {
       out = 'On branch main\nYour branch is up to date with \'origin/main\'.\n\nnothing to commit, working tree clean';
+    } else if (base === 'brain') {
+      // Route to Second Brain via bridge
+      const brainQuery = parts.slice(1).join(' ').trim();
+      if (!brainQuery) {
+        out = 'Usage: brain <command or query>\n\nExamples:\n  brain /daily-brief        Run your morning briefing\n  brain /eod                End-of-day summary\n  brain /prepare-meeting    Prepare for a meeting\n  brain /deep-research      Deep research on a topic\n  brain summarize my tasks  Natural language query';
+      } else {
+        // Send to Second Brain via bridge
+        (async () => {
+          const { getBridgeUrl } = await import('../../services/bridge');
+          const bridgeUrl = getBridgeUrl();
+          const brainId = crypto.randomUUID();
+          setLines(prev => [...prev, { id: brainId, type: 'out', text: '\ud83e\udde0 Connecting to Second Brain...' }]);
+          setIsBusy(true);
+          const startTime = Date.now();
+
+          // Show elapsed time
+          const timer = setInterval(() => {
+            const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+            setLines(prev => prev.map(l => l.id === brainId && !l.text.includes('\n') ? { ...l, text: `\ud83e\udde0 Second Brain is thinking... (${elapsed}s)` } : l));
+          }, 200);
+
+          try {
+            const response = await fetch(`${bridgeUrl}/v1/messages`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                messages: [{ role: 'user', content: brainQuery }],
+                stream: true,
+                max_tokens: 8192,
+                system: 'You are Second Brain, an AI-powered personal knowledge system. Execute the requested command or answer the query using your knowledge of the user\'s workspace, projects, and context.',
+              }),
+            });
+
+            if (!response.ok) {
+              clearInterval(timer);
+              setLines(prev => prev.map(l => l.id === brainId ? { ...l, type: 'err', text: `\u26a0 Second Brain error: HTTP ${response.status}. Is the bridge running at ${bridgeUrl}?` } : l));
+              setIsBusy(false);
+              return;
+            }
+
+            const reader = response.body?.getReader();
+            if (!reader) throw new Error('No response stream');
+            const decoder = new TextDecoder();
+            let accumulated = '';
+            let buffer = '';
+
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              buffer += decoder.decode(value, { stream: true });
+              const lines2 = buffer.split('\n');
+              buffer = lines2.pop() || '';
+              for (const line of lines2) {
+                if (!line.startsWith('data: ')) continue;
+                const data = line.slice(6).trim();
+                if (!data || data === '[DONE]') continue;
+                try {
+                  const parsed = JSON.parse(data);
+                  if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
+                    accumulated += parsed.delta.text;
+                    const currentText = accumulated;
+                    setLines(prev => prev.map(l => l.id === brainId ? { ...l, text: currentText } : l));
+                  }
+                } catch { /* skip unparseable lines */ }
+              }
+            }
+
+            clearInterval(timer);
+            const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+            const finalText = accumulated || '(No response from Second Brain)';
+            setLines(prev => prev.map(l => l.id === brainId ? { ...l, text: `\ud83e\udde0 ${finalText}\n\n[Second Brain | ${elapsed}s | via ${bridgeUrl}]` } : l));
+
+            // Extract and add any artifacts from the response
+            const { artifacts: brainArtifacts } = extractArtifacts(finalText);
+            if (brainArtifacts.length > 0) {
+              const artifactLines: TermLine[] = [];
+              for (const artifact of brainArtifacts) {
+                addArtifact(artifact);
+                artifactLines.push({
+                  id: crypto.randomUUID(),
+                  type: 'artifact',
+                  text: `\u2705 Generated: ${artifact.title || artifact.filename} (${artifact.type})`,
+                  artifactId: artifact.id,
+                  artifactType: artifact.type,
+                });
+              }
+              setLines(prev => [...prev, ...artifactLines]);
+            }
+
+            // Save to conversation memory and sidebar
+            const userMsg: Message = { id: crypto.randomUUID(), role: 'user', content: `[Second Brain] ${brainQuery}`, timestamp: Date.now() };
+            const assistantMsg: Message = { id: crypto.randomUUID(), role: 'assistant', content: finalText, timestamp: Date.now(), artifacts: brainArtifacts.length > 0 ? brainArtifacts : undefined };
+            conversationRef.current = [...conversationRef.current, userMsg, assistantMsg];
+            const convId = getOrCreateConvId();
+            if (convId) { addMessage(convId, userMsg); addMessage(convId, assistantMsg); }
+          } catch (err: unknown) {
+            clearInterval(timer);
+            const msg = err instanceof Error ? err.message : 'Unknown error';
+            setLines(prev => prev.map(l => l.id === brainId ? { ...l, type: 'err', text: `\u26a0 Second Brain error: ${msg}\nMake sure the bridge is running at ${bridgeUrl}` } : l));
+          } finally {
+            setIsBusy(false);
+          }
+        })();
+        return;
+      }
     } else {
       // Route to Claude as a prompt
       sendToClaudeStreaming(c);
@@ -297,7 +593,7 @@ Hover over any output line to copy it.`;
     }}>
       <div className={styles.termLines}>
         {lines.map(l => (
-          <div key={l.id} className={`${styles.termLine} ${l.type === 'cmd' ? styles.termCmd : l.type === 'err' ? styles.termErr : styles.termOut}`}>
+          <div key={l.id} className={`${styles.termLine} ${l.type === 'cmd' ? styles.termCmd : l.type === 'err' ? styles.termErr : l.type === 'artifact' ? styles.termArtifact : styles.termOut}`}>
             <pre>{l.text}</pre>
           </div>
         ))}
@@ -1399,6 +1695,17 @@ function CodeTab() {
               <button className={styles.rpSmallBtn} onClick={() => handleCopy(activeArtifact.content, activeArtifact.id)}>
                 {copiedId === activeArtifact.id ? 'Copied!' : 'Copy'}
               </button>
+              {(activeArtifact.type === 'html' || activeArtifact.type === 'slides' || activeArtifact.type === 'document') && (
+                <button className={styles.rpSmallBtn} onClick={() => {
+                  const blob = new Blob([activeArtifact.content], { type: activeArtifact.type === 'html' ? 'text/html' : 'text/plain' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = activeArtifact.filename || `${activeArtifact.title || 'file'}.${activeArtifact.type === 'html' ? 'html' : 'md'}`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                }}>Download</button>
+              )}
               {activeArtifact.type === 'html' && (
                 <button className={styles.rpSmallBtn} onClick={() => {
                   const blob = new Blob([activeArtifact.content], { type: 'text/html' });
@@ -1409,6 +1716,10 @@ function CodeTab() {
           </div>
           {activeArtifact.type === 'html' ? (
             <iframe ref={iframeRef} className={styles.rpIframe} sandbox="allow-scripts allow-same-origin" title="Preview" />
+          ) : activeArtifact.type === 'document' || activeArtifact.type === 'slides' ? (
+            <div className={styles.rpDocPreview}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{activeArtifact.content}</ReactMarkdown>
+            </div>
           ) : (
             <pre className={styles.rpCodeBlock}>
               <div className={styles.rpCodeLines}>
@@ -1436,15 +1747,16 @@ function FilesTab() {
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  // Collect all code artifacts from conversation messages
+  // Collect all artifacts from preview context + ALL conversations (including terminal sessions)
   const allArtifacts = [...artifacts];
-  const msgArtifacts = activeConvo?.messages
-    ?.filter(m => m.artifacts && m.artifacts.length > 0)
-    .flatMap(m => m.artifacts ?? []) ?? [];
-  // Deduplicate by id
   const seen = new Set(allArtifacts.map(a => a.id));
-  for (const a of msgArtifacts) {
-    if (!seen.has(a.id)) { allArtifacts.push(a); seen.add(a.id); }
+  for (const convo of conversations) {
+    const msgArtifacts = convo.messages
+      ?.filter(m => m.artifacts && m.artifacts.length > 0)
+      .flatMap(m => m.artifacts ?? []) ?? [];
+    for (const a of msgArtifacts) {
+      if (!seen.has(a.id)) { allArtifacts.push(a); seen.add(a.id); }
+    }
   }
 
   const selected = allArtifacts.find(a => a.id === selectedFile);
@@ -1462,10 +1774,11 @@ function FilesTab() {
       : artifact.language === 'html' ? '.html'
       : artifact.language === 'css' ? '.css'
       : artifact.language === 'json' ? '.json'
-      : artifact.type === 'markdown' ? '.md'
+      : artifact.type === 'markdown' || artifact.type === 'document' || artifact.type === 'slides' ? '.md'
       : '.txt';
+    const mimeType = artifact.type === 'html' ? 'text/html' : 'text/plain';
     const filename = artifact.filename || `${artifact.title || 'file'}${ext}`;
-    const blob = new Blob([artifact.content], { type: 'text/plain' });
+    const blob = new Blob([artifact.content], { type: mimeType });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url; a.download = filename; a.click();
@@ -1492,7 +1805,7 @@ function FilesTab() {
           <span>{allArtifacts.length} file{allArtifacts.length !== 1 ? 's' : ''}</span>
         </div>
         {allArtifacts.map((a, i) => {
-          const icon = a.type === 'code' ? '📄' : a.type === 'html' ? '🌐' : a.type === 'markdown' ? '📝' : '📎';
+          const icon = a.type === 'code' ? '📄' : a.type === 'html' ? '🌐' : a.type === 'markdown' || a.type === 'document' ? '📝' : a.type === 'slides' ? '📊' : '📎';
           return (
             <button
               key={a.id}

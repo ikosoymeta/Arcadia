@@ -167,7 +167,7 @@ export interface Message {
 
 export interface Artifact {
   id: string;
-  type: 'code' | 'markdown' | 'html' | 'image' | 'file';
+  type: 'code' | 'markdown' | 'html' | 'image' | 'file' | 'slides' | 'document';
   language?: string;
   title?: string;
   content: string;
