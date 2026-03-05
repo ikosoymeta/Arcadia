@@ -2,6 +2,8 @@
   display: flex;
   flex-direction: column;
   height: 100%;
+  flex: 1;
+  min-width: 0;
   background: var(--bg-primary);
   font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Courier New', monospace;
 }
@@ -229,6 +231,9 @@
   padding: 10px 12px;
   line-height: 1.6;
   color: var(--text-primary);
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
 }
 
 .engMsgContent p { margin: 0 0 6px; }
@@ -259,6 +264,9 @@
   word-break: break-word;
   font-family: inherit;
   font-size: 13px;
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
   color: var(--text-primary);
 }
 
@@ -726,6 +734,9 @@
   white-space: pre-wrap;
   word-break: break-all;
   font-family: inherit;
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
 }
 
 .termCmd pre { color: #e5e5e5; }
@@ -736,17 +747,18 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
-  border-top: 1px solid #1a1a1a;
-  background: #0a0a0a;
+  padding: 10px 14px;
+  border-top: 1px solid #2a2a2a;
+  background: #111111;
   flex-shrink: 0;
 }
 
 .termPrompt {
   color: #22c55e;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 700;
   flex-shrink: 0;
+  text-shadow: 0 0 6px rgba(34, 197, 94, 0.4);
 }
 
 .termInput {
@@ -754,13 +766,13 @@
   background: none;
   border: none;
   outline: none;
-  color: #e5e5e5;
-  font-size: 13px;
+  color: #f0f0f0;
+  font-size: 14px;
   font-family: inherit;
   caret-color: #22c55e;
 }
 
-.termInput::placeholder { color: #333; }
+.termInput::placeholder { color: #555; }
 
 /* ─── Debug Panel ──────────────────────────────────────────────────────────── */
 
@@ -1197,8 +1209,8 @@
 /* ─── Right Panel Workspace ──────────────────────────────────────────────── */
 
 .rpPanel {
-  width: 380px;
-  min-width: 380px;
+  flex: 1;
+  min-width: 320px;
   height: 100%;
   background: var(--bg-secondary);
   border-left: 1px solid var(--border);

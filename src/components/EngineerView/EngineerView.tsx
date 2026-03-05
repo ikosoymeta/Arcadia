@@ -87,12 +87,13 @@ interface TermLine { id: string; type: 'cmd' | 'out' | 'err'; text: string; }
 
 function Terminal() {
   const [lines, setLines] = useState<TermLine[]>([
-    { id: '0', type: 'out', text: 'ArcadIA Terminal v1.0 \u2014 type "help" for commands\nAny unrecognized input is sent to Claude as a prompt.' },
+    { id: '0', type: 'out', text: 'ArcadIA Terminal v1.0 \u2014 type "help" for commands\nAny unrecognized input is sent to Claude as a prompt.\nClaude remembers your conversation \u2014 type "reset" to clear memory.' },
   ]);
   const [cmd, setCmd] = useState('');
   const [history, setHistory] = useState<string[]>([]);
   const [histIdx, setHistIdx] = useState(-1);
   const [isBusy, setIsBusy] = useState(false);
+  const conversationRef = useRef<Message[]>([]);
   const streamLineId = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
@@ -109,23 +110,35 @@ function Terminal() {
     setIsBusy(true);
     const responseId = crypto.randomUUID();
     streamLineId.current = responseId;
-    setLines(prev => [...prev, { id: responseId, type: 'out', text: '\u23f3 Claude is thinking...' }]);
+    const startTime = Date.now();
+    setLines(prev => [...prev, { id: responseId, type: 'out', text: '\u2588 Connecting to Claude...' }]);
+
+    // Show elapsed time while waiting
+    const thinkingTimer = setInterval(() => {
+      if (!accumulated) {
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+        setLines(prev => prev.map(l => l.id === responseId && !accumulated ? { ...l, text: `\u2588 Claude is thinking... (${elapsed}s)` } : l));
+      }
+    }, 200);
 
     const controller = new AbortController();
     abortRef.current = controller;
     let accumulated = '';
 
-    try {
-      const userMsg: Message = {
-        id: crypto.randomUUID(),
-        role: 'user',
-        content: prompt,
-        timestamp: Date.now(),
-      };
+    // Add user message to conversation memory
+    const userMsg: Message = {
+      id: crypto.randomUUID(),
+      role: 'user',
+      content: prompt,
+      timestamp: Date.now(),
+    };
+    conversationRef.current = [...conversationRef.current, userMsg];
 
+    try {
       const result = await sendMessage({
         connection: activeConnection,
-        messages: [userMsg],
+        messages: conversationRef.current,
+        systemPrompt: 'You are Claude, responding in a terminal interface. Be concise and use plain text formatting. The user may ask follow-up questions that reference previous messages in this conversation.',
         onToken: (chunk: string) => {
           accumulated += chunk;
           const currentText = accumulated;
@@ -137,9 +150,18 @@ function Terminal() {
       // Final update with complete content
       const finalText = result.content || accumulated;
       const tokenInfo = result.inputTokens || result.outputTokens
-        ? `\n\n[tokens: ${result.inputTokens ?? '?'} in / ${result.outputTokens ?? '?'} out${result.totalTime ? ` | ${(result.totalTime / 1000).toFixed(1)}s` : ''}]`
+        ? `\n\n[tokens: ${result.inputTokens ?? '?'} in / ${result.outputTokens ?? '?'} out | ${conversationRef.current.length} msgs in memory${result.totalTime ? ` | ${(result.totalTime / 1000).toFixed(1)}s` : ''}]`
         : '';
       setLines(prev => prev.map(l => l.id === responseId ? { ...l, text: finalText + tokenInfo } : l));
+
+      // Add assistant response to conversation memory
+      const assistantMsg: Message = {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: finalText,
+        timestamp: Date.now(),
+      };
+      conversationRef.current = [...conversationRef.current, assistantMsg];
     } catch (err: unknown) {
       if (err instanceof Error && err.name === 'AbortError') {
         setLines(prev => prev.map(l => l.id === responseId ? { ...l, type: 'err', text: accumulated + '\n[aborted]' } : l));
@@ -147,7 +169,10 @@ function Terminal() {
         const msg = err instanceof Error ? err.message : 'Unknown error';
         setLines(prev => prev.map(l => l.id === responseId ? { ...l, type: 'err', text: `Error: ${msg}` } : l));
       }
+      // Remove the user message from memory if the request failed
+      conversationRef.current = conversationRef.current.filter(m => m.id !== userMsg.id);
     } finally {
+      clearInterval(thinkingTimer);
       setIsBusy(false);
       streamLineId.current = null;
       abortRef.current = null;
@@ -176,8 +201,10 @@ function Terminal() {
     if (base === 'help') {
       out = `Available commands:
   help          Show this help
-  clear         Clear terminal
+  clear         Clear terminal (keeps memory)
+  reset         Clear terminal AND conversation memory
   stop          Cancel active Claude response
+  memory        Show conversation memory stats
   ls            List files
   pwd           Print working directory
   cat <file>    Show file contents
@@ -188,10 +215,26 @@ function Terminal() {
   npm run build Build project (simulated)
   git status    Show git status (simulated)
 
-Anything else is sent to Claude as a prompt.`;
+Anything else is sent to Claude as a prompt.
+Claude remembers your conversation \u2014 ask follow-up questions naturally.
+Hover over any output line to copy it.`;
     } else if (base === 'clear') {
-      setLines([{ id: crypto.randomUUID(), type: 'out', text: 'ArcadIA Terminal v1.0' }]);
+      setLines([{ id: crypto.randomUUID(), type: 'out', text: `ArcadIA Terminal v1.0 (memory: ${conversationRef.current.length} messages)` }]);
       return;
+    } else if (base === 'reset') {
+      conversationRef.current = [];
+      setLines([{ id: crypto.randomUUID(), type: 'out', text: 'ArcadIA Terminal v1.0 \u2014 conversation memory cleared.' }]);
+      return;
+    } else if (base === 'memory') {
+      const msgs = conversationRef.current;
+      if (msgs.length === 0) {
+        out = 'Conversation memory is empty. Start chatting to build context.';
+      } else {
+        const userCount = msgs.filter(m => m.role === 'user').length;
+        const assistantCount = msgs.filter(m => m.role === 'assistant').length;
+        const totalChars = msgs.reduce((sum, m) => sum + m.content.length, 0);
+        out = `Conversation memory:\n  ${msgs.length} total messages (${userCount} user, ${assistantCount} assistant)\n  ~${Math.round(totalChars / 4)} tokens estimated\n  Type "reset" to clear memory.`;
+      }
     } else if (base === 'ls') {
       out = 'src/  public/  package.json  vite.config.ts  README.md  PROJECT_SUMMARY.md';
     } else if (base === 'pwd') {
@@ -240,7 +283,14 @@ Anything else is sent to Claude as a prompt.`;
   };
 
   return (
-    <div className={styles.terminal} onClick={() => inputRef.current?.focus()}>
+    <div className={styles.terminal} onClick={(e) => {
+      // Only focus input if user clicked on empty space, not while selecting text
+      const selection = window.getSelection();
+      if (selection && selection.toString().length > 0) return;
+      // Don't steal focus from the copy button
+      if ((e.target as HTMLElement).tagName === 'BUTTON') return;
+      inputRef.current?.focus();
+    }}>
       <div className={styles.termLines}>
         {lines.map(l => (
           <div key={l.id} className={`${styles.termLine} ${l.type === 'cmd' ? styles.termCmd : l.type === 'err' ? styles.termErr : styles.termOut}`}>

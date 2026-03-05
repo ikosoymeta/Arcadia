@@ -41,6 +41,8 @@
   padding: 0 0 8px;
   contain: style;
   will-change: scroll-position;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .messageList {
@@ -462,6 +464,9 @@
   font-size: 14px;
   line-height: 1.7;
   max-width: 85%;
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
 }
 
 .userContent {
@@ -684,6 +689,7 @@
 
 .messageMeta {
   display: flex;
+  align-items: center;
   gap: 10px;
   font-size: 11px;
   color: var(--text-tertiary);
