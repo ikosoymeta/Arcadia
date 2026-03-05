@@ -87,19 +87,84 @@ interface TermLine { id: string; type: 'cmd' | 'out' | 'err'; text: string; }
 
 function Terminal() {
   const [lines, setLines] = useState<TermLine[]>([
-    { id: '0', type: 'out', text: 'ArcadIA Terminal v1.0 — type "help" for commands' },
+    { id: '0', type: 'out', text: 'ArcadIA Terminal v1.0 \u2014 type "help" for commands\nAny unrecognized input is sent to Claude as a prompt.' },
   ]);
   const [cmd, setCmd] = useState('');
   const [history, setHistory] = useState<string[]>([]);
   const [histIdx, setHistIdx] = useState(-1);
+  const [isBusy, setIsBusy] = useState(false);
+  const streamLineId = useRef<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const { activeConnection } = useConnection();
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [lines]);
 
-  const run = (command: string) => {
+  const sendToClaudeStreaming = useCallback(async (prompt: string) => {
+    if (!activeConnection) {
+      setLines(prev => [...prev, { id: crypto.randomUUID(), type: 'err', text: '\u26a0 No active connection. Please connect to Claude first (use the connection panel).' }]);
+      return;
+    }
+    setIsBusy(true);
+    const responseId = crypto.randomUUID();
+    streamLineId.current = responseId;
+    setLines(prev => [...prev, { id: responseId, type: 'out', text: '\u23f3 Claude is thinking...' }]);
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+    let accumulated = '';
+
+    try {
+      const userMsg: Message = {
+        id: crypto.randomUUID(),
+        role: 'user',
+        content: prompt,
+        timestamp: Date.now(),
+      };
+
+      const result = await sendMessage({
+        connection: activeConnection,
+        messages: [userMsg],
+        onToken: (chunk: string) => {
+          accumulated += chunk;
+          const currentText = accumulated;
+          setLines(prev => prev.map(l => l.id === responseId ? { ...l, text: currentText } : l));
+        },
+        signal: controller.signal,
+      });
+
+      // Final update with complete content
+      const finalText = result.content || accumulated;
+      const tokenInfo = result.inputTokens || result.outputTokens
+        ? `\n\n[tokens: ${result.inputTokens ?? '?'} in / ${result.outputTokens ?? '?'} out${result.totalTime ? ` | ${(result.totalTime / 1000).toFixed(1)}s` : ''}]`
+        : '';
+      setLines(prev => prev.map(l => l.id === responseId ? { ...l, text: finalText + tokenInfo } : l));
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        setLines(prev => prev.map(l => l.id === responseId ? { ...l, type: 'err', text: accumulated + '\n[aborted]' } : l));
+      } else {
+        const msg = err instanceof Error ? err.message : 'Unknown error';
+        setLines(prev => prev.map(l => l.id === responseId ? { ...l, type: 'err', text: `Error: ${msg}` } : l));
+      }
+    } finally {
+      setIsBusy(false);
+      streamLineId.current = null;
+      abortRef.current = null;
+    }
+  }, [activeConnection]);
+
+  const run = useCallback((command: string) => {
     const c = command.trim();
     if (!c) return;
+    if (isBusy && c === 'stop') {
+      abortRef.current?.abort();
+      return;
+    }
+    if (isBusy) {
+      setLines(prev => [...prev, { id: crypto.randomUUID(), type: 'err', text: 'Claude is still responding... type "stop" to cancel.' }]);
+      return;
+    }
     setHistory(prev => [c, ...prev.slice(0, 49)]);
     setHistIdx(-1);
     setLines(prev => [...prev, { id: crypto.randomUUID(), type: 'cmd', text: `$ ${c}` }]);
@@ -112,6 +177,7 @@ function Terminal() {
       out = `Available commands:
   help          Show this help
   clear         Clear terminal
+  stop          Cancel active Claude response
   ls            List files
   pwd           Print working directory
   cat <file>    Show file contents
@@ -120,7 +186,9 @@ function Terminal() {
   logs          Show last 5 API log entries
   npm run dev   Start dev server (simulated)
   npm run build Build project (simulated)
-  git status    Show git status (simulated)`;
+  git status    Show git status (simulated)
+
+Anything else is sent to Claude as a prompt.`;
     } else if (base === 'clear') {
       setLines([{ id: crypto.randomUUID(), type: 'out', text: 'ArcadIA Terminal v1.0' }]);
       return;
@@ -137,7 +205,7 @@ function Terminal() {
       const file = parts[1];
       if (!file) { out = 'Usage: cat <filename>'; }
       else if (file === 'package.json') { out = '{ "name": "arcadia", "version": "2.0.0", ... }'; }
-      else if (file === 'README.md') { out = '# ArcadIA — Claude Web Editor\nDual-interface AI editor powered by Claude.'; }
+      else if (file === 'README.md') { out = '# ArcadIA \u2014 Claude Web Editor\nDual-interface AI editor powered by Claude.'; }
       else { out = `cat: ${file}: No such file or directory`; }
     } else if (base === 'logs') {
       const logs = getApiLogs().slice(0, 5);
@@ -145,17 +213,19 @@ function Terminal() {
         `[${new Date(l.timestamp).toISOString()}] ${l.direction.toUpperCase()} ${l.label ?? ''}`
       ).join('\n');
     } else if (c === 'npm run dev') {
-      out = '> arcadia@2.0.0 dev\n> vite\n\n  VITE v7.0.0  ready in 312 ms\n  ➜  Local:   http://localhost:5173/Arcadia/';
+      out = '> arcadia@2.0.0 dev\n> vite\n\n  VITE v7.0.0  ready in 312 ms\n  \u279c  Local:   http://localhost:5173/Arcadia/';
     } else if (c === 'npm run build') {
-      out = '> arcadia@2.0.0 build\n> tsc -b && vite build\n\nvite v7.0.0 building for production...\n✓ 142 modules transformed.\ndist/index.html  0.46 kB\ndist/assets/index-[hash].js  284.12 kB\n✓ built in 3.2s';
+      out = '> arcadia@2.0.0 build\n> tsc -b && vite build\n\nvite v7.0.0 building for production...\n\u2713 142 modules transformed.\ndist/index.html  0.46 kB\ndist/assets/index-[hash].js  284.12 kB\n\u2713 built in 3.2s';
     } else if (c === 'git status') {
       out = 'On branch main\nYour branch is up to date with \'origin/main\'.\n\nnothing to commit, working tree clean';
     } else {
-      out = `${base}: command not found`;
+      // Route to Claude as a prompt
+      sendToClaudeStreaming(c);
+      return;
     }
 
     setLines(prev => [...prev, { id: crypto.randomUUID(), type: base === 'cat' && !parts[1] ? 'err' : 'out', text: out }]);
-  };
+  }, [isBusy, sendToClaudeStreaming]);
 
   const handleKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') { run(cmd); setCmd(''); }
@@ -180,7 +250,7 @@ function Terminal() {
         <div ref={endRef} />
       </div>
       <div className={styles.termInputRow}>
-        <span className={styles.termPrompt}>$</span>
+        <span className={styles.termPrompt}>{isBusy ? '\u23f3' : '$'}</span>
         <input
           ref={inputRef}
           className={styles.termInput}
@@ -189,7 +259,7 @@ function Terminal() {
           onKeyDown={handleKey}
           spellCheck={false}
           autoComplete="off"
-          placeholder="Enter command..."
+          placeholder={isBusy ? 'Claude is responding... type "stop" to cancel' : 'Enter command or ask Claude anything...'}
         />
       </div>
     </div>
