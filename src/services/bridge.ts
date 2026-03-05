@@ -58,8 +58,8 @@ export function isRemoteBridge(): boolean {
   return config.enabled && !!config.url.trim();
 }
 
-/** Test bridge connectivity */
-export async function testBridgeConnection(url?: string): Promise<{ ok: boolean; latency: number; error?: string }> {
+/** Test bridge connectivity — returns version, platform, and pool info when available */
+export async function testBridgeConnection(url?: string): Promise<{ ok: boolean; latency: number; version?: string; platform?: string; error?: string }> {
   const target = url || getBridgeUrl();
   const start = performance.now();
   try {
@@ -69,7 +69,12 @@ export async function testBridgeConnection(url?: string): Promise<{ ok: boolean;
     clearTimeout(timeout);
     const latency = Math.round(performance.now() - start);
     if (response.ok) {
-      return { ok: true, latency };
+      try {
+        const data = await response.json();
+        return { ok: true, latency, version: data.version, platform: data.platform };
+      } catch {
+        return { ok: true, latency };
+      }
     }
     return { ok: false, latency, error: `HTTP ${response.status}` };
   } catch (e: any) {
@@ -79,4 +84,24 @@ export async function testBridgeConnection(url?: string): Promise<{ ok: boolean;
     }
     return { ok: false, latency, error: e.message || 'Connection failed' };
   }
+}
+
+/** Normalize a user-entered URL: add http:// if missing, remove trailing slash */
+export function normalizeBridgeUrl(input: string): string {
+  let url = input.trim();
+  if (!url) return '';
+  // Add http:// if no protocol specified
+  if (!/^https?:\/\//i.test(url)) {
+    url = `http://${url}`;
+  }
+  // Remove trailing slashes
+  url = url.replace(/\/+$/, '');
+  // Add default port if none specified
+  try {
+    const parsed = new URL(url);
+    if (!parsed.port && !url.includes(':80') && !url.includes(':443')) {
+      url = `${parsed.protocol}//${parsed.hostname}:8087`;
+    }
+  } catch { /* keep as-is if URL parsing fails */ }
+  return url;
 }

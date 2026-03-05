@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useConnection } from '../../store/ConnectionContext';
 import { CLAUDE_MODELS, getModelInfo } from '../../types';
-import { getRemoteBridgeConfig, setRemoteBridgeConfig, testBridgeConnection, type RemoteBridgeConfig } from '../../services/bridge';
+import { getRemoteBridgeConfig, setRemoteBridgeConfig, testBridgeConnection, normalizeBridgeUrl, type RemoteBridgeConfig } from '../../services/bridge';
 import styles from './Settings.module.css';
 
 type ConnectionType = 'apikey' | 'proxy';
@@ -38,8 +38,11 @@ export function SettingsPanel() {
 
   // Remote Bridge state
   const [remoteBridge, setRemoteBridge] = useState<RemoteBridgeConfig>(() => getRemoteBridgeConfig());
-  const [bridgeTestResult, setBridgeTestResult] = useState<{ ok: boolean; latency: number; error?: string } | null>(null);
+  const [bridgeTestResult, setBridgeTestResult] = useState<{ ok: boolean; latency: number; version?: string; platform?: string; error?: string } | null>(null);
   const [bridgeTesting, setBridgeTesting] = useState(false);
+  const [bridgeUrlInput, setBridgeUrlInput] = useState(() => getRemoteBridgeConfig().url);
+  const autoTestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [copiedCmd, setCopiedCmd] = useState(false);
 
   const handleBridgeToggle = (enabled: boolean) => {
     const updated = { ...remoteBridge, enabled };
@@ -48,20 +51,59 @@ export function SettingsPanel() {
     setBridgeTestResult(null);
   };
 
-  const handleBridgeUrlChange = (url: string) => {
-    const updated = { ...remoteBridge, url };
-    setRemoteBridge(updated);
-    setRemoteBridgeConfig(updated);
+  const handleBridgeUrlInput = (raw: string) => {
+    setBridgeUrlInput(raw);
     setBridgeTestResult(null);
+    // Auto-test after 1.5s of no typing
+    if (autoTestTimer.current) clearTimeout(autoTestTimer.current);
+    if (raw.trim().length > 5) {
+      autoTestTimer.current = setTimeout(async () => {
+        const normalized = normalizeBridgeUrl(raw);
+        if (!normalized) return;
+        setBridgeTesting(true);
+        const result = await testBridgeConnection(normalized);
+        setBridgeTestResult(result);
+        setBridgeTesting(false);
+        // Auto-enable on successful test
+        if (result.ok) {
+          const updated = { enabled: true, url: normalized };
+          setRemoteBridge(updated);
+          setRemoteBridgeConfig(updated);
+          setBridgeUrlInput(normalized);
+        }
+      }, 1500);
+    }
   };
 
   const handleBridgeTest = async () => {
-    if (!remoteBridge.url.trim()) return;
+    const normalized = normalizeBridgeUrl(bridgeUrlInput);
+    if (!normalized) return;
     setBridgeTesting(true);
     setBridgeTestResult(null);
-    const result = await testBridgeConnection(remoteBridge.url.trim().replace(/\/+$/, ''));
+    const result = await testBridgeConnection(normalized);
     setBridgeTestResult(result);
     setBridgeTesting(false);
+    // Auto-enable on success
+    if (result.ok) {
+      const updated = { enabled: true, url: normalized };
+      setRemoteBridge(updated);
+      setRemoteBridgeConfig(updated);
+      setBridgeUrlInput(normalized);
+    }
+  };
+
+  const handleDisconnectRemote = () => {
+    const updated = { enabled: false, url: '' };
+    setRemoteBridge(updated);
+    setRemoteBridgeConfig(updated);
+    setBridgeUrlInput('');
+    setBridgeTestResult(null);
+  };
+
+  const copyBridgeCommand = () => {
+    navigator.clipboard.writeText('cd ~/Arcadia && node bridge/arcadia-bridge.js --host 0.0.0.0');
+    setCopiedCmd(true);
+    setTimeout(() => setCopiedCmd(false), 2000);
   };
 
   const selectedModelInfo = getModelInfo(formData.model);
@@ -488,78 +530,114 @@ export function SettingsPanel() {
         <div className={styles.sectionTitle} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <span>🧠 Remote Second Brain</span>
           <span style={{ fontSize: '10px', padding: '2px 8px', borderRadius: '20px', background: remoteBridge.enabled ? '#22c55e18' : '#64748b18', color: remoteBridge.enabled ? '#22c55e' : '#64748b', fontWeight: 600 }}>
-            {remoteBridge.enabled ? 'Enabled' : 'Disabled'}
+            {remoteBridge.enabled ? `✅ Connected` : 'Not connected'}
           </span>
         </div>
         <div style={{ padding: '12px 16px' }}>
-          <p style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: '1.6', marginBottom: '12px' }}>
-            For Windows users with Second Brain running on a remote machine (e.g., OnDemand devserver).
-            Configure the remote bridge URL to access your Second Brain from this device.
-          </p>
 
-          {/* Enable toggle */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
-            <label style={{ fontSize: '13px', color: 'var(--text-primary)', fontWeight: 500, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <input
-                type="checkbox"
-                checked={remoteBridge.enabled}
-                onChange={e => handleBridgeToggle(e.target.checked)}
-                style={{ accentColor: '#6366f1', width: '16px', height: '16px' }}
-              />
-              Use remote bridge instead of localhost
-            </label>
-          </div>
+          {/* Connected state */}
+          {remoteBridge.enabled && bridgeTestResult?.ok ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div style={{ padding: '14px 16px', borderRadius: '10px', background: '#22c55e08', border: '1px solid #22c55e25' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                  <span style={{ fontSize: '14px', fontWeight: 700, color: '#22c55e' }}>✅ Remote Bridge Connected</span>
+                  <button onClick={handleDisconnectRemote} style={{ fontSize: '11px', padding: '4px 10px', borderRadius: '6px', border: '1px solid #ef444440', background: 'transparent', color: '#ef4444', cursor: 'pointer', fontWeight: 500 }}>Disconnect</button>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                  <div><span style={{ color: 'var(--text-tertiary)' }}>URL:</span> <span style={{ fontFamily: 'monospace', color: 'var(--text-primary)' }}>{remoteBridge.url}</span></div>
+                  <div><span style={{ color: 'var(--text-tertiary)' }}>Latency:</span> <span style={{ color: bridgeTestResult.latency < 200 ? '#22c55e' : bridgeTestResult.latency < 500 ? '#eab308' : '#ef4444' }}>{bridgeTestResult.latency}ms</span></div>
+                  {bridgeTestResult.version && <div><span style={{ color: 'var(--text-tertiary)' }}>Bridge:</span> v{bridgeTestResult.version}</div>}
+                  {bridgeTestResult.platform && <div><span style={{ color: 'var(--text-tertiary)' }}>Platform:</span> {bridgeTestResult.platform}</div>}
+                </div>
+              </div>
+              <p style={{ fontSize: '11px', color: 'var(--text-tertiary)', lineHeight: '1.5' }}>
+                All Second Brain features are now routed through the remote bridge. Open the 🧠 Second Brain panel to use slash commands, or type <code style={{ background: 'var(--bg-primary)', padding: '1px 5px', borderRadius: '3px', fontFamily: 'monospace' }}>brain /daily-brief</code> in the Terminal.
+              </p>
+            </div>
+          ) : (
+            /* Setup state */
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.6', margin: 0 }}>
+                Access your Second Brain from a remote machine (e.g., Mac laptop, OnDemand devserver). Just enter the address and we'll connect automatically.
+              </p>
 
-          {/* URL input (shown when enabled) */}
-          {remoteBridge.enabled && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              <div>
-                <label className={styles.label}>Remote Bridge URL</label>
+              {/* Step 1: Start bridge on remote */}
+              <div style={{ padding: '12px 14px', borderRadius: '10px', background: 'var(--bg-primary)', border: '1px solid var(--border)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                  <span style={{ width: '22px', height: '22px', borderRadius: '50%', background: '#6366f120', color: '#818cf8', fontSize: '12px', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>1</span>
+                  <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>Start the bridge on your remote machine</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <code style={{ flex: 1, display: 'block', padding: '8px 10px', background: 'var(--bg-secondary)', borderRadius: '6px', fontFamily: 'monospace', fontSize: '12px', color: '#a78bfa', userSelect: 'all' }}>
+                    cd ~/Arcadia && node bridge/arcadia-bridge.js --host 0.0.0.0
+                  </code>
+                  <button onClick={copyBridgeCommand} style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: copiedCmd ? '#22c55e' : 'var(--text-secondary)', cursor: 'pointer', fontSize: '12px', fontWeight: 500, whiteSpace: 'nowrap', minWidth: '60px' }}>
+                    {copiedCmd ? '✓ Copied' : 'Copy'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Step 2: Enter URL */}
+              <div style={{ padding: '12px 14px', borderRadius: '10px', background: 'var(--bg-primary)', border: '1px solid var(--border)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                  <span style={{ width: '22px', height: '22px', borderRadius: '50%', background: '#6366f120', color: '#818cf8', fontSize: '12px', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>2</span>
+                  <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>Enter the remote machine's address</span>
+                </div>
                 <div style={{ display: 'flex', gap: '8px' }}>
                   <input
                     className={styles.input}
-                    value={remoteBridge.url}
-                    onChange={e => handleBridgeUrlChange(e.target.value)}
-                    placeholder="http://your-devserver.example.com:8087"
-                    style={{ flex: 1 }}
+                    value={bridgeUrlInput}
+                    onChange={e => handleBridgeUrlInput(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && handleBridgeTest()}
+                    placeholder="devserver-hostname or IP address"
+                    style={{ flex: 1, fontFamily: 'monospace' }}
                   />
                   <button
                     className={styles.primaryBtn}
                     onClick={handleBridgeTest}
-                    disabled={bridgeTesting || !remoteBridge.url.trim()}
-                    style={{ whiteSpace: 'nowrap', minWidth: '80px' }}
+                    disabled={bridgeTesting || !bridgeUrlInput.trim()}
+                    style={{ whiteSpace: 'nowrap', minWidth: '90px' }}
                   >
-                    {bridgeTesting ? 'Testing...' : 'Test'}
+                    {bridgeTesting ? (
+                      <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span style={{ display: 'inline-block', width: '12px', height: '12px', border: '2px solid #fff4', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                        Testing…
+                      </span>
+                    ) : 'Connect'}
                   </button>
                 </div>
+                <p style={{ fontSize: '11px', color: 'var(--text-tertiary)', margin: '6px 0 0', lineHeight: '1.4' }}>
+                  Just type the hostname or IP — we'll add <code style={{ background: 'var(--bg-secondary)', padding: '0 3px', borderRadius: '2px' }}>http://</code> and port <code style={{ background: 'var(--bg-secondary)', padding: '0 3px', borderRadius: '2px' }}>:8087</code> automatically.
+                </p>
               </div>
 
               {/* Test result */}
               {bridgeTestResult && (
                 <div style={{
                   fontSize: '12px',
-                  padding: '8px 12px',
-                  borderRadius: '8px',
+                  padding: '10px 14px',
+                  borderRadius: '10px',
                   background: bridgeTestResult.ok ? '#22c55e10' : '#ef444410',
                   border: `1px solid ${bridgeTestResult.ok ? '#22c55e30' : '#ef444430'}`,
                   color: bridgeTestResult.ok ? '#22c55e' : '#ef4444',
                   fontWeight: 500,
                 }}>
                   {bridgeTestResult.ok
-                    ? `✓ Connected successfully (${bridgeTestResult.latency}ms latency)`
-                    : `✗ ${bridgeTestResult.error || 'Connection failed'}`}
+                    ? `✅ Connected! Bridge v${bridgeTestResult.version || '?'} on ${bridgeTestResult.platform || 'unknown'} (${bridgeTestResult.latency}ms). Remote mode is now active.`
+                    : `❌ ${bridgeTestResult.error || 'Connection failed'}. Make sure the bridge is running on the remote machine and port 8087 is accessible.`}
                 </div>
               )}
 
-              {/* Help text */}
-              <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', lineHeight: '1.6', padding: '8px 12px', background: 'var(--bg-primary)', borderRadius: '8px' }}>
-                <strong style={{ color: 'var(--text-secondary)' }}>Setup:</strong> Run the ArcadIA Bridge on your remote machine:
-                <code style={{ display: 'block', marginTop: '4px', padding: '6px 8px', background: 'var(--bg-secondary)', borderRadius: '4px', fontFamily: 'monospace', fontSize: '11px' }}>
-                  cd ~/Arcadia && node bridge/arcadia-bridge.js --host 0.0.0.0
-                </code>
-                <div style={{ marginTop: '6px' }}>Then enter the URL above (e.g., <code>http://devserver-hostname:8087</code>).</div>
-                <div style={{ marginTop: '4px' }}>The bridge must be accessible from this device. If using an OD devserver, ensure port 8087 is forwarded.</div>
-              </div>
+              {/* Troubleshooting tips (shown only on failure) */}
+              {bridgeTestResult && !bridgeTestResult.ok && (
+                <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', lineHeight: '1.6', padding: '10px 14px', background: 'var(--bg-primary)', borderRadius: '8px' }}>
+                  <strong style={{ color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>Troubleshooting:</strong>
+                  <div>• Verify the bridge is running: <code>curl http://&lt;hostname&gt;:8087/health</code></div>
+                  <div>• Check that port 8087 is not blocked by a firewall</div>
+                  <div>• For OD devservers, make sure port forwarding is configured</div>
+                  <div>• Ensure the bridge was started with <code>--host 0.0.0.0</code> (not just localhost)</div>
+                </div>
+              )}
             </div>
           )}
         </div>
