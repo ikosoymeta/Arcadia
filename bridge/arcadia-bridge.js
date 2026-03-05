@@ -401,9 +401,11 @@ function setCorsHeaders(res, req) {
     res.setHeader('Access-Control-Allow-Origin', ALLOWED_ORIGINS[ALLOWED_ORIGINS.length - 2]); // GitHub Pages
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-api-key, x-bridge-token, anthropic-version, anthropic-dangerous-direct-browser-access');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-api-key, x-bridge-token, anthropic-version, anthropic-dangerous-direct-browser-access, Access-Control-Request-Private-Network');
   res.setHeader('Access-Control-Expose-Headers', 'x-bridge-version');
   res.setHeader('Access-Control-Max-Age', '86400');
+  // Chrome Private Network Access: allow public websites to reach localhost
+  res.setHeader('Access-Control-Allow-Private-Network', 'true');
   res.setHeader('Vary', 'Origin');
   res.setHeader('x-bridge-version', VERSION);
 }
