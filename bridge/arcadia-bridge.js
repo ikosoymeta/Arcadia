@@ -677,20 +677,61 @@ function handleMessages(req, res, body) {
     if (styleGuide) contextParts.push(`<style_guide>\n${styleGuide}\n</style_guide>`);
     if (priorities) contextParts.push(`<priorities_and_tasks>\n${priorities}\n</priorities_and_tasks>`);
     
+    // Pre-read recent notes and project files for richer context
+    let recentNotes = '';
+    if (slashCmdWorkspacePath) {
+      const fs = require('fs');
+      const path = require('path');
+      // Read files from common subdirectories
+      const dirsToScan = ['notes', 'projects', 'daily', 'weekly', 'logs', ''];
+      const readFiles = [];
+      for (const subdir of dirsToScan) {
+        try {
+          const dir = subdir ? `${slashCmdWorkspacePath}/${subdir}` : slashCmdWorkspacePath;
+          if (!fs.existsSync(dir)) continue;
+          const entries = fs.readdirSync(dir, { withFileTypes: true });
+          for (const entry of entries) {
+            if (entry.isFile() && /\.(md|txt|json)$/i.test(entry.name) && !entry.name.startsWith('.')) {
+              const fullPath = path.join(dir, entry.name);
+              try {
+                const stat = fs.statSync(fullPath);
+                readFiles.push({ path: fullPath, name: subdir ? `${subdir}/${entry.name}` : entry.name, mtime: stat.mtimeMs, size: stat.size });
+              } catch {}
+            }
+          }
+        } catch {}
+      }
+      // Sort by most recently modified, take top 10, skip files > 20KB
+      readFiles.sort((a, b) => b.mtime - a.mtime);
+      const topFiles = readFiles.filter(f => f.size < 20000).slice(0, 10);
+      for (const f of topFiles) {
+        try {
+          const content = fs.readFileSync(f.path, 'utf8');
+          recentNotes += `\n--- ${f.name} (${new Date(f.mtime).toLocaleDateString()}) ---\n${content}\n`;
+        } catch {}
+      }
+      if (recentNotes) console.log(`[${new Date().toISOString()}]   📝 Pre-read ${topFiles.length} recent workspace files`);
+    }
+    if (recentNotes) contextParts.push(`<recent_workspace_files>\n${recentNotes}\n</recent_workspace_files>`);
+
     contextParts.push(`<instructions>
-You are the user's Second Brain assistant. You have access to their Google Drive workspace at ${slashCmdWorkspacePath || 'unknown path'}.
-The user's installed skills include: calendar, google-drive, google-docs, google-sheets, google-slides-presentation, tasks, deep-research, create-wiki, gchat.
-When executing slash commands:
-- Read files from the workspace directory to get context
-- For /daily-brief: summarize priorities, upcoming tasks, and any recent notes. Reference workspace files specifically.
-- For /eod: process today's work, update task statuses, and preview tomorrow
-- For /eow: compile weekly accomplishments, PSC-worthy items, and next week priorities
-- For /prepare-meeting: research the topic/person and create a structured agenda
-- For /add-context: route the information to the appropriate project folder
-- For /deep-research: conduct thorough research with multiple sources and citations
-- Keep responses concise, actionable, and well-formatted with markdown
-- Match the user's writing style if a style guide is provided above
-- IMPORTANT: Respond quickly and directly. Do not spend time on unnecessary file operations.
+You are the user's Second Brain assistant. All the context you need is provided above — do NOT try to read files or use tools.
+The user's workspace is at ${slashCmdWorkspacePath || 'unknown path'}. Today is ${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}.
+
+Based ONLY on the workspace content provided above, respond to the slash command:
+- /daily-brief: Give a concise morning briefing. Summarize priorities, upcoming tasks, and recent activity from the workspace files above. Be specific — reference actual file names and content.
+- /eod: End-of-day wrap-up. Summarize what was worked on today based on recent files, capture key decisions, preview tomorrow.
+- /eow: Weekly summary. Compile this week's accomplishments, PSC-worthy items, and next week priorities from the files above.
+- /prepare-meeting: Create a structured meeting agenda with talking points based on available context.
+- /add-context: Acknowledge the information and suggest which project folder it belongs in.
+- /deep-research: Provide a thorough analysis with structured findings based on available context.
+
+Rules:
+- Be concise and actionable. Use markdown formatting.
+- Reference specific files and content from the workspace.
+- Match the user's writing style if a style guide is provided above.
+- Do NOT attempt to read files, access calendar, or use any tools. Everything you need is in the context above.
+- Respond in under 500 words unless the command requires more detail.
 </instructions>`);
 
     if (systemPrompt) contextParts.push(`<additional_context>\n${systemPrompt}\n</additional_context>`);
@@ -725,15 +766,14 @@ When executing slash commands:
   const effectiveTimeout = isSlashCommand ? SLASH_CMD_TIMEOUT_MS : TIMEOUT_MS;
 
   if (isSlashCommand) {
-    const workspaceCwd = slashCmdWorkspacePath || (process.env.HOME || '/Users/' + process.env.USER);
-
-    const args = ['-p', '--no-session-persistence'];
+    // Do NOT use --cwd — all context is already injected into the prompt
+    // Use --allowedTools '' to prevent Claude from trying to read files (which is slow)
+    const args = ['-p', '--no-session-persistence', '--allowedTools', ''];
     if (model) args.push('--model', model);
     console.log(`[${new Date().toISOString()}]   🧠 Slash command detected: ${lastUserText.slice(0, 40)}`);
-    console.log(`[${new Date().toISOString()}]   Spawning with --cwd ${workspaceCwd} (timeout: ${effectiveTimeout / 1000}s)`);
+    console.log(`[${new Date().toISOString()}]   Spawning WITHOUT --cwd, tools disabled (timeout: ${effectiveTimeout / 1000}s)`);
     claude = spawn(CLAUDE_PATH, args, {
       env: { ...process.env },
-      cwd: workspaceCwd,
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: false,
     });
