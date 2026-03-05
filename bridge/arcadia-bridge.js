@@ -1022,17 +1022,15 @@ function handleSecondBrainDetect(req, res) {
 
   const promises = [];
 
-  // 1. Check Claude Code
+  // 1. Check Claude Code (skip slow `claude --version` — scribe_cat adds 10-15s on Meta machines)
   promises.push(new Promise(resolve => {
     try {
       const cmd = IS_WIN ? 'where claude' : 'which claude';
       const claudePath = execSync(cmd, { encoding: 'utf-8', timeout: 5000 }).trim().split('\n')[0];
       checks.claudeCode.path = claudePath;
       checks.claudeCode.installed = true;
-      try {
-        const ver = execSync('claude --version', { encoding: 'utf-8', timeout: 10000 }).trim();
-        checks.claudeCode.version = ver;
-      } catch { /* version check failed but claude exists */ }
+      // Use cached version if available, otherwise just mark as installed
+      checks.claudeCode.version = claudeVersion || 'installed';
     } catch { /* claude not found */ }
     resolve();
   }));
