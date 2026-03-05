@@ -1326,8 +1326,17 @@ function handleSecondBrainDetect(req, res) {
     try {
       const fs = require('fs');
       if (IS_WIN) {
-        // Check common Windows paths
-        checks.wisprFlow.installed = false; // TODO: Windows path
+        // Check common Windows install paths for Wispr Flow
+        const localAppData = process.env.LOCALAPPDATA || `${process.env.USERPROFILE}\\AppData\\Local`;
+        const programFiles = process.env.ProgramFiles || 'C:\\Program Files';
+        const programFilesX86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)';
+        checks.wisprFlow.installed =
+          fs.existsSync(`${localAppData}\\Programs\\wispr-flow\\Wispr Flow.exe`) ||
+          fs.existsSync(`${localAppData}\\WisprFlow\\Wispr Flow.exe`) ||
+          fs.existsSync(`${programFiles}\\Wispr Flow\\Wispr Flow.exe`) ||
+          fs.existsSync(`${programFilesX86}\\Wispr Flow\\Wispr Flow.exe`) ||
+          fs.existsSync(`${localAppData}\\Programs\\superwhisper\\SuperWhisper.exe`) ||
+          (() => { try { execSync('where wispr-flow 2>nul', { encoding: 'utf-8', timeout: 3000 }); return true; } catch { return false; } })();
       } else {
         checks.wisprFlow.installed = 
           fs.existsSync('/Applications/Wispr Flow.app') ||
@@ -1707,11 +1716,15 @@ function handleSecondBrainSetup(req, res, body) {
     let description;
     switch (addon) {
       case 'wispr-flow':
-        cmd = 'brew install --cask wispr-flow 2>&1';
+        cmd = IS_WIN
+          ? 'winget install --id WisprAI.WisprFlow --accept-package-agreements --accept-source-agreements 2>&1'
+          : 'brew install --cask wispr-flow 2>&1';
         description = 'Wispr Flow (voice-to-text)';
         break;
       case 'obsidian':
-        cmd = 'brew install --cask obsidian 2>&1';
+        cmd = IS_WIN
+          ? 'winget install --id Obsidian.Obsidian --accept-package-agreements --accept-source-agreements 2>&1'
+          : 'brew install --cask obsidian 2>&1';
         description = 'Obsidian (knowledge management)';
         break;
       case 'gclaude':

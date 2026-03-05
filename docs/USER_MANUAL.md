@@ -280,11 +280,13 @@ This ensures Claude matches your tone and style across all writing tasks.
 
 ### Optional add-ons
 
-| Add-on | Description | Status |
-|---|---|---|
-| **Wispr Flow** | Voice-to-text input (3x faster than typing) | Detected automatically |
-| **GClaude** | Chat with Second Brain via Google Chat | Manual setup |
-| **Obsidian** | Local knowledge management that syncs with your workspace | Detected automatically |
+| Add-on | Description | Install method | Status |
+|---|---|---|---|
+| **Wispr Flow** | Voice-to-text input (3x faster than typing) | macOS: `brew install --cask wispr-flow` / Windows: `winget install WisprAI.WisprFlow` | Detected automatically |
+| **GClaude** | Chat with Second Brain via Google Chat | `npm install -g gclaude` (cross-platform) | Manual setup |
+| **Obsidian** | Local knowledge management that syncs with your workspace | macOS: `brew install --cask obsidian` / Windows: `winget install Obsidian.Obsidian` | Detected automatically |
+
+The **"Install Automatically"** button in the Second Brain panel detects your OS and runs the appropriate package manager command (`brew` on macOS, `winget` on Windows). You can also install these manually using the commands above.
 
 ---
 

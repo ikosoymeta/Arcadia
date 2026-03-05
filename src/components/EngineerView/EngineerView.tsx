@@ -13,6 +13,27 @@ import styles from './EngineerView.module.css';
 
 type EngTab = 'chat' | 'validate' | 'logs' | 'terminal' | 'debug';
 
+// ─── Cross-platform OS detection ─────────────────────────────────────────────
+
+function detectOS(): 'mac' | 'win' | 'linux' {
+  const ua = navigator.userAgent.toLowerCase();
+  if (ua.includes('win')) return 'win';
+  if (ua.includes('linux') && !ua.includes('android')) return 'linux';
+  return 'mac';
+}
+
+const USER_OS = detectOS();
+
+const SETUP_CMD = USER_OS === 'win'
+  ? 'irm https://raw.githubusercontent.com/ikosoymeta/Arcadia/main/bridge/setup.ps1 | iex'
+  : 'curl -sL https://raw.githubusercontent.com/ikosoymeta/Arcadia/main/bridge/setup.sh | bash';
+
+const MANUAL_CMD = USER_OS === 'win'
+  ? 'node "%USERPROFILE%\\.arcadia-bridge\\arcadia-bridge.js"'
+  : 'node ~/.arcadia-bridge/arcadia-bridge.js';
+
+const TERMINAL_NAME = USER_OS === 'win' ? 'PowerShell' : 'Terminal';
+
 // ─── Built-in tools ───────────────────────────────────────────────────────────
 
 const BUILTIN_TOOLS: ToolDefinition[] = [
@@ -999,9 +1020,9 @@ function ValidationPanel() {
       {/* Bridge status */}
       {bridgeOk === false && (
         <div className={styles.validateWarning}>
-          Bridge not detected. Run this in Terminal to connect:
-          <code>curl -sL https://raw.githubusercontent.com/ikosoymeta/Arcadia/main/bridge/setup.sh | bash</code>
-          <span style={{ fontSize: '11px', opacity: 0.7, marginLeft: '8px' }}>Already set up? Run: <code>node ~/.arcadia-bridge/arcadia-bridge.js</code></span>
+          Bridge not detected. Run this in {TERMINAL_NAME} to connect:
+          <code>{SETUP_CMD}</code>
+          <span style={{ fontSize: '11px', opacity: 0.7, marginLeft: '8px' }}>Already set up? Run: <code>{MANUAL_CMD}</code></span>
         </div>
       )}
 
@@ -1586,13 +1607,19 @@ function DebugTab() {
       {/* Quick Reference */}
       <div className={styles.rpDebugSection}>
         <div className={styles.rpDebugSectionTitle}>Quick Reference</div>
-        {[
+        {(USER_OS === 'win' ? [
+          { label: 'Health Check', cmd: 'curl http://localhost:8087/health' },
+          { label: 'Start Bridge', cmd: 'node "%USERPROFILE%\.arcadia-bridge\arcadia-bridge.js"' },
+          { label: 'Kill Bridge', cmd: 'taskkill /F /FI "WINDOWTITLE eq arcadia-bridge*"' },
+          { label: 'View Logs', cmd: 'type "%USERPROFILE%\.arcadia-bridge\bridge.log"' },
+          { label: 'Update', cmd: 'cd %USERPROFILE%\Arcadia && git pull origin main' },
+        ] : [
           { label: 'Health Check', cmd: 'curl localhost:8087/health' },
-          { label: 'Start Bridge', cmd: 'node bridge/arcadia-bridge.js' },
+          { label: 'Start Bridge', cmd: 'node ~/.arcadia-bridge/arcadia-bridge.js' },
           { label: 'Kill Bridge', cmd: 'pkill -f arcadia-bridge' },
           { label: 'View Logs', cmd: 'cat ~/.arcadia-bridge/bridge.log' },
           { label: 'Update', cmd: 'cd ~/Arcadia && git pull origin main' },
-        ].map(item => (
+        ]).map(item => (
           <div key={item.label} className={styles.rpDebugCmd}>
             <span className={styles.rpDebugCmdLabel}>{item.label}</span>
             <code className={styles.rpDebugCmdCode}>{item.cmd}</code>

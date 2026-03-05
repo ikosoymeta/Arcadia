@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard</title>
+<style>
+  *, *::before, *::after {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: #f0f2f5;
+    color: #1a1a2e;
+    min-height: 100vh;
+  }
+
+  /* Navigation */
+  nav {
+    background: #1a1a2e;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 2rem;
+    height: 60px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  }
+
+  nav .logo {
+    font-size: 1.25rem;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+  }
+
+  nav ul {
+    list-style: none;
+    display: flex;
+    gap: 1.5rem;
+  }
+
+  nav ul li a {
+    color: #a0a0b8;
+    text-decoration: none;
+    font-size: 0.9rem;
+    font-weight: 500;
+    transition: color 0.2s;
+  }
+
+  nav ul li a:hover,
+  nav ul li a.active {
+    color: #fff;
+  }
+
+  nav .nav-right {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+  }
+
+  nav .avatar {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: #6c63ff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  /* Main content */
+  main {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 2rem;
+  }
+
+  .page-header {
+    margin-bottom: 2rem;
+  }
+
+  .page-header h1 {
+    font-size: 1.75rem;
+    font-weight: 700;
+    margin-bottom: 0.25rem;
+  }
+
+  .page-header p {
+    color: #6b7280;
+    font-size: 0.95rem;
+  }
+
+  /* Metric cards grid */
+  .metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1.25rem;
+    margin-bottom: 2rem;
+  }
+
+  .metric-card {
+    background: #fff;
+    border-radius: 12px;
+    padding: 1.5rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+    transition: transform 0.15s, box-shadow 0.15s;
+  }
+
+  .metric-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  }
+
+  .metric-card .label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #6b7280;
+    margin-bottom: 0.75rem;
+  }
+
+  .metric-card .value {
+    font-size: 2rem;
+    font-weight: 700;
+    line-height: 1;
+    margin-bottom: 0.5rem;
+  }
+
+  .metric-card .change {
+    font-size: 0.85rem;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+
+  .metric-card .change.positive { color: #10b981; }
+  .metric-card .change.negative { color: #ef4444; }
+
+  .metric-card .change .arrow-up::before { content: "\25B2 "; }
+  .metric-card .change .arrow-down::before { content: "\25BC "; }
+
+  /* Accent top borders */
+  .metric-card:nth-child(1) { border-top: 3px solid #6c63ff; }
+  .metric-card:nth-child(2) { border-top: 3px solid #10b981; }
+  .metric-card:nth-child(3) { border-top: 3px solid #f59e0b; }
+  .metric-card:nth-child(4) { border-top: 3px solid #ef4444; }
+
+  /* Chart section */
+  .chart-section {
+    background: #fff;
+    border-radius: 12px;
+    padding: 1.5rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  }
+
+  .chart-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1.5rem;
+  }
+
+  .chart-header h2 {
+    font-size: 1.1rem;
+    font-weight: 600;
+  }
+
+  .chart-tabs {
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  .chart-tabs button {
+    padding: 0.4rem 1rem;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    background: #fff;
+    color: #6b7280;
+    font-size: 0.8rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .chart-tabs button.active,
+  .chart-tabs button:hover {
+    background: #6c63ff;
+    color: #fff;
+    border-color: #6c63ff;
+  }
+
+  .chart-placeholder {
+    width: 100%;
+    height: 300px;
+    background:
+      linear-gradient(180deg, rgba(108, 99, 255, 0.05) 0%, rgba(108, 99, 255, 0.02) 100%);
+    border: 2px dashed #d1d5db;
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: #9ca3af;
+  }
+
+  .chart-placeholder .chart-icon {
+    font-size: 2.5rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .chart-placeholder p {
+    font-size: 0.95rem;
+  }
+
+  .chart-placeholder .chart-bars {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    height: 80px;
+    margin-bottom: 1rem;
+  }
+
+  .chart-placeholder .chart-bars .bar {
+    width: 20px;
+    border-radius: 3px 3px 0 0;
+    background: #c7d2fe;
+    animation: grow 1s ease-out forwards;
+    transform-origin: bottom;
+  }
+
+  @keyframes grow {
+    from { transform: scaleY(0); }
+    to { transform: scaleY(1); }
+  }
+
+  .chart-placeholder .chart-bars .bar:nth-child(1) { height: 40%; animation-delay: 0s; }
+  .chart-placeholder .chart-bars .bar:nth-child(2) { height: 65%; animation-delay: 0.1s; }
+  .chart-placeholder .chart-bars .bar:nth-child(3) { height: 45%; animation-delay: 0.2s; }
+  .chart-placeholder .chart-bars .bar:nth-child(4) { height: 80%; animation-delay: 0.3s; }
+  .chart-placeholder .chart-bars .bar:nth-child(5) { height: 55%; animation-delay: 0.4s; }
+  .chart-placeholder .chart-bars .bar:nth-child(6) { height: 90%; animation-delay: 0.5s; }
+  .chart-placeholder .chart-bars .bar:nth-child(7) { height: 70%; animation-delay: 0.6s; }
+
+  /* Responsive breakpoints */
+  @media (max-width: 1024px) {
+    .metrics-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  @media (max-width: 640px) {
+    nav {
+      padding: 0 1rem;
+    }
+
+    nav ul {
+      display: none;
+    }
+
+    main {
+      padding: 1.25rem;
+    }
+
+    .metrics-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .metric-card .value {
+      font-size: 1.5rem;
+    }
+
+    .chart-header {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.75rem;
+    }
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="logo">Arcadia</div>
+  <ul>
+    <li><a href="#" class="active">Dashboard</a></li>
+    <li><a href="#">Analytics</a></li>
+    <li><a href="#">Reports</a></li>
+    <li><a href="#">Settings</a></li>
+  </ul>
+  <div class="nav-right">
+    <div class="avatar">IK</div>
+  </div>
+</nav>
+
+<main>
+  <div class="page-header">
+    <h1>Dashboard</h1>
+    <p>Overview of key metrics and performance indicators.</p>
+  </div>
+
+  <section class="metrics-grid">
+    <div class="metric-card">
+      <div class="label">Total Revenue</div>
+      <div class="value">$48,352</div>
+      <div class="change positive"><span class="arrow-up"></span>12.5% vs last month</div>
+    </div>
+    <div class="metric-card">
+      <div class="label">Active Users</div>
+      <div class="value">2,841</div>
+      <div class="change positive"><span class="arrow-up"></span>8.2% vs last month</div>
+    </div>
+    <div class="metric-card">
+      <div class="label">Conversion Rate</div>
+      <div class="value">3.6%</div>
+      <div class="change negative"><span class="arrow-down"></span>1.4% vs last month</div>
+    </div>
+    <div class="metric-card">
+      <div class="label">Bounce Rate</div>
+      <div class="value">42.1%</div>
+      <div class="change negative"><span class="arrow-down"></span>0.8% vs last month</div>
+    </div>
+  </section>
+
+  <section class="chart-section">
+    <div class="chart-header">
+      <h2>Revenue Over Time</h2>
+      <div class="chart-tabs">
+        <button>7D</button>
+        <button class="active">30D</button>
+        <button>90D</button>
+        <button>1Y</button>
+      </div>
+    </div>
+    <div class="chart-placeholder">
+      <div class="chart-bars">
+        <div class="bar"></div>
+        <div class="bar"></div>
+        <div class="bar"></div>
+        <div class="bar"></div>
+        <div class="bar"></div>
+        <div class="bar"></div>
+        <div class="bar"></div>
+      </div>
+      <p>Integrate a charting library (e.g. Chart.js, D3) to render live data here.</p>
+    </div>
+  </section>
+</main>
+
+</body>
+</html>

@@ -4,6 +4,16 @@ const SUPPORT_EMAIL = 'ikosoy@meta.com';
 const SUPPORT_SUBJECT = 'ArcadIA Editor Support';
 const SUPPORT_HREF = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(SUPPORT_SUBJECT)}`;
 
+function detectOS(): 'mac' | 'win' | 'linux' {
+  const ua = navigator.userAgent.toLowerCase();
+  if (ua.includes('win')) return 'win';
+  if (ua.includes('linux') && !ua.includes('android')) return 'linux';
+  return 'mac';
+}
+
+const USER_OS = detectOS();
+const IS_WIN = USER_OS === 'win';
+
 const SECTIONS = [
   {
     icon: '🚀',
@@ -93,12 +103,20 @@ const SECTIONS = [
     icon: '🔧',
     title: 'Connection Troubleshooting',
     content: [
-      { q: 'I see "Unable to connect"', a: 'This means the ArcadIA Bridge is not running. Open Terminal and run:\n\nnode ~/.arcadia-bridge/arcadia-bridge.js\n\nIf you haven\'t set it up yet, run the one-time setup command shown on the welcome screen.' },
-      { q: 'The bridge is running but ArcadIA won\'t connect', a: 'Check that nothing else is using port 8087:\n\nlsof -i :8087\n\nIf another process is using it, kill it and restart the bridge.' },
-      { q: 'Claude Code is not installed', a: 'Install Claude Code on your Meta laptop. See: https://fburl.com/claude.code.users\n\nAfter installing, verify with: claude --version' },
-      { q: 'The bridge stopped working after a restart', a: 'The bridge should auto-start on login. If it didn\'t, run:\n\nlaunchctl load ~/Library/LaunchAgents/com.arcadia.bridge.plist\n\nOr re-run the setup command to reinstall.' },
+      { q: 'I see "Unable to connect"', a: IS_WIN
+        ? 'This means the ArcadIA Bridge is not running. Open PowerShell and run:\n\nnode "%USERPROFILE%\\.arcadia-bridge\\arcadia-bridge.js"\n\nIf you haven\'t set it up yet, run the one-time setup command shown on the welcome screen.'
+        : 'This means the ArcadIA Bridge is not running. Open Terminal and run:\n\nnode ~/.arcadia-bridge/arcadia-bridge.js\n\nIf you haven\'t set it up yet, run the one-time setup command shown on the welcome screen.' },
+      { q: 'The bridge is running but ArcadIA won\'t connect', a: IS_WIN
+        ? 'Check that nothing else is using port 8087:\n\nnetstat -ano | findstr :8087\n\nIf another process is using it, end it in Task Manager and restart the bridge.'
+        : 'Check that nothing else is using port 8087:\n\nlsof -i :8087\n\nIf another process is using it, kill it and restart the bridge.' },
+      { q: 'Claude Code is not installed', a: 'Install Claude Code on your work laptop. See: https://fburl.com/claude.code.users\n\nAfter installing, verify with: claude --version' },
+      { q: 'The bridge stopped working after a restart', a: IS_WIN
+        ? 'The bridge should auto-start on login via a scheduled task. If it didn\'t, open PowerShell and run:\n\nirm https://raw.githubusercontent.com/ikosoymeta/Arcadia/main/bridge/setup.ps1 | iex\n\nThis will re-install and restart the bridge.'
+        : 'The bridge should auto-start on login. If it didn\'t, run:\n\nlaunchctl load ~/Library/LaunchAgents/com.arcadia.bridge.plist\n\nOr re-run the setup command to reinstall.' },
       { q: 'How do I check connection diagnostics?', a: 'On the welcome screen, click "Connection diagnostics" to see the bridge status, endpoint, and last check time. You can also run a manual check from there.' },
-      { q: 'Still having issues?', a: `Contact support: ${SUPPORT_EMAIL}\nSubject: ArcadIA Editor Support\n\nInclude:\n• Your Mac model and macOS version\n• Output of: claude --version\n• Output of: lsof -i :8087\n• Any error messages you see` },
+      { q: 'Still having issues?', a: IS_WIN
+        ? `Contact support: ${SUPPORT_EMAIL}\nSubject: ArcadIA Editor Support\n\nInclude:\n\u2022 Your Windows version (Settings \u2192 System \u2192 About)\n\u2022 Output of: claude --version\n\u2022 Output of: netstat -ano | findstr :8087\n\u2022 Any error messages you see`
+        : `Contact support: ${SUPPORT_EMAIL}\nSubject: ArcadIA Editor Support\n\nInclude:\n\u2022 Your Mac model and macOS version\n\u2022 Output of: claude --version\n\u2022 Output of: lsof -i :8087\n\u2022 Any error messages you see` },
     ],
   },
   {
