@@ -1257,6 +1257,22 @@ Output ONLY the style guide in clean Markdown. Start with a title "# Writing Sty
           )}
         </div>
 
+        {/* Quick Actions */}
+        <div style={{ display: 'flex', gap: '10px', marginTop: '18px', flexWrap: 'wrap' }}>
+          <button
+            onClick={() => { const el = document.getElementById('style-guide-section'); if (el) el.scrollIntoView({ behavior: 'smooth' }); setStyleGuideOpen(true); }}
+            style={{ fontSize: '12px', color: '#fff', background: '#6366f1', border: 'none', borderRadius: '8px', padding: '8px 16px', cursor: 'pointer', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}
+          >
+            <span>✍️</span> {styleGuideSaved ? 'Style Guide Saved ✓' : styleGuideResult ? 'View Style Guide' : 'Create Writing Style Guide'}
+          </button>
+          <button
+            onClick={() => { const el = document.getElementById('addons-section'); if (el) el.scrollIntoView({ behavior: 'smooth' }); }}
+            style={{ fontSize: '12px', color: 'var(--text-primary)', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '8px', padding: '8px 16px', cursor: 'pointer', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}
+          >
+            <span>🧩</span> Add-ons
+          </button>
+        </div>
+
         {/* Slash Commands — click to EXECUTE, small copy button */}
         <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '12px', marginTop: '24px' }}>Slash Commands</div>
         <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '14px', marginTop: '-6px', lineHeight: '1.5' }}>
@@ -1301,7 +1317,7 @@ Output ONLY the style guide in clean Markdown. Start with a title "# Writing Sty
         </div>
 
         {/* Writing Style Guide */}
-        <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '12px', marginTop: '24px' }}>Writing Style Guide</div>
+        <div id="style-guide-section" style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '12px', marginTop: '24px' }}>Writing Style Guide</div>
         <div style={{ background: 'var(--bg-secondary)', border: `1px solid ${styleGuideSaved ? '#22c55e30' : 'var(--border)'}`, borderRadius: '12px', padding: '16px 20px' }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: '14px' }}>
             <div style={{ fontSize: '28px' }}>✍️</div>
@@ -1427,7 +1443,7 @@ Output ONLY the style guide in clean Markdown. Start with a title "# Writing Sty
         </div>
 
         {/* Add-ons */}
-        <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '12px', marginTop: '24px' }}>Optional Add-ons</div>
+        <div id="addons-section" style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '12px', marginTop: '24px' }}>Optional Add-ons</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
           {ADDONS.map(addon => {
             const detected = addon.detectionKey ? (detection as any)?.[addon.detectionKey] : null;

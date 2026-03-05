@@ -590,18 +590,124 @@ function handleMessages(req, res, body) {
   const stream = payload.stream === true;
 
   // Detect slash commands — they need special handling (longer timeout, --cwd to workspace)
-  const lastUserMsg = messages.filter(m => m.role === 'user').pop();
-  const lastUserText = lastUserMsg ? extractText(lastUserMsg.content).trim() : '';
+  const lastUserMsg = messages.filter(m => m.role === "user").pop();
+  const lastUserText = lastUserMsg ? extractText(lastUserMsg.content).trim() : "";
   const isSlashCommand = /^\/(daily-brief|eod|eow|prepare-meeting|add-context|deep-research)/.test(lastUserText);
+
+// For slash commands, inject CLAUDE.md content and workspace context into the prompt
+  let enrichedSystemPrompt = systemPrompt;
+  let slashCmdWorkspacePath = null;
+  if (isSlashCommand) {
+    const home = process.env.HOME || '/Users/' + process.env.USER;
+    const username = process.env.USER || require('os').userInfo().username;
+    const gDrivePaths = findGoogleDrivePaths(home, username, 'claude');
+    for (const p of gDrivePaths) {
+      try { if (require('fs').existsSync(p)) { slashCmdWorkspacePath = p; break; } } catch {}
+    }
+
+    // Read CLAUDE.md if it exists
+    let claudeMdContent = '';
+    if (slashCmdWorkspacePath) {
+      try {
+        const claudeMdPath = `${slashCmdWorkspacePath}/CLAUDE.md`;
+        if (require('fs').existsSync(claudeMdPath)) {
+          claudeMdContent = require('fs').readFileSync(claudeMdPath, 'utf8');
+          console.log(`[${new Date().toISOString()}]   📄 Loaded CLAUDE.md (${claudeMdContent.length} chars)`);
+        }
+      } catch (e) {
+        console.log(`[${new Date().toISOString()}]   ⚠ Could not read CLAUDE.md: ${e.message}`);
+      }
+    }
+
+    // List workspace files (2 levels deep)
+    let workspaceFiles = '';
+    if (slashCmdWorkspacePath) {
+      try {
+        const listDir = (dir, prefix = '', depth = 0) => {
+          if (depth > 2) return '';
+          let result = '';
+          const entries = require('fs').readdirSync(dir, { withFileTypes: true });
+          for (const entry of entries.slice(0, 50)) {
+            if (entry.name.startsWith('.')) continue;
+            result += `${prefix}${entry.isDirectory() ? '[DIR]' : '[FILE]'} ${entry.name}\n`;
+            if (entry.isDirectory() && depth < 2) {
+              result += listDir(`${dir}/${entry.name}`, prefix + '  ', depth + 1);
+            }
+          }
+          return result;
+        };
+        workspaceFiles = listDir(slashCmdWorkspacePath);
+        console.log(`[${new Date().toISOString()}]   📂 Workspace files listed`);
+      } catch (e) {
+        console.log(`[${new Date().toISOString()}]   ⚠ Could not list workspace: ${e.message}`);
+      }
+    }
+
+    // Read style guide if it exists
+    let styleGuide = '';
+    if (slashCmdWorkspacePath) {
+      try {
+        const sgPath = `${slashCmdWorkspacePath}/STYLE_GUIDE.md`;
+        if (require('fs').existsSync(sgPath)) {
+          styleGuide = require('fs').readFileSync(sgPath, 'utf8');
+          console.log(`[${new Date().toISOString()}]   ✍️ Loaded STYLE_GUIDE.md`);
+        }
+      } catch {}
+    }
+
+    // Read priorities/tasks if they exist
+    let priorities = '';
+    if (slashCmdWorkspacePath) {
+      for (const fname of ['priorities.md', 'tasks.md', 'TODO.md', 'notes/priorities.md']) {
+        try {
+          const fpath = `${slashCmdWorkspacePath}/${fname}`;
+          if (require('fs').existsSync(fpath)) {
+            priorities += `\n--- ${fname} ---\n` + require('fs').readFileSync(fpath, 'utf8');
+          }
+        } catch {}
+      }
+      if (priorities) console.log(`[${new Date().toISOString()}]   📋 Loaded priorities/tasks`);
+    }
+
+    // Build enriched system prompt with all context
+    const contextParts = [];
+    if (claudeMdContent) contextParts.push(`<claude_md>\n${claudeMdContent}\n</claude_md>`);
+    if (slashCmdWorkspacePath) contextParts.push(`<workspace_path>${slashCmdWorkspacePath}</workspace_path>`);
+    if (workspaceFiles) contextParts.push(`<workspace_files>\n${workspaceFiles}\n</workspace_files>`);
+    if (styleGuide) contextParts.push(`<style_guide>\n${styleGuide}\n</style_guide>`);
+    if (priorities) contextParts.push(`<priorities_and_tasks>\n${priorities}\n</priorities_and_tasks>`);
+    
+    contextParts.push(`<instructions>
+You are the user's Second Brain assistant. You have access to their Google Drive workspace at ${slashCmdWorkspacePath || 'unknown path'}.
+The user's installed skills include: calendar, google-drive, google-docs, google-sheets, google-slides-presentation, tasks, deep-research, create-wiki, gchat.
+When executing slash commands:
+- Read files from the workspace directory to get context
+- For /daily-brief: summarize priorities, upcoming tasks, and any recent notes. Reference workspace files specifically.
+- For /eod: process today's work, update task statuses, and preview tomorrow
+- For /eow: compile weekly accomplishments, PSC-worthy items, and next week priorities
+- For /prepare-meeting: research the topic/person and create a structured agenda
+- For /add-context: route the information to the appropriate project folder
+- For /deep-research: conduct thorough research with multiple sources and citations
+- Keep responses concise, actionable, and well-formatted with markdown
+- Match the user's writing style if a style guide is provided above
+- IMPORTANT: Respond quickly and directly. Do not spend time on unnecessary file operations.
+</instructions>`);
+
+    if (systemPrompt) contextParts.push(`<additional_context>\n${systemPrompt}\n</additional_context>`);
+    
+    enrichedSystemPrompt = contextParts.join('\n\n');
+    console.log(`[${new Date().toISOString()}]   🧠 Enriched prompt: ${enrichedSystemPrompt.length} chars of context injected`);
+  }
 
   // Apply context window management
   const trimmedMessages = trimMessages(messages);
-  const fullPrompt = buildPrompt(trimmedMessages, systemPrompt);
+  const fullPrompt = buildPrompt(trimmedMessages, enrichedSystemPrompt);
   if (!fullPrompt) {
     res.writeHead(400, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'No user message found' }));
     return;
   }
+
 
   totalRequests++;
   activeRequests++;
@@ -619,14 +725,7 @@ function handleMessages(req, res, body) {
   const effectiveTimeout = isSlashCommand ? SLASH_CMD_TIMEOUT_MS : TIMEOUT_MS;
 
   if (isSlashCommand) {
-    // Find the workspace directory
-    const home = process.env.HOME || '/Users/' + process.env.USER;
-    const gDrivePaths = findGoogleDrivePaths(home);
-    let workspaceCwd = home; // fallback
-    for (const p of gDrivePaths) {
-      const wsPath = `${p}/My Drive/claude`;
-      try { if (require('fs').existsSync(wsPath)) { workspaceCwd = wsPath; break; } } catch {}
-    }
+    const workspaceCwd = slashCmdWorkspacePath || (process.env.HOME || '/Users/' + process.env.USER);
 
     const args = ['-p', '--no-session-persistence'];
     if (model) args.push('--model', model);
