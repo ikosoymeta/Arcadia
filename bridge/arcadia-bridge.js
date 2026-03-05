@@ -1,10 +1,15 @@
 #!/usr/bin/env node
 /**
- * ArcadIA Bridge v3.4.0 — Local proxy connecting ArcadIA web app to Claude Code
+ * ArcadIA Bridge v3.4.2 — Local proxy connecting ArcadIA web app to Claude Code
  * 
  * Runs on localhost:8087 and forwards requests from the ArcadIA web app
  * to Claude Code CLI, which handles Meta internal authentication.
  * 
+ * v3.4.2:
+ * - Dynamic Google Drive path discovery: scans ~/Library/CloudStorage/ for any GoogleDrive-* folder
+ * - Improved skills detection: checks multiple locations + claude-templates list
+ * - Detailed logging in detect endpoint for debugging
+ *
  * v3.4.0:
  * - Process pool of 2: keeps TWO standby processes for back-to-back requests
  * - Optimized CLI flags: --model, --no-session-persistence, reduced overhead
@@ -32,7 +37,7 @@ const os = require('os');
 
 const PORT = 8087;
 const HOST = '127.0.0.1';
-const VERSION = '3.4.1';
+const VERSION = '3.4.2';
 const IS_WIN = process.platform === 'win32';
 const TIMEOUT_MS = 180000; // 3 minute timeout
 const KEEPALIVE_INTERVAL_MS = 2000; // SSE keepalive every 2s
@@ -951,6 +956,54 @@ function handleMessages(req, res, body) {
   }
 }
 
+// ─── Google Drive path discovery (dynamic scan) ──────────────────────────
+
+function findGoogleDrivePaths(home, username, suffix) {
+  // suffix: 'claude' for workspace, '' for My Drive root
+  const fs = require('fs');
+  const paths = [];
+
+  if (IS_WIN) {
+    const sep = '\\';
+    const bases = [
+      `${home}${sep}Google Drive${sep}My Drive`,
+      `G:${sep}My Drive`,
+      `${home}${sep}GoogleDrive${sep}My Drive`,
+    ];
+    for (const b of bases) {
+      paths.push(suffix ? `${b}${sep}${suffix}` : b);
+    }
+  } else {
+    // Dynamically scan ~/Library/CloudStorage/ for any GoogleDrive-* folder
+    const cloudStorageDir = `${home}/Library/CloudStorage`;
+    try {
+      if (fs.existsSync(cloudStorageDir)) {
+        const entries = fs.readdirSync(cloudStorageDir);
+        for (const entry of entries) {
+          if (entry.startsWith('GoogleDrive-')) {
+            const myDrive = `${cloudStorageDir}/${entry}/My Drive`;
+            paths.push(suffix ? `${myDrive}/${suffix}` : myDrive);
+          }
+        }
+      }
+    } catch { /* scan failed, fall through to hardcoded paths */ }
+
+    // Fallback hardcoded paths
+    const hardcoded = [
+      `${home}/Library/CloudStorage/GoogleDrive-${username}@meta.com/My Drive`,
+      `${home}/Library/CloudStorage/GoogleDrive-${username}@fb.com/My Drive`,
+      `${home}/Google Drive/My Drive`,
+      `${home}/gdrive`,
+    ];
+    for (const h of hardcoded) {
+      const full = suffix ? `${h}/${suffix}` : h;
+      if (!paths.includes(full)) paths.push(full);
+    }
+  }
+
+  return paths;
+}
+
 // ─── Second Brain detection endpoint ──────────────────────────────────────
 
 function handleSecondBrainDetect(req, res) {
@@ -989,34 +1042,42 @@ function handleSecondBrainDetect(req, res) {
     try {
       const home = process.env.HOME || os.homedir();
       const username = process.env.USER || os.userInfo().username;
-      let drivePaths;
-      if (IS_WIN) {
-        drivePaths = [
-          `${home}\\Google Drive\\My Drive\\claude`,
-          `G:\\My Drive\\claude`,
-          `${home}\\GoogleDrive\\My Drive\\claude`,
-        ];
-      } else {
-        drivePaths = [
-          `${home}/Library/CloudStorage/GoogleDrive-${username}@meta.com/My Drive/claude`,
-          `${home}/Google Drive/My Drive/claude`,
-          `${home}/gdrive/claude`,
-        ];
-      }
+      const drivePaths = findGoogleDrivePaths(home, username, 'claude');
       const fs = require('fs');
+      console.log(`[${new Date().toISOString()}] 🧠 Detect: scanning ${drivePaths.length} Google Drive paths...`);
+      let found = false;
       for (const p of drivePaths) {
-        if (fs.existsSync(p)) {
+        const exists = fs.existsSync(p);
+        console.log(`[${new Date().toISOString()}]   ${exists ? '✓' : '✗'} ${p}`);
+        if (exists && !found) {
+          found = true;
           checks.googleDrive.installed = true;
           checks.googleDrive.workspacePath = p;
           // Check for CLAUDE.md
-          if (fs.existsSync(`${p}/CLAUDE.md`) || fs.existsSync(`${p}/.claude/CLAUDE.md`)) {
+          const hasClaude = fs.existsSync(`${p}/CLAUDE.md`);
+          const hasClaudeAlt = fs.existsSync(`${p}/.claude/CLAUDE.md`);
+          console.log(`[${new Date().toISOString()}]   CLAUDE.md: ${hasClaude ? 'found' : 'not found'} | .claude/CLAUDE.md: ${hasClaudeAlt ? 'found' : 'not found'}`);
+          if (hasClaude || hasClaudeAlt) {
             checks.secondBrain.initialized = true;
             checks.secondBrain.claudeMdExists = true;
+          } else {
+            // Also mark as initialized if workspace has subfolders (projects, notes, etc.)
+            try {
+              const contents = fs.readdirSync(p);
+              if (contents.includes('projects') || contents.includes('notes')) {
+                checks.secondBrain.initialized = true;
+                console.log(`[${new Date().toISOString()}]   Workspace has subfolders, marking as initialized`);
+              }
+            } catch { /* ignore */ }
           }
-          break;
         }
       }
-    } catch { /* drive check failed */ }
+      if (!found) {
+        console.log(`[${new Date().toISOString()}]   ⚠ No Google Drive workspace found in any scanned path`);
+      }
+    } catch (e) {
+      console.log(`[${new Date().toISOString()}]   ⚠ Drive check error: ${e.message}`);
+    }
     resolve();
   }));
 
@@ -1035,14 +1096,41 @@ function handleSecondBrainDetect(req, res) {
     try {
       const home = process.env.HOME || os.homedir();
       const fs = require('fs');
-      const skillsDir = `${home}/.claude/skills`;
-      if (fs.existsSync(skillsDir)) {
-        const dirs = fs.readdirSync(skillsDir).filter(d => {
-          try { return fs.statSync(`${skillsDir}/${d}`).isDirectory(); } catch { return false; }
-        });
-        checks.skills.installed = dirs;
+      // Check multiple possible skills locations
+      const skillsDirs = [
+        `${home}/.claude/skills`,
+        `${home}/.claude-code/skills`,
+        `${home}/.config/claude/skills`,
+      ];
+      let allSkills = [];
+      for (const skillsDir of skillsDirs) {
+        if (fs.existsSync(skillsDir)) {
+          const dirs = fs.readdirSync(skillsDir).filter(d => {
+            try { return fs.statSync(`${skillsDir}/${d}`).isDirectory(); } catch { return false; }
+          });
+          console.log(`[${new Date().toISOString()}]   Skills in ${skillsDir}: ${dirs.length > 0 ? dirs.join(', ') : 'none'}`);
+          allSkills = allSkills.concat(dirs);
+        } else {
+          console.log(`[${new Date().toISOString()}]   Skills dir not found: ${skillsDir}`);
+        }
       }
-    } catch { /* skills check failed */ }
+      // Also check if claude-templates is installed (counts as having skills infrastructure)
+      if (allSkills.length === 0 && checks.claudeTemplates.installed) {
+        try {
+          const result = execSync('claude-templates skill list 2>/dev/null', { encoding: 'utf-8', timeout: 10000 }).trim();
+          if (result) {
+            const lines = result.split('\n').filter(l => l.trim() && !l.startsWith('─') && !l.toLowerCase().includes('name'));
+            if (lines.length > 0) {
+              allSkills = lines.map(l => l.trim().split(/\s+/)[0]).filter(Boolean);
+              console.log(`[${new Date().toISOString()}]   Skills from claude-templates: ${allSkills.join(', ')}`);
+            }
+          }
+        } catch { /* claude-templates list failed */ }
+      }
+      checks.skills.installed = [...new Set(allSkills)];
+    } catch (e) {
+      console.log(`[${new Date().toISOString()}]   ⚠ Skills check error: ${e.message}`);
+    }
     resolve();
   }));
 
@@ -1081,12 +1169,17 @@ function handleSecondBrainDetect(req, res) {
 
   Promise.all(promises).then(() => {
     // Calculate overall readiness
+    // Note: "Google Drive" = drive is installed, "Second Brain Workspace" = claude/ folder exists with content
+    // For dashboard display, we combine these: if workspace exists, Drive is implicitly installed
+    const hasWorkspace = checks.googleDrive.installed;
+    const hasConfig = checks.secondBrain.claudeMdExists || checks.secondBrain.initialized;
     const components = [
       { name: 'Claude Code', ready: checks.claudeCode.installed },
-      { name: 'Google Drive', ready: checks.googleDrive.installed },
-      { name: 'Second Brain Workspace', ready: checks.secondBrain.initialized },
+      { name: 'Google Drive Workspace', ready: hasWorkspace && hasConfig },
+      { name: 'CLAUDE.md Configuration', ready: checks.secondBrain.claudeMdExists },
       { name: 'Skills & Plugins', ready: checks.skills.installed.length > 0 },
     ];
+    console.log(`[${new Date().toISOString()}] 🧠 Detect results: Claude=${checks.claudeCode.installed}, Drive=${hasWorkspace}, Workspace=${hasConfig}, CLAUDE.md=${checks.secondBrain.claudeMdExists}, Skills=${checks.skills.installed.length}`);
     const readyCount = components.filter(c => c.ready).length;
     const totalRequired = components.length;
 
@@ -1181,20 +1274,7 @@ function handleSecondBrainSetup(req, res, body) {
     console.log(`[${new Date().toISOString()}] 🧠 Second Brain: Creating workspace...`);
     try {
       // Try to find Google Drive mount
-      let drivePaths;
-      if (IS_WIN) {
-        drivePaths = [
-          `${home}\\Google Drive\\My Drive`,
-          `G:\\My Drive`,
-          `${home}\\GoogleDrive\\My Drive`,
-        ];
-      } else {
-        drivePaths = [
-          `${home}/Library/CloudStorage/GoogleDrive-${username}@meta.com/My Drive`,
-          `${home}/Google Drive/My Drive`,
-          `${home}/gdrive`,
-        ];
-      }
+      const drivePaths = findGoogleDrivePaths(home, username, '');
 
       let driveRoot = null;
       for (const p of drivePaths) {
@@ -1258,13 +1338,7 @@ function handleSecondBrainSetup(req, res, body) {
     try {
       // Find the workspace
       let workspacePath = null;
-      const drivePaths = IS_WIN
-        ? [`${home}\\Google Drive\\My Drive\\claude`, `G:\\My Drive\\claude`]
-        : [
-            `${home}/Library/CloudStorage/GoogleDrive-${username}@meta.com/My Drive/claude`,
-            `${home}/Google Drive/My Drive/claude`,
-            `${home}/gdrive/claude`,
-          ];
+      const drivePaths = findGoogleDrivePaths(home, username, 'claude');
 
       for (const p of drivePaths) {
         if (fs.existsSync(p)) {
