@@ -2,6 +2,7 @@ import { useState, useRef } from 'react';
 import { useConnection } from '../../store/ConnectionContext';
 import { CLAUDE_MODELS, getModelInfo } from '../../types';
 import { getRemoteBridgeConfig, setRemoteBridgeConfig, testBridgeConnection, normalizeBridgeUrl, type RemoteBridgeConfig } from '../../services/bridge';
+import { detectPlatform } from '../../services/detectOS';
 import styles from './Settings.module.css';
 
 type ConnectionType = 'apikey' | 'proxy';
@@ -43,7 +44,7 @@ export function SettingsPanel() {
   const [bridgeUrlInput, setBridgeUrlInput] = useState(() => getRemoteBridgeConfig().url);
   const autoTestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [copiedCmd, setCopiedCmd] = useState(false);
-  const [bridgePlatform, setBridgePlatform] = useState<'mac' | 'windows'>('mac');
+  const [bridgePlatform, setBridgePlatform] = useState<'mac' | 'windows'>(detectPlatform);
 
   const handleBridgeUrlInput = (raw: string) => {
     setBridgeUrlInput(raw);

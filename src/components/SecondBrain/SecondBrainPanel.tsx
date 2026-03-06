@@ -69,6 +69,7 @@ const SETUP_STEPS: Omit<SetupStep, 'status'>[] = [
 // ─── Bridge API ─────────────────────────────────────────────────────────────
 
 import { getBridgeUrl, isRemoteBridge, getRemoteBridgeConfig, setRemoteBridgeConfig, testBridgeConnection, normalizeBridgeUrl } from '../../services/bridge';
+import { detectPlatform } from '../../services/detectOS';
 
 // Dynamic bridge URL — reads from localStorage (remote) or defaults to localhost
 function BRIDGE() { return getBridgeUrl(); }
@@ -419,7 +420,7 @@ function BridgeNotConnected({ onRetry }: { onRetry: () => void }) {
   };
 
   const BRIDGE_CDN = 'https://files.manuscdn.com/user_upload_by_module/session_file/310519663326120815/BpnQIHTwBWLxOLsq.js';
-  const [remotePlatform, setRemotePlatform] = useState<'mac' | 'windows'>('mac');
+  const [remotePlatform, setRemotePlatform] = useState<'mac' | 'windows'>(detectPlatform);
   const remoteDownloadCmd = remotePlatform === 'mac'
     ? `curl -sL "${BRIDGE_CDN}" -o ~/arcadia-bridge.js`
     : `Invoke-WebRequest -Uri "${BRIDGE_CDN}" -OutFile "$HOME\\arcadia-bridge.js"`;
