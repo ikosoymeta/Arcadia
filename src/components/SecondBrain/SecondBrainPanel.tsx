@@ -427,11 +427,11 @@ function renderInline(text: string): React.ReactNode {
 // ─── Bridge Not Connected ─────────────────────────────────────────────────
 
 function BridgeNotConnected({ onRetry }: { onRetry: () => void }) {
-  const [mode, setMode] = useState<'choose' | 'remote'>('choose');
+  const [mode, setMode] = useState<'choose' | 'local' | 'remote'>('choose');
   const [remoteUrl, setRemoteUrl] = useState('');
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; latency: number; version?: string; error?: string } | null>(null);
-  const [copiedCmd, setCopiedCmd] = useState(false);
+  const [copiedStep, setCopiedStep] = useState<number | null>(null);
 
   const handleConnect = async () => {
     const normalized = normalizeBridgeUrl(remoteUrl);
@@ -443,13 +443,27 @@ function BridgeNotConnected({ onRetry }: { onRetry: () => void }) {
     setTesting(false);
     if (res.ok) {
       setRemoteBridgeConfig({ enabled: true, url: normalized });
-      // Trigger re-detection with the new bridge URL
       setTimeout(onRetry, 500);
     }
   };
 
   const BRIDGE_CDN = 'https://files.manuscdn.com/user_upload_by_module/session_file/310519663326120815/fWRKXaZSkMJsFLJB.js';
+  const platform = detectPlatform();
   const [remotePlatform, setRemotePlatform] = useState<'mac' | 'windows'>(detectPlatform);
+
+  const copyText = (text: string, step: number) => {
+    navigator.clipboard.writeText(text);
+    setCopiedStep(step);
+    setTimeout(() => setCopiedStep(null), 2000);
+  };
+
+  // Platform-specific commands
+  const downloadCmd = platform === 'windows'
+    ? `Invoke-WebRequest -Uri "${BRIDGE_CDN}" -OutFile "$env:USERPROFILE\\arcadia-bridge.js"`
+    : `curl -sL "${BRIDGE_CDN}" -o ~/arcadia-bridge.js`;
+  const runCmd = platform === 'windows'
+    ? 'node "$env:USERPROFILE\\arcadia-bridge.js"'
+    : 'node ~/arcadia-bridge.js';
   const remoteDownloadCmd = remotePlatform === 'mac'
     ? `curl -sL "${BRIDGE_CDN}" -o ~/arcadia-bridge.js`
     : `Invoke-WebRequest -Uri "${BRIDGE_CDN}" -OutFile "$env:USERPROFILE\\arcadia-bridge.js"`;
@@ -457,11 +471,22 @@ function BridgeNotConnected({ onRetry }: { onRetry: () => void }) {
     ? 'node ~/arcadia-bridge.js --host 0.0.0.0'
     : 'node "$env:USERPROFILE\\arcadia-bridge.js" --host 0.0.0.0';
 
-  const copyCmd = (cmd?: string) => {
-    navigator.clipboard.writeText(cmd || remoteRunCmd);
-    setCopiedCmd(true);
-    setTimeout(() => setCopiedCmd(false), 2000);
-  };
+  const stepBubble = (num: number) => (
+    <span style={{ width: '28px', height: '28px', borderRadius: '50%', background: '#6366f120', color: '#818cf8', fontSize: '14px', fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{num}</span>
+  );
+
+  const copyButton = (text: string, step: number) => (
+    <button onClick={() => copyText(text, step)} style={{ padding: '6px 14px', borderRadius: '8px', border: '1px solid var(--border)', background: copiedStep === step ? '#22c55e18' : 'var(--bg-primary)', color: copiedStep === step ? '#22c55e' : 'var(--text-secondary)', cursor: 'pointer', fontSize: '12px', fontWeight: 600, whiteSpace: 'nowrap', transition: 'all 0.2s' }}>
+      {copiedStep === step ? '✓ Copied!' : '📋 Copy'}
+    </button>
+  );
+
+  const cmdBlock = (text: string, step: number) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
+      <code style={{ flex: 1, padding: '10px 12px', background: 'var(--bg-primary)', borderRadius: '8px', fontFamily: 'monospace', fontSize: '12px', color: '#a78bfa', userSelect: 'all', wordBreak: 'break-all', lineHeight: '1.4' }}>{text}</code>
+      {copyButton(text, step)}
+    </div>
+  );
 
   return (
     <div style={{ padding: '24px', maxWidth: '800px', margin: '0 auto' }}>
@@ -470,49 +495,137 @@ function BridgeNotConnected({ onRetry }: { onRetry: () => void }) {
         <p style={{ fontSize: '14px', color: 'var(--text-secondary)', lineHeight: '1.6' }}>Your AI-powered personal knowledge system — powered by Claude Code and Google Drive.</p>
       </div>
 
-      {mode === 'choose' ? (
+      {/* ─── Choose mode ─── */}
+      {mode === 'choose' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          {/* Local connection option */}
+          <div style={{ padding: '16px 20px', borderRadius: '12px', background: '#6366f108', border: '1px solid #6366f120', marginBottom: '4px' }}>
+            <p style={{ fontSize: '14px', color: 'var(--text-secondary)', lineHeight: '1.6', margin: 0 }}>
+              Second Brain needs a small helper program called the <strong style={{ color: 'var(--text-primary)' }}>ArcadIA Bridge</strong> running on your computer. It connects ArcadIA to Claude Code and your Google Drive files.
+            </p>
+          </div>
+
+          {/* Local — this computer */}
           <div style={{ padding: '20px', borderRadius: '12px', background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
               <span style={{ fontSize: '20px' }}>💻</span>
               <div>
-                <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>Local Connection</div>
-                <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Bridge running on this computer</div>
+                <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>This Computer</div>
+                <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Set up or connect to the bridge on this Mac or PC</div>
               </div>
             </div>
-            <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', lineHeight: '1.5', margin: '0 0 12px' }}>
-              Start the ArcadIA Bridge on this machine, then click retry.
+            <p style={{ fontSize: '13px', color: 'var(--text-tertiary)', lineHeight: '1.5', margin: '0 0 12px' }}>
+              Best for most users. We'll walk you through the setup step by step.
             </p>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-              <code style={{ flex: 1, padding: '8px 10px', background: 'var(--bg-primary)', borderRadius: '6px', fontFamily: 'monospace', fontSize: '12px', color: '#a78bfa', userSelect: 'all' }}>
-                {detectPlatform() === 'windows' ? 'node %USERPROFILE%\\arcadia-bridge.js' : 'node ~/arcadia-bridge.js'}
-              </code>
-            </div>
-            <button onClick={onRetry} style={{ padding: '8px 20px', borderRadius: '8px', border: 'none', background: '#6366f1', color: '#fff', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>
-              🔄 Retry Connection
+            <button onClick={() => setMode('local')} style={{ padding: '10px 24px', borderRadius: '8px', border: 'none', background: '#6366f1', color: '#fff', fontSize: '14px', fontWeight: 600, cursor: 'pointer' }}>
+              Get Started
             </button>
           </div>
 
-          {/* Remote connection option */}
+          {/* Remote — another machine */}
           <div style={{ padding: '20px', borderRadius: '12px', background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
               <span style={{ fontSize: '20px' }}>🌐</span>
               <div>
-                <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>Remote Connection</div>
-                <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Bridge running on another machine (e.g., OnDemand devserver)</div>
+                <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>Another Computer</div>
+                <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Connect to a bridge on a remote machine (e.g., OnDemand devserver)</div>
               </div>
             </div>
-            <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', lineHeight: '1.5', margin: '0 0 12px' }}>
-              For Windows users or anyone with Second Brain on a remote machine. Connect in 2 easy steps.
+            <p style={{ fontSize: '13px', color: 'var(--text-tertiary)', lineHeight: '1.5', margin: '0 0 12px' }}>
+              For advanced setups where Second Brain runs on a different machine.
             </p>
-            <button onClick={() => setMode('remote')} style={{ padding: '8px 20px', borderRadius: '8px', border: 'none', background: '#22c55e', color: '#fff', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>
-              🔗 Connect to Remote Bridge
+            <button onClick={() => setMode('remote')} style={{ padding: '10px 24px', borderRadius: '8px', border: 'none', background: 'var(--bg-primary)', color: 'var(--text-primary)', fontSize: '14px', fontWeight: 600, cursor: 'pointer', border: '1px solid var(--border)' }}>
+              Connect to Remote Machine
+            </button>
+          </div>
+
+          {/* Already running? */}
+          <div style={{ textAlign: 'center', marginTop: '4px' }}>
+            <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', margin: '0 0 8px' }}>Already have the bridge running?</p>
+            <button onClick={onRetry} style={{ padding: '8px 20px', borderRadius: '8px', border: '1px solid var(--border)', background: 'transparent', color: '#6366f1', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>
+              🔄 Retry Connection
             </button>
           </div>
         </div>
-      ) : (
-        /* Remote setup flow */
+      )}
+
+      {/* ─── Local setup (step-by-step) ─── */}
+      {mode === 'local' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <button onClick={() => setMode('choose')} style={{ alignSelf: 'flex-start', padding: '4px 12px', borderRadius: '6px', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '12px' }}>
+            ← Back
+          </button>
+
+          <div style={{ padding: '14px 18px', borderRadius: '10px', background: '#818cf808', border: '1px solid #818cf820', fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.5' }}>
+            Follow these 3 steps. Each one takes about 10 seconds.
+          </div>
+
+          {/* Step 1: Open Terminal */}
+          <div style={{ padding: '16px 20px', borderRadius: '12px', background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+              {stepBubble(1)}
+              <span style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)' }}>Open {platform === 'windows' ? 'PowerShell' : 'Terminal'}</span>
+            </div>
+            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.6', margin: 0 }}>
+              {platform === 'windows'
+                ? <>Press <strong style={{ color: 'var(--text-primary)' }}>Windows key</strong>, type <strong style={{ color: 'var(--text-primary)' }}>PowerShell</strong>, and click to open it. <span style={{ color: 'var(--text-tertiary)', fontSize: '12px' }}>(Use PowerShell 7 if available — the blue "Windows PowerShell" works too.)</span></>
+                : <>Press <strong style={{ color: 'var(--text-primary)' }}>Cmd + Space</strong>, type <strong style={{ color: 'var(--text-primary)' }}>Terminal</strong>, and press Enter.</>
+              }
+            </p>
+          </div>
+
+          {/* Step 2: Download */}
+          <div style={{ padding: '16px 20px', borderRadius: '12px', background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+              {stepBubble(2)}
+              <span style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)' }}>Download the bridge</span>
+            </div>
+            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.6', margin: '0 0 4px' }}>
+              Copy this command and paste it into {platform === 'windows' ? 'PowerShell' : 'Terminal'}, then press <strong style={{ color: 'var(--text-primary)' }}>Enter</strong>:
+            </p>
+            {cmdBlock(downloadCmd, 2)}
+            <p style={{ fontSize: '11px', color: 'var(--text-tertiary)', margin: '8px 0 0' }}>
+              This downloads a small file (~84KB) to your home folder. You only need to do this once.
+            </p>
+          </div>
+
+          {/* Step 3: Start */}
+          <div style={{ padding: '16px 20px', borderRadius: '12px', background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+              {stepBubble(3)}
+              <span style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)' }}>Start the bridge</span>
+            </div>
+            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.6', margin: '0 0 4px' }}>
+              Copy and paste this command, then press <strong style={{ color: 'var(--text-primary)' }}>Enter</strong>:
+            </p>
+            {cmdBlock(runCmd, 3)}
+            <p style={{ fontSize: '11px', color: 'var(--text-tertiary)', margin: '8px 0 0' }}>
+              You should see a message like "ArcadIA Bridge running on port 8087". Keep this window open.
+            </p>
+          </div>
+
+          {/* Retry */}
+          <div style={{ textAlign: 'center', marginTop: '4px' }}>
+            <button onClick={onRetry} style={{ padding: '12px 32px', borderRadius: '10px', border: 'none', background: '#22c55e', color: '#fff', fontSize: '15px', fontWeight: 700, cursor: 'pointer' }}>
+              ✓ Done — Connect Now
+            </button>
+            <p style={{ fontSize: '11px', color: 'var(--text-tertiary)', margin: '8px 0 0' }}>
+              Make sure the bridge is running before clicking.
+            </p>
+          </div>
+
+          {/* Prerequisite note */}
+          <div style={{ padding: '12px 16px', borderRadius: '10px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', fontSize: '12px', color: 'var(--text-tertiary)', lineHeight: '1.6' }}>
+            <strong style={{ color: 'var(--text-secondary)' }}>Prerequisite:</strong> Node.js must be installed.{' '}
+            {platform === 'windows'
+              ? <>If you see "'node' is not recognized", <a href="https://nodejs.org" target="_blank" rel="noopener" style={{ color: '#818cf8' }}>download Node.js here</a> and try again.</>
+              : <>If you see "command not found: node", <a href="https://nodejs.org" target="_blank" rel="noopener" style={{ color: '#818cf8' }}>download Node.js here</a> and try again.</>
+            }
+          </div>
+        </div>
+      )}
+
+      {/* ─── Remote setup ─── */}
+      {mode === 'remote' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
           <button onClick={() => setMode('choose')} style={{ alignSelf: 'flex-start', padding: '4px 12px', borderRadius: '6px', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '12px' }}>
             ← Back
@@ -521,7 +634,7 @@ function BridgeNotConnected({ onRetry }: { onRetry: () => void }) {
           {/* Step 1 */}
           <div style={{ padding: '16px', borderRadius: '12px', background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-              <span style={{ width: '24px', height: '24px', borderRadius: '50%', background: '#6366f120', color: '#818cf8', fontSize: '13px', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>1</span>
+              {stepBubble(1)}
               <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>Download & start the bridge on your remote machine</span>
             </div>
 
@@ -545,24 +658,12 @@ function BridgeNotConnected({ onRetry }: { onRetry: () => void }) {
             <p style={{ fontSize: '11px', color: 'var(--text-tertiary)', lineHeight: '1.5', margin: '0 0 6px' }}>
               Or download via terminal on the remote machine:
             </p>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-              <code style={{ flex: 1, padding: '8px 10px', background: 'var(--bg-primary)', borderRadius: '8px', fontFamily: 'monospace', fontSize: '11px', color: '#a78bfa', userSelect: 'all', wordBreak: 'break-all', lineHeight: '1.4' }}>
-                {remoteDownloadCmd}
-              </code>
-              <button onClick={() => copyCmd(remoteDownloadCmd)} style={{ padding: '6px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-primary)', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '11px', fontWeight: 500, whiteSpace: 'nowrap' }}>Copy</button>
-            </div>
+            {cmdBlock(remoteDownloadCmd, 10)}
 
-            <p style={{ fontSize: '11px', color: 'var(--text-tertiary)', lineHeight: '1.5', margin: '0 0 6px' }}>
+            <p style={{ fontSize: '11px', color: 'var(--text-tertiary)', lineHeight: '1.5', margin: '10px 0 6px' }}>
               Then start the bridge:
             </p>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <code style={{ flex: 1, padding: '8px 10px', background: 'var(--bg-primary)', borderRadius: '8px', fontFamily: 'monospace', fontSize: '11px', color: '#a78bfa', userSelect: 'all' }}>
-                {remoteRunCmd}
-              </code>
-              <button onClick={() => copyCmd(remoteRunCmd)} style={{ padding: '6px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-primary)', color: copiedCmd ? '#22c55e' : 'var(--text-secondary)', cursor: 'pointer', fontSize: '11px', fontWeight: 500, whiteSpace: 'nowrap' }}>
-                {copiedCmd ? '✓ Copied' : 'Copy'}
-              </button>
-            </div>
+            {cmdBlock(remoteRunCmd, 11)}
             <p style={{ fontSize: '10px', color: 'var(--text-tertiary)', margin: '8px 0 0' }}>
               💡 Single file (~84KB), zero dependencies. No npm install or repo clone needed.
             </p>
@@ -571,7 +672,7 @@ function BridgeNotConnected({ onRetry }: { onRetry: () => void }) {
           {/* Step 2 */}
           <div style={{ padding: '16px', borderRadius: '12px', background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-              <span style={{ width: '24px', height: '24px', borderRadius: '50%', background: '#6366f120', color: '#818cf8', fontSize: '13px', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>2</span>
+              {stepBubble(2)}
               <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>Enter the remote machine's address</span>
             </div>
             <div style={{ display: 'flex', gap: '8px' }}>
@@ -616,7 +717,7 @@ function BridgeNotConnected({ onRetry }: { onRetry: () => void }) {
           {result && !result.ok && (
             <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', lineHeight: '1.7', padding: '12px 16px', background: 'var(--bg-secondary)', borderRadius: '10px', border: '1px solid var(--border)' }}>
               <strong style={{ color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>Troubleshooting:</strong>
-              <div>• Verify the bridge is running: <code style={{ background: 'var(--bg-primary)', padding: '1px 4px', borderRadius: '3px' }}>curl http://&lt;hostname&gt;:8087/health</code></div>
+              <div>• Make sure the bridge is running on the remote machine</div>
               <div>• Check that port 8087 is not blocked by a firewall</div>
               <div>• For OD devservers, ensure port forwarding is configured</div>
               <div>• Make sure the bridge was started with <code style={{ background: 'var(--bg-primary)', padding: '1px 4px', borderRadius: '3px' }}>--host 0.0.0.0</code></div>
@@ -636,6 +737,7 @@ export function SecondBrainPanel() {
   const [bridgeConnected, setBridgeConnected] = useState(false);
   const [bridgeVersion, setBridgeVersion] = useState<string | null>(null);
   const [bridgeOutdated, setBridgeOutdated] = useState(false);
+  const [updateCopiedStep, setUpdateCopiedStep] = useState<number | null>(null);
   const [steps, setSteps] = useState<SetupStep[]>([]);
   const [currentStepIdx, setCurrentStepIdx] = useState(0);
   const [copiedCommand, setCopiedCommand] = useState<string | null>(null);
@@ -1355,22 +1457,83 @@ Output ONLY the style guide in clean Markdown. Start with a title "# Writing Sty
   }
 
   // ─── Bridge outdated warning (shown as banner above dashboard) ────────
+  const updatePlatform = detectPlatform();
+  const BRIDGE_CDN_URL = 'https://files.manuscdn.com/user_upload_by_module/session_file/310519663326120815/fWRKXaZSkMJsFLJB.js';
+  const updateDownloadCmd = updatePlatform === 'windows'
+    ? `Invoke-WebRequest -Uri "${BRIDGE_CDN_URL}" -OutFile "$env:USERPROFILE\\arcadia-bridge.js"`
+    : `curl -sL "${BRIDGE_CDN_URL}" -o ~/arcadia-bridge.js`;
+  const updateRunCmd = updatePlatform === 'windows'
+    ? 'node "$env:USERPROFILE\\arcadia-bridge.js"'
+    : 'node ~/arcadia-bridge.js';
+  const copyUpdateCmd = (text: string, step: number) => {
+    navigator.clipboard.writeText(text);
+    setUpdateCopiedStep(step);
+    setTimeout(() => setUpdateCopiedStep(null), 2000);
+  };
+
   const bridgeOutdatedBanner = bridgeOutdated && bridgeVersion ? (
     <div style={{
-      marginBottom: '16px', padding: '12px 16px', borderRadius: '10px',
-      background: '#f59e0b10', border: '1px solid #f59e0b30',
-      fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.6',
+      marginBottom: '16px', padding: '20px', borderRadius: '12px',
+      background: '#f59e0b08', border: '1px solid #f59e0b25',
     }}>
-      <strong style={{ color: '#f59e0b' }}>⚠️ Bridge outdated (v{bridgeVersion}).</strong>{' '}
-      Some features (Google Drive, Second Brain setup) require bridge v{MIN_BRIDGE_VERSION}+. Please update:
-      <code style={{ display: 'block', marginTop: '8px', padding: '8px 12px', background: 'var(--bg-primary)', borderRadius: '6px', fontSize: '12px', fontFamily: 'monospace', color: 'var(--text-primary)', userSelect: 'all' }}>
-        {detectPlatform() === 'windows'
-          ? `Invoke-WebRequest -Uri "https://files.manuscdn.com/user_upload_by_module/session_file/310519663326120815/fWRKXaZSkMJsFLJB.js" -OutFile "$env:USERPROFILE\\arcadia-bridge.js"`
-          : `curl -sL "https://files.manuscdn.com/user_upload_by_module/session_file/310519663326120815/fWRKXaZSkMJsFLJB.js" -o ~/arcadia-bridge.js`
-        }
-      </code>
-      <div style={{ marginTop: '6px', fontSize: '11px', color: 'var(--text-tertiary)' }}>
-        Then restart the bridge.
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
+        <span style={{ fontSize: '22px' }}>🔄</span>
+        <div>
+          <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>Bridge Update Available</div>
+          <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>Your bridge is v{bridgeVersion} — v{MIN_BRIDGE_VERSION} is now available with new features</div>
+        </div>
+      </div>
+
+      <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.6', margin: '0 0 14px' }}>
+        A newer version of the bridge is available. Update in 3 quick steps:
+      </p>
+
+      {/* Step 1: Stop */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', marginBottom: '12px' }}>
+        <span style={{ width: '24px', height: '24px', borderRadius: '50%', background: '#f59e0b18', color: '#f59e0b', fontSize: '12px', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: '1px' }}>1</span>
+        <div style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.5' }}>
+          <strong style={{ color: 'var(--text-primary)' }}>Stop the bridge</strong> — go to the {updatePlatform === 'windows' ? 'PowerShell' : 'Terminal'} window where it's running and press <strong style={{ color: 'var(--text-primary)' }}>Ctrl+C</strong>
+        </div>
+      </div>
+
+      {/* Step 2: Download new version */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', marginBottom: '12px' }}>
+        <span style={{ width: '24px', height: '24px', borderRadius: '50%', background: '#f59e0b18', color: '#f59e0b', fontSize: '12px', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: '1px' }}>2</span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.5', marginBottom: '6px' }}>
+            <strong style={{ color: 'var(--text-primary)' }}>Download the update</strong> — paste this command and press Enter:
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <code style={{ flex: 1, padding: '8px 10px', background: 'var(--bg-primary)', borderRadius: '8px', fontFamily: 'monospace', fontSize: '11px', color: '#a78bfa', userSelect: 'all', wordBreak: 'break-all', lineHeight: '1.4' }}>{updateDownloadCmd}</code>
+            <button onClick={() => copyUpdateCmd(updateDownloadCmd, 1)} style={{ padding: '5px 12px', borderRadius: '6px', border: '1px solid var(--border)', background: updateCopiedStep === 1 ? '#22c55e18' : 'var(--bg-primary)', color: updateCopiedStep === 1 ? '#22c55e' : 'var(--text-secondary)', cursor: 'pointer', fontSize: '11px', fontWeight: 600, whiteSpace: 'nowrap', transition: 'all 0.2s' }}>
+              {updateCopiedStep === 1 ? '✓ Copied!' : '📋 Copy'}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Step 3: Restart */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', marginBottom: '12px' }}>
+        <span style={{ width: '24px', height: '24px', borderRadius: '50%', background: '#f59e0b18', color: '#f59e0b', fontSize: '12px', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: '1px' }}>3</span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.5', marginBottom: '6px' }}>
+            <strong style={{ color: 'var(--text-primary)' }}>Restart the bridge</strong> — paste this command and press Enter:
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <code style={{ flex: 1, padding: '8px 10px', background: 'var(--bg-primary)', borderRadius: '8px', fontFamily: 'monospace', fontSize: '11px', color: '#a78bfa', userSelect: 'all', lineHeight: '1.4' }}>{updateRunCmd}</code>
+            <button onClick={() => copyUpdateCmd(updateRunCmd, 2)} style={{ padding: '5px 12px', borderRadius: '6px', border: '1px solid var(--border)', background: updateCopiedStep === 2 ? '#22c55e18' : 'var(--bg-primary)', color: updateCopiedStep === 2 ? '#22c55e' : 'var(--text-secondary)', cursor: 'pointer', fontSize: '11px', fontWeight: 600, whiteSpace: 'nowrap', transition: 'all 0.2s' }}>
+              {updateCopiedStep === 2 ? '✓ Copied!' : '📋 Copy'}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Re-scan button */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '14px', paddingTop: '12px', borderTop: '1px solid #f59e0b15' }}>
+        <button onClick={runDetection} style={{ padding: '8px 20px', borderRadius: '8px', border: 'none', background: '#f59e0b', color: '#fff', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>
+          ✓ Done — Re-scan
+        </button>
+        <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>Click after restarting the bridge to verify the update.</span>
       </div>
     </div>
   ) : null;
