@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { ToolDefinition } from '../../types';
+import { getBridgeUrl } from '../../services/bridge';
 
 // ─── Tool Definitions for Claude API ─────────────────────────────────────────
 
@@ -364,18 +365,20 @@ export function IntegrationsPanel() {
   const [bridgeConnected, setBridgeConnected] = useState(false);
   const [githubTokenValid, setGithubTokenValid] = useState<boolean | null>(null);
   const [checkingGithub, setCheckingGithub] = useState(false);
+  const [gdriveChecking, setGdriveChecking] = useState(false);
+  const [gdriveStatus, setGdriveStatus] = useState<{ connected: boolean; driveRoot?: string; workspacePath?: string } | null>(null);
 
   useEffect(() => {
     saveIntegrations(config);
   }, [config]);
 
-  // Check bridge connectivity on mount
+  // Check bridge connectivity on mount (use dynamic bridge URL)
   useEffect(() => {
     const checkBridge = async () => {
       try {
         const ctrl = new AbortController();
         const timer = setTimeout(() => ctrl.abort(), 3000);
-        const res = await fetch('http://127.0.0.1:8087/health', { signal: ctrl.signal });
+        const res = await fetch(`${getBridgeUrl()}/health`, { signal: ctrl.signal });
         clearTimeout(timer);
         setBridgeConnected(res.ok);
       } catch {
@@ -385,6 +388,29 @@ export function IntegrationsPanel() {
     checkBridge();
     const interval = setInterval(checkBridge, 30000);
     return () => clearInterval(interval);
+  }, []);
+
+  // Check Google Drive status via bridge
+  const checkGDriveStatus = useCallback(async () => {
+    setGdriveChecking(true);
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 5000);
+      const res = await fetch(`${getBridgeUrl()}/v1/gdrive/status`, { signal: ctrl.signal });
+      clearTimeout(timer);
+      if (res.ok) {
+        const data = await res.json();
+        setGdriveStatus(data);
+        if (data.connected) {
+          setConfig(prev => ({ ...prev, gdrive: { connected: true, email: 'via bridge' } }));
+        }
+      } else {
+        setGdriveStatus({ connected: false });
+      }
+    } catch {
+      setGdriveStatus({ connected: false });
+    }
+    setGdriveChecking(false);
   }, []);
 
   // Validate GitHub token when it changes
@@ -417,6 +443,7 @@ export function IntegrationsPanel() {
         if (githubTokenValid === true) return 'ready';
         return 'needs_setup';
       case 'gdrive':
+        if (config.gdrive?.connected && gdriveStatus?.connected) return 'ready';
         if (config.gdrive?.connected) return 'ready';
         return 'needs_setup';
       case 'web':
@@ -589,7 +616,7 @@ export function IntegrationsPanel() {
       icon: '📁',
       name: 'Google Drive',
       shortDesc: 'Browse, read, and create documents in your Google Drive.',
-      longDesc: 'Connect your Google account to let Claude list your Drive files, read Google Docs, and create new documents — all from the chat. Your files stay private and Claude only accesses what you ask about.',
+      longDesc: 'Access your Google Drive files through the ArcadIA Bridge. The bridge reads files directly from your locally-mounted Google Drive — no OAuth or cloud API setup needed. Just have Google Drive for Desktop installed and the bridge running.',
       whatYouCanDo: [
         '"List my recent Drive files" — browse your documents',
         '"Read my Q1 Report doc" — open and read any file',
@@ -599,66 +626,74 @@ export function IntegrationsPanel() {
       color: '#22c55e',
       requiresSetup: true,
       requirements: [
-        { label: 'Google account', met: true },
-        { label: 'OAuth connection', met: !!config.gdrive?.connected },
+        { label: 'ArcadIA Bridge running', met: bridgeConnected },
+        { label: 'Google Drive for Desktop installed', met: !!gdriveStatus?.connected },
       ],
       setup: (
         <div style={styles.setupBox}>
           <div style={styles.setupTitle}>
             <span>🔧</span> Setup Guide
-            <span style={styles.badge('#22c55e20', '#22c55e')}>1 min setup</span>
+            <span style={styles.badge('#22c55e20', '#22c55e')}>Automatic</span>
             {config.gdrive?.connected && <span style={styles.badge('#22c55e20', '#22c55e')}>Connected</span>}
           </div>
 
           <div style={styles.infoBox('#22c55e')}>
-            <strong>How does this work?</strong> You'll sign in with your Google account in a popup window. ArcadIA can then access your Drive files on your behalf. You can revoke access anytime from your Google account settings.
+            <strong>How does this work?</strong> The ArcadIA Bridge reads files directly from your locally-mounted Google Drive folder. No OAuth tokens or Google Cloud setup needed — if you have Google Drive for Desktop installed, it just works.
           </div>
 
           <div style={{ marginTop: '12px' }}>
             <div style={styles.stepRow}>
               <span style={styles.stepNumber('#22c55e')}>1</span>
               <div style={styles.stepText}>
-                <strong>Click "Connect Google Account"</strong> below. A popup will open.
+                <strong>Install Google Drive for Desktop</strong> — download from{' '}
+                <a href="https://www.google.com/drive/download/" target="_blank" rel="noopener" style={{ color: '#22c55e', textDecoration: 'underline' }}>google.com/drive/download</a>
+                {' '}and sign in with your Google account.
               </div>
             </div>
 
             <div style={styles.stepRow}>
               <span style={styles.stepNumber('#22c55e')}>2</span>
               <div style={styles.stepText}>
-                <strong>Sign in</strong> with your Google account and click "Allow" to grant access. The popup will close automatically.
+                <strong>Start the ArcadIA Bridge</strong> — the bridge automatically detects your Google Drive mount point.
+              </div>
+            </div>
+
+            <div style={styles.stepRow}>
+              <span style={styles.stepNumber('#22c55e')}>3</span>
+              <div style={styles.stepText}>
+                <strong>Click "Check Connection"</strong> below to verify everything is working.
               </div>
             </div>
           </div>
 
-          <div style={{ marginTop: '4px', marginLeft: '32px' }}>
+          <div style={{ marginTop: '8px', marginLeft: '32px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
             <button
-              onClick={() => {
-                const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
-                if (!clientId) {
-                  alert('Google OAuth is not configured yet.\n\nThis feature requires a Google Cloud OAuth Client ID.\nContact your admin or check the setup documentation for details.');
-                  return;
-                }
-                const params = new URLSearchParams({
-                  client_id: clientId,
-                  redirect_uri: `${window.location.origin}/auth/google/callback`,
-                  response_type: 'token',
-                  scope: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly',
-                });
-                window.open(`https://accounts.google.com/o/oauth2/auth?${params}`, '_blank', 'width=500,height=600');
-              }}
-              style={styles.btn('#4285f4')}
+              onClick={checkGDriveStatus}
+              disabled={gdriveChecking}
+              style={styles.btn(gdriveChecking ? '#22c55e88' : '#22c55e')}
             >
-              <span>🔗</span> Connect Google Account
+              {gdriveChecking ? 'Checking...' : '🔍 Check Connection'}
             </button>
-            {config.gdrive?.connected && (
-              <div style={{ marginTop: '8px', fontSize: '12px', color: '#22c55e', fontWeight: 600 }}>
-                ✓ Connected as {config.gdrive.email}
+            {gdriveStatus?.connected && (
+              <div style={{ fontSize: '12px', color: '#22c55e', fontWeight: 600 }}>
+                ✓ Google Drive detected{gdriveStatus.driveRoot ? ` at ${gdriveStatus.driveRoot}` : ''}
+              </div>
+            )}
+            {gdriveStatus && !gdriveStatus.connected && (
+              <div style={{ fontSize: '12px', color: '#ef4444', fontWeight: 600 }}>
+                ✗ Google Drive not found. Make sure it's installed and the bridge is running.
               </div>
             )}
           </div>
 
+          {gdriveStatus?.workspacePath && (
+            <div style={{ marginTop: '8px', marginLeft: '32px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+              📂 Second Brain workspace: <code style={{ background: 'var(--bg-primary)', padding: '1px 4px', borderRadius: '3px', fontSize: '11px' }}>{gdriveStatus.workspacePath}</code>
+            </div>
+          )}
+
           <div style={{ ...styles.infoBox('#22c55e'), marginTop: '12px' }}>
-            <strong>Privacy:</strong> ArcadIA can only access files you explicitly ask about in conversations. It cannot browse your entire Drive on its own.
+            <strong>Privacy:</strong> All file access happens locally through the bridge on your machine. No data is sent to any cloud API. ArcadIA can only access files you explicitly ask about in conversations.
           </div>
         </div>
       ),
@@ -777,7 +812,7 @@ export function IntegrationsPanel() {
         }}>
           <strong style={{ color: '#ef4444' }}>Bridge not detected.</strong> Some integrations (Web Search, Code Execution) require the ArcadIA Bridge to be running on your machine. Start it with:
           <code style={{ display: 'block', marginTop: '8px', padding: '8px 12px', background: 'var(--bg-primary)', borderRadius: '6px', fontSize: '12px', fontFamily: 'monospace', color: 'var(--text-primary)' }}>
-            cd ~/Arcadia && node bridge/arcadia-bridge.js
+            node ~/arcadia-bridge.js
           </code>
         </div>
       )}

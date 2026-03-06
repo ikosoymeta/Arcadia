@@ -356,25 +356,37 @@ curl -sL https://raw.githubusercontent.com/ikosoymeta/Arcadia/main/bridge/arcadi
 node ~/arcadia-bridge.js --host 0.0.0.0
 ```
 
-**Windows (PowerShell or Command Prompt):**
+**Windows (PowerShell 7+ or Command Prompt):**
 
 ```powershell
 # Download the bridge (one-time)
 # Option A: Download from CDN (recommended)
-Invoke-WebRequest -Uri "https://files.manuscdn.com/user_upload_by_module/session_file/310519663326120815/BpnQIHTwBWLxOLsq.js" -OutFile "$HOME\arcadia-bridge.js"
+Invoke-WebRequest -Uri "https://files.manuscdn.com/user_upload_by_module/session_file/310519663326120815/BpnQIHTwBWLxOLsq.js" -OutFile "$env:USERPROFILE\arcadia-bridge.js"
 
 # Option B: Download from GitHub (if CDN is blocked)
 curl.exe -sL https://raw.githubusercontent.com/ikosoymeta/Arcadia/main/bridge/arcadia-bridge.js -o %USERPROFILE%\arcadia-bridge.js
 
 # Start the bridge (run each time)
-node $HOME\arcadia-bridge.js --host 0.0.0.0
+node "$env:USERPROFILE\arcadia-bridge.js" --host 0.0.0.0
 ```
+
+> **Important for Windows users:**
+> - Use **PowerShell 7+** or **Command Prompt** (not Windows PowerShell 5.x which doesn't support `&&`)
+> - Do NOT run the bridge inside **Sandboxie** — it causes SBIE2205 errors. Use a regular terminal.
+> - If using Command Prompt, replace `$env:USERPROFILE` with `%USERPROFILE%`
 
 The `--host 0.0.0.0` flag is required so the bridge accepts connections from other machines (not just localhost).
 
-Alternatively, if you already have the Arcadia repo cloned on the remote machine, you can run:
+Alternatively, if you already have the Arcadia repo cloned on the remote machine:
+
+**Mac/Linux:**
 ```bash
-cd ~/Arcadia && node bridge/arcadia-bridge.js --host 0.0.0.0
+cd ~/Arcadia; node bridge/arcadia-bridge.js --host 0.0.0.0
+```
+
+**Windows PowerShell:**
+```powershell
+cd $env:USERPROFILE\Arcadia; node bridge\arcadia-bridge.js --host 0.0.0.0
 ```
 
 **Step 2: Connect from ArcadIA**

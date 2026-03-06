@@ -104,9 +104,9 @@ export function SettingsPanel() {
       run: `node ~/arcadia-bridge.js --host 0.0.0.0`,
     },
     windows: {
-      download: `Invoke-WebRequest -Uri "${BRIDGE_CDN_URL}" -OutFile "$HOME\\arcadia-bridge.js"`,
+      download: `Invoke-WebRequest -Uri "${BRIDGE_CDN_URL}" -OutFile "$env:USERPROFILE\\arcadia-bridge.js"`,
       downloadAlt: `curl.exe -sL "${BRIDGE_GH_URL}" -o %USERPROFILE%\\arcadia-bridge.js`,
-      run: `node $HOME\\arcadia-bridge.js --host 0.0.0.0`,
+      run: `node "$env:USERPROFILE\\arcadia-bridge.js" --host 0.0.0.0`,
     },
   };
 
@@ -595,7 +595,7 @@ export function SettingsPanel() {
                 {/* Prerequisites */}
                 <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginBottom: '8px', lineHeight: '1.5' }}>
                   <strong style={{ color: 'var(--text-secondary)' }}>Prerequisites:</strong> Node.js 18+ and Claude Code CLI installed on the remote machine.
-                  {bridgePlatform === 'windows' && <span> On Windows, use PowerShell or Command Prompt.</span>}
+                  {bridgePlatform === 'windows' && <span> On Windows, use <strong>PowerShell 7+</strong> or <strong>Command Prompt</strong>. Do NOT run inside Sandboxie (causes SBIE2205 errors).</span>}
                 </div>
 
                 {/* Step 1a: Download */}

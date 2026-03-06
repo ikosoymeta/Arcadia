@@ -1,10 +1,16 @@
 #!/usr/bin/env node
 /**
- * ArcadIA Bridge v3.4.2 — Local proxy connecting ArcadIA web app to Claude Code
+ * ArcadIA Bridge v3.5.0 — Local proxy connecting ArcadIA web app to Claude Code
  * 
  * Runs on localhost:8087 and forwards requests from the ArcadIA web app
  * to Claude Code CLI, which handles Meta internal authentication.
  * 
+ * v3.5.0:
+ * - Google Drive file API: /v1/gdrive/status, /v1/gdrive/list, /v1/gdrive/read, /v1/gdrive/create
+ * - --host flag support for remote access (e.g. --host 0.0.0.0)
+ * - /v1/version endpoint with feature flags for bridge version checking
+ * - Windows PowerShell compatibility fixes
+ *
  * v3.4.2:
  * - Dynamic Google Drive path discovery: scans ~/Library/CloudStorage/ for any GoogleDrive-* folder
  * - Improved skills detection: checks multiple locations + claude-templates list
@@ -36,8 +42,13 @@ const { spawn, execSync } = require('child_process');
 const os = require('os');
 
 const PORT = 8087;
-const HOST = '127.0.0.1';
-const VERSION = '3.4.2';
+// Parse --host flag for remote access (e.g., --host 0.0.0.0)
+const HOST = (() => {
+  const idx = process.argv.indexOf('--host');
+  if (idx !== -1 && process.argv[idx + 1]) return process.argv[idx + 1];
+  return '127.0.0.1';
+})();
+const VERSION = '3.5.0';
 const IS_WIN = process.platform === 'win32';
 const TIMEOUT_MS = 180000; // 3 minute timeout for regular messages
 const SLASH_CMD_TIMEOUT_MS = 600000; // 10 minute timeout for slash commands
@@ -445,6 +456,10 @@ function handleHealthCheck(res, req) {
       streaming: true,
       structured_messages: true,
       context_management: true,
+      secondbrain_detect: true,
+      secondbrain_setup: true,
+      gdrive_api: true,
+      version_endpoint: true,
     },
     stats: {
       total_requests: totalRequests,
@@ -2039,6 +2054,236 @@ function handleAutoFix(req, res, body) {
   handleMessages(req, res, syntheticBody);
 }
 
+// ─── Google Drive API endpoints ──────────────────────────────────────────
+
+function getGDriveRoot() {
+  const fs = require('fs');
+  const home = process.env.HOME || os.homedir();
+  const username = process.env.USER || os.userInfo().username;
+  const paths = findGoogleDrivePaths(home, username, '');
+  for (const p of paths) {
+    if (fs.existsSync(p)) return p;
+  }
+  return null;
+}
+
+function handleGDriveStatus(req, res) {
+  setCorsHeaders(res, req);
+  const root = getGDriveRoot();
+  const fs = require('fs');
+  const home = process.env.HOME || os.homedir();
+  const username = process.env.USER || os.userInfo().username;
+  const workspacePaths = findGoogleDrivePaths(home, username, 'claude');
+  let workspacePath = null;
+  for (const p of workspacePaths) {
+    if (fs.existsSync(p)) { workspacePath = p; break; }
+  }
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({
+    connected: !!root,
+    driveRoot: root,
+    workspacePath,
+    platform: process.platform,
+    version: VERSION,
+  }));
+}
+
+function handleGDriveList(req, res, body) {
+  setCorsHeaders(res, req);
+  const fs = require('fs');
+  const path = require('path');
+  let payload = {};
+  try { payload = JSON.parse(body); } catch {}
+  
+  const root = getGDriveRoot();
+  if (!root) {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: false, error: 'Google Drive not mounted' }));
+    return;
+  }
+  
+  const targetDir = payload.folder ? path.join(root, payload.folder) : root;
+  const limit = payload.limit || 50;
+  const query = (payload.query || '').toLowerCase();
+  
+  try {
+    if (!fs.existsSync(targetDir)) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: `Folder not found: ${payload.folder || '/'}` }));
+      return;
+    }
+    
+    const entries = fs.readdirSync(targetDir, { withFileTypes: true });
+    let files = entries
+      .filter(e => !e.name.startsWith('.'))
+      .map(e => {
+        const fullPath = path.join(targetDir, e.name);
+        let stat;
+        try { stat = fs.statSync(fullPath); } catch { return null; }
+        return {
+          name: e.name,
+          type: e.isDirectory() ? 'folder' : 'file',
+          size: stat.size,
+          modified: stat.mtime.toISOString(),
+          path: path.relative(root, fullPath),
+        };
+      })
+      .filter(Boolean);
+    
+    if (query) {
+      files = files.filter(f => f.name.toLowerCase().includes(query));
+    }
+    
+    // Sort: folders first, then by modified date descending
+    files.sort((a, b) => {
+      if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
+      return new Date(b.modified) - new Date(a.modified);
+    });
+    
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      success: true,
+      files: files.slice(0, limit),
+      total: files.length,
+      folder: payload.folder || '/',
+      driveRoot: root,
+    }));
+  } catch (e) {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: false, error: e.message }));
+  }
+}
+
+function handleGDriveRead(req, res, body) {
+  setCorsHeaders(res, req);
+  const fs = require('fs');
+  const path = require('path');
+  let payload;
+  try { payload = JSON.parse(body); } catch {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Invalid JSON' }));
+    return;
+  }
+  
+  const root = getGDriveRoot();
+  if (!root) {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: false, error: 'Google Drive not mounted' }));
+    return;
+  }
+  
+  const filePath = path.join(root, payload.path || '');
+  // Security: ensure path is within drive root
+  if (!filePath.startsWith(root)) {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: false, error: 'Access denied: path outside Drive' }));
+    return;
+  }
+  
+  try {
+    if (!fs.existsSync(filePath)) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: `File not found: ${payload.path}` }));
+      return;
+    }
+    
+    const stat = fs.statSync(filePath);
+    if (stat.isDirectory()) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: 'Path is a directory, use /v1/gdrive/list instead' }));
+      return;
+    }
+    
+    // Read text files (up to 5MB)
+    if (stat.size > 5 * 1024 * 1024) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: `File too large: ${(stat.size / 1024 / 1024).toFixed(1)}MB (max 5MB)` }));
+      return;
+    }
+    
+    const content = fs.readFileSync(filePath, 'utf-8');
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      success: true,
+      path: payload.path,
+      name: path.basename(filePath),
+      content,
+      size: stat.size,
+      modified: stat.mtime.toISOString(),
+    }));
+  } catch (e) {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: false, error: e.message }));
+  }
+}
+
+function handleGDriveCreate(req, res, body) {
+  setCorsHeaders(res, req);
+  const fs = require('fs');
+  const path = require('path');
+  let payload;
+  try { payload = JSON.parse(body); } catch {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Invalid JSON' }));
+    return;
+  }
+  
+  const root = getGDriveRoot();
+  if (!root) {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: false, error: 'Google Drive not mounted' }));
+    return;
+  }
+  
+  const folder = payload.folder || 'claude/notes';
+  const title = payload.title || `Untitled ${new Date().toISOString().slice(0, 10)}`;
+  const content = payload.content || '';
+  const ext = payload.extension || '.md';
+  
+  const dirPath = path.join(root, folder);
+  const filePath = path.join(dirPath, `${title}${ext}`);
+  
+  // Security: ensure path is within drive root
+  if (!filePath.startsWith(root)) {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: false, error: 'Access denied: path outside Drive' }));
+    return;
+  }
+  
+  try {
+    fs.mkdirSync(dirPath, { recursive: true });
+    fs.writeFileSync(filePath, content, 'utf-8');
+    console.log(`[${new Date().toISOString()}] 📁 GDrive: Created ${filePath}`);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      success: true,
+      path: path.relative(root, filePath),
+      fullPath: filePath,
+      name: `${title}${ext}`,
+    }));
+  } catch (e) {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: false, error: e.message }));
+  }
+}
+
+function handleVersionCheck(req, res) {
+  setCorsHeaders(res, req);
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({
+    version: VERSION,
+    features: {
+      secondbrain_detect: true,
+      secondbrain_setup: true,
+      gdrive_api: true,
+      auto_fix: true,
+      process_pool: true,
+    },
+    min_frontend_version: '3.5.0',
+    platform: process.platform,
+  }));
+}
+
 // ─── HTTP Server ───────────────────────────────────────────────────────────
 const server = http.createServer((req, res) => {
   if (req.method === 'OPTIONS') {
@@ -2050,6 +2295,16 @@ const server = http.createServer((req, res) => {
 
   if (req.method === 'GET' && (req.url === '/' || req.url === '/health')) {
     handleHealthCheck(res, req);
+    return;
+  }
+
+  if (req.method === 'GET' && req.url === '/v1/version') {
+    handleVersionCheck(req, res);
+    return;
+  }
+
+  if (req.method === 'GET' && req.url === '/v1/gdrive/status') {
+    handleGDriveStatus(req, res);
     return;
   }
 
@@ -2094,6 +2349,27 @@ const server = http.createServer((req, res) => {
     let body = '';
     req.on('data', chunk => { body += chunk; });
     req.on('end', () => handleAutoFix(req, res, body));
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/v1/gdrive/list') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => handleGDriveList(req, res, body));
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/v1/gdrive/read') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => handleGDriveRead(req, res, body));
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/v1/gdrive/create') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => handleGDriveCreate(req, res, body));
     return;
   }
 

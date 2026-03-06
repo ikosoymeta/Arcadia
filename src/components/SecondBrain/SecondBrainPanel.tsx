@@ -120,6 +120,35 @@ async function checkBridge(): Promise<boolean> {
   } catch { return false; }
 }
 
+async function checkBridgeVersion(): Promise<{ version: string; features: Record<string, boolean> } | null> {
+  try {
+    const c = new AbortController();
+    const t = setTimeout(() => c.abort(), 3000);
+    const r = await fetch(`${BRIDGE()}/v1/version`, { signal: c.signal });
+    clearTimeout(t);
+    if (r.ok) return await r.json();
+    // Fallback: try health endpoint for version
+    const h = await fetch(`${BRIDGE()}/health`, { signal: new AbortController().signal });
+    if (h.ok) {
+      const data = await h.json();
+      return { version: data.version || 'unknown', features: data.capabilities || {} };
+    }
+    return null;
+  } catch { return null; }
+}
+
+function compareVersions(a: string, b: string): number {
+  const pa = a.split('.').map(Number);
+  const pb = b.split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    if ((pa[i] || 0) > (pb[i] || 0)) return 1;
+    if ((pa[i] || 0) < (pb[i] || 0)) return -1;
+  }
+  return 0;
+}
+
+const MIN_BRIDGE_VERSION = '3.5.0';
+
 // ─── Download helpers ───────────────────────────────────────────────────────
 
 function downloadFile(content: string, filename: string, mimeType: string = 'text/plain') {
@@ -423,10 +452,10 @@ function BridgeNotConnected({ onRetry }: { onRetry: () => void }) {
   const [remotePlatform, setRemotePlatform] = useState<'mac' | 'windows'>(detectPlatform);
   const remoteDownloadCmd = remotePlatform === 'mac'
     ? `curl -sL "${BRIDGE_CDN}" -o ~/arcadia-bridge.js`
-    : `Invoke-WebRequest -Uri "${BRIDGE_CDN}" -OutFile "$HOME\\arcadia-bridge.js"`;
+    : `Invoke-WebRequest -Uri "${BRIDGE_CDN}" -OutFile "$env:USERPROFILE\\arcadia-bridge.js"`;
   const remoteRunCmd = remotePlatform === 'mac'
     ? 'node ~/arcadia-bridge.js --host 0.0.0.0'
-    : 'node $HOME\\arcadia-bridge.js --host 0.0.0.0';
+    : 'node "$env:USERPROFILE\\arcadia-bridge.js" --host 0.0.0.0';
 
   const copyCmd = (cmd?: string) => {
     navigator.clipboard.writeText(cmd || remoteRunCmd);
@@ -449,7 +478,7 @@ function BridgeNotConnected({ onRetry }: { onRetry: () => void }) {
               <span style={{ fontSize: '20px' }}>💻</span>
               <div>
                 <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>Local Connection</div>
-                <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Bridge running on this computer (Mac)</div>
+                <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Bridge running on this computer</div>
               </div>
             </div>
             <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', lineHeight: '1.5', margin: '0 0 12px' }}>
@@ -457,7 +486,7 @@ function BridgeNotConnected({ onRetry }: { onRetry: () => void }) {
             </p>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
               <code style={{ flex: 1, padding: '8px 10px', background: 'var(--bg-primary)', borderRadius: '6px', fontFamily: 'monospace', fontSize: '12px', color: '#a78bfa', userSelect: 'all' }}>
-                cd ~/Arcadia && node bridge/arcadia-bridge.js
+                {detectPlatform() === 'windows' ? 'node %USERPROFILE%\\arcadia-bridge.js' : 'node ~/arcadia-bridge.js'}
               </code>
             </div>
             <button onClick={onRetry} style={{ padding: '8px 20px', borderRadius: '8px', border: 'none', background: '#6366f1', color: '#fff', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>
@@ -605,6 +634,8 @@ export function SecondBrainPanel() {
   const [phase, setPhase] = useState<Phase>('detecting');
   const [detection, setDetection] = useState<DetectionResult | null>(null);
   const [bridgeConnected, setBridgeConnected] = useState(false);
+  const [bridgeVersion, setBridgeVersion] = useState<string | null>(null);
+  const [bridgeOutdated, setBridgeOutdated] = useState(false);
   const [steps, setSteps] = useState<SetupStep[]>([]);
   const [currentStepIdx, setCurrentStepIdx] = useState(0);
   const [copiedCommand, setCopiedCommand] = useState<string | null>(null);
@@ -652,6 +683,16 @@ export function SecondBrainPanel() {
     console.log('[SecondBrain] bridge connected:', connected);
     setBridgeConnected(connected);
     if (!connected) { setPhase('dashboard'); return; }
+    // Check bridge version
+    const versionInfo = await checkBridgeVersion();
+    if (versionInfo) {
+      setBridgeVersion(versionInfo.version);
+      const outdated = compareVersions(versionInfo.version, MIN_BRIDGE_VERSION) < 0;
+      setBridgeOutdated(outdated);
+      if (outdated) {
+        console.log(`[SecondBrain] Bridge v${versionInfo.version} is outdated (need v${MIN_BRIDGE_VERSION}+)`);
+      }
+    }
     const result = await detect();
     console.log('[SecondBrain] detection result summary:', result?.summary);
     console.log('[SecondBrain] claudeCode:', result?.claudeCode);
@@ -1313,6 +1354,27 @@ Output ONLY the style guide in clean Markdown. Start with a title "# Writing Sty
     return (<BridgeNotConnected onRetry={runDetection} />);
   }
 
+  // ─── Bridge outdated warning (shown as banner above dashboard) ────────
+  const bridgeOutdatedBanner = bridgeOutdated && bridgeVersion ? (
+    <div style={{
+      marginBottom: '16px', padding: '12px 16px', borderRadius: '10px',
+      background: '#f59e0b10', border: '1px solid #f59e0b30',
+      fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.6',
+    }}>
+      <strong style={{ color: '#f59e0b' }}>⚠️ Bridge outdated (v{bridgeVersion}).</strong>{' '}
+      Some features (Google Drive, Second Brain setup) require bridge v{MIN_BRIDGE_VERSION}+. Please update:
+      <code style={{ display: 'block', marginTop: '8px', padding: '8px 12px', background: 'var(--bg-primary)', borderRadius: '6px', fontSize: '12px', fontFamily: 'monospace', color: 'var(--text-primary)', userSelect: 'all' }}>
+        {detectPlatform() === 'windows'
+          ? `Invoke-WebRequest -Uri "https://files.manuscdn.com/user_upload_by_module/session_file/310519663326120815/BpnQIHTwBWLxOLsq.js" -OutFile "$env:USERPROFILE\\arcadia-bridge.js"`
+          : `curl -sL "https://files.manuscdn.com/user_upload_by_module/session_file/310519663326120815/BpnQIHTwBWLxOLsq.js" -o ~/arcadia-bridge.js`
+        }
+      </code>
+      <div style={{ marginTop: '6px', fontSize: '11px', color: 'var(--text-tertiary)' }}>
+        Then restart the bridge.
+      </div>
+    </div>
+  ) : null;
+
   // ─── Installing (progress view) ────────────────────────────────────────
 
   if (phase === 'installing') {
@@ -1425,6 +1487,9 @@ Output ONLY the style guide in clean Markdown. Start with a title "# Writing Sty
           <h2 style={{ fontSize: '22px', fontWeight: 800, color: 'var(--text-primary)', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '10px' }}>🧠 Second Brain</h2>
           <p style={{ fontSize: '14px', color: 'var(--text-secondary)', lineHeight: '1.6' }}>Your AI-powered personal knowledge system — powered by Claude Code and Google Drive.</p>
         </div>
+
+        {/* Bridge outdated warning */}
+        {bridgeOutdatedBanner}
 
         {/* Status overview */}
         <div style={{ display: 'flex', gap: '12px', marginBottom: '20px', flexWrap: 'wrap' }}>
