@@ -8,6 +8,7 @@ import { trackMessage } from '../../services/analytics';
 import type { Message, Artifact, ImageAttachment, ToolUseBlock } from '../../types';
 import { CLAUDE_MODELS } from '../../types';
 import styles from './SimpleView.module.css';
+import { PresentationDialog } from './PresentationDialog';
 
 // ─── Quick suggestion prompts ─────────────────────────────────────────────────
 
@@ -18,6 +19,10 @@ const SUGGESTIONS = [
   { icon: '🎯', label: 'Project status update', prompt: 'Help me write a project status update. Ask me about the project name, what was accomplished this week, blockers, next steps, and any risks. Format it as a clean status report ready to share with stakeholders.' },
   { icon: '📝', label: 'HPM Self-Review', prompt: 'Help me draft my HPM self-review for this half. Ask me about my role, key projects, and accomplishments. Then write a draft with sections for Impact, Execution, and Collaboration.' },
   { icon: '💡', label: 'Brainstorm ideas', prompt: 'Help me brainstorm. I\'ll describe a challenge or opportunity, and you generate a range of creative solutions and approaches. Organize them by effort level (quick wins vs. bigger bets) so I can prioritize.' },
+  { icon: '📅', label: 'Organize my day', prompt: 'Act as an executive productivity coach. Help me organize my day. Ask me about my goals for today, tasks, meetings, and deadlines. Then: 1) Identify my top 3 priorities, 2) Suggest a structured schedule, 3) Highlight tasks that can be automated or delegated, 4) Recommend the highest-impact activities for today.' },
+  { icon: '🔍', label: 'Research a topic', prompt: 'Act as a professional research analyst. Ask me what topic I want to research. Then provide: 1) Key insights, 2) Current trends, 3) Important statistics, 4) Major companies or players involved, 5) Opportunities or risks in this space. Be thorough and cite sources where possible.' },
+  { icon: '🧩', label: 'Clarify an idea', prompt: 'I will share a rough idea or unstructured thoughts. Your task is to: Clarify the core idea, organize it logically, identify missing pieces, and suggest improvements. Ask me to share my idea, then restructure it into something clear and actionable.' },
+  { icon: '✨', label: 'Improve writing', prompt: 'Improve the text I share to make it: clearer, more persuasive, more concise, and more professional. Keep the original meaning but significantly improve the quality of the writing. Ask me to paste the text I want improved.' },
 ];
 
 // ─── Follow-up suggestions based on response type ─────────────────────────────
@@ -38,6 +43,21 @@ function getFollowUpSuggestions(content: string): string[] {
   }
   if (lower.includes('data') || lower.includes('metric') || lower.includes('number') || lower.includes('chart')) {
     return ['What are the key takeaways?', 'Compare to last period', 'What should I do about this?', 'Simplify for executives'];
+  }
+  if (lower.includes('schedule') || lower.includes('priority') || lower.includes('delegate') || lower.includes('productivity')) {
+    return ['Block time for deep work', 'What can I skip today?', 'Add buffer between meetings', 'Reorder by energy level'];
+  }
+  if (lower.includes('research') || lower.includes('trend') || lower.includes('market') || lower.includes('industry')) {
+    return ['Go deeper on one area', 'Add competitive analysis', 'Summarize for executives', 'What are the risks?'];
+  }
+  if (lower.includes('clarif') || lower.includes('restructur') || lower.includes('missing piece') || lower.includes('organize')) {
+    return ['Make it more actionable', 'Add a timeline', 'Identify dependencies', 'Create an elevator pitch'];
+  }
+  if (lower.includes('improve') || lower.includes('rewrite') || lower.includes('persuasive') || lower.includes('concise')) {
+    return ['Make it even shorter', 'Change the tone', 'Add a stronger opening', 'Simplify the language'];
+  }
+  if (lower.includes('presentation') || lower.includes('slide') || lower.includes('deck')) {
+    return ['Add speaker notes', 'Make it more visual', 'Reduce to 5 slides', 'Add a summary slide'];
   }
   return ['Make it shorter', 'Give me an example', 'Explain in simpler terms', 'What should I do next?'];
 }
@@ -598,6 +618,7 @@ export function SimpleView() {
   const [isDragging, setIsDragging] = useState(false);
   const [showModelSelector, setShowModelSelector] = useState(false);
   const [showThinkingLive, setShowThinkingLive] = useState(false);
+  const [showPresentationDialog, setShowPresentationDialog] = useState(false);
 
   // ─── Preloaded prompt response cache ──────────────────────────────────────
   const preloadCacheRef = useRef<Map<string, { result: SendMessageResult; timestamp: number }>>(new Map());
@@ -1029,6 +1050,13 @@ export function SimpleView() {
                   </button>
                 );
               })}
+              <button
+                className={`${styles.suggestionBtn} ${styles.presentationBtn}`}
+                onClick={() => setShowPresentationDialog(true)}
+              >
+                <span className={styles.suggestionIcon}>🎬</span>
+                <span>Create presentation</span>
+              </button>
             </div>
           </div>
         ) : (
@@ -1181,6 +1209,7 @@ export function SimpleView() {
           Do not submit any sensitive information or <a href="https://www.internalfb.com/support/home/people/about-meta/privacy-programs/privacy-review-process#when-a-project-needs-a-privacy-review" target="_blank" rel="noopener noreferrer">User Data</a> into ArcadIA.
         </div>
       </div>
+      <PresentationDialog open={showPresentationDialog} onClose={() => setShowPresentationDialog(false)} />
     </div>
   );
 }

@@ -258,6 +258,151 @@ function DownloadMenu({ messages, activeCommand }: { messages: ChatMessage[]; ac
     });
   }
 
+  // Word document export
+  downloadOptions.push({
+    label: 'Download as Word (.docx)',
+    icon: '📘',
+    action: async () => {
+      try {
+        const { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } = await import('docx');
+        const lines = assistantContent.split('\n');
+        const children: InstanceType<typeof Paragraph>[] = [];
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) {
+            children.push(new Paragraph({ text: '' }));
+            continue;
+          }
+          // Headers
+          if (trimmed.startsWith('### ')) {
+            children.push(new Paragraph({ text: trimmed.replace(/^### /, ''), heading: HeadingLevel.HEADING_3 }));
+          } else if (trimmed.startsWith('## ')) {
+            children.push(new Paragraph({ text: trimmed.replace(/^## /, ''), heading: HeadingLevel.HEADING_2 }));
+          } else if (trimmed.startsWith('# ')) {
+            children.push(new Paragraph({ text: trimmed.replace(/^# /, ''), heading: HeadingLevel.HEADING_1 }));
+          } else if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+            children.push(new Paragraph({
+              children: [new TextRun(trimmed.replace(/^[-*] /, ''))],
+              bullet: { level: 0 },
+            }));
+          } else if (/^\d+\.\s/.test(trimmed)) {
+            children.push(new Paragraph({
+              children: [new TextRun(trimmed.replace(/^\d+\.\s/, ''))],
+              numbering: { reference: 'default-numbering', level: 0 },
+            }));
+          } else if (trimmed.startsWith('**') && trimmed.endsWith('**')) {
+            children.push(new Paragraph({
+              children: [new TextRun({ text: trimmed.replace(/\*\*/g, ''), bold: true })],
+            }));
+          } else {
+            children.push(new Paragraph({ children: [new TextRun(trimmed)] }));
+          }
+        }
+
+        const doc = new Document({
+          numbering: {
+            config: [{
+              reference: 'default-numbering',
+              levels: [{ level: 0, format: 'decimal' as const, text: '%1.', alignment: AlignmentType.LEFT }],
+            }],
+          },
+          sections: [{ children }],
+        });
+
+        const blob = await Packer.toBlob(doc);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = generateFilename(activeCommand, '.docx');
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        console.error('Word export failed:', err);
+        // Fallback to plain text
+        downloadFile(assistantContent, generateFilename(activeCommand, '.txt'), 'text/plain');
+      }
+      setOpen(false);
+    },
+  });
+
+  // PDF export
+  downloadOptions.push({
+    label: 'Download as PDF',
+    icon: '📕',
+    action: async () => {
+      try {
+        const { jsPDF } = await import('jspdf');
+        const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+        const pageWidth = pdf.internal.pageSize.getWidth();
+        const margin = 20;
+        const maxWidth = pageWidth - margin * 2;
+        let y = margin;
+
+        const lines = assistantContent.split('\n');
+        for (const line of lines) {
+          const trimmed = line.trim();
+
+          if (y > 270) {
+            pdf.addPage();
+            y = margin;
+          }
+
+          if (!trimmed) {
+            y += 4;
+            continue;
+          }
+
+          // Headers
+          if (trimmed.startsWith('# ')) {
+            pdf.setFontSize(18);
+            pdf.setFont('helvetica', 'bold');
+            const text = trimmed.replace(/^#+ /, '').replace(/\*\*/g, '');
+            const split = pdf.splitTextToSize(text, maxWidth);
+            pdf.text(split, margin, y);
+            y += split.length * 8 + 4;
+          } else if (trimmed.startsWith('## ')) {
+            pdf.setFontSize(14);
+            pdf.setFont('helvetica', 'bold');
+            const text = trimmed.replace(/^#+ /, '').replace(/\*\*/g, '');
+            const split = pdf.splitTextToSize(text, maxWidth);
+            pdf.text(split, margin, y);
+            y += split.length * 6 + 3;
+          } else if (trimmed.startsWith('### ')) {
+            pdf.setFontSize(12);
+            pdf.setFont('helvetica', 'bold');
+            const text = trimmed.replace(/^#+ /, '').replace(/\*\*/g, '');
+            const split = pdf.splitTextToSize(text, maxWidth);
+            pdf.text(split, margin, y);
+            y += split.length * 5 + 2;
+          } else if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+            pdf.setFontSize(11);
+            pdf.setFont('helvetica', 'normal');
+            const text = '\u2022 ' + trimmed.replace(/^[-*] /, '').replace(/\*\*/g, '');
+            const split = pdf.splitTextToSize(text, maxWidth - 5);
+            pdf.text(split, margin + 5, y);
+            y += split.length * 5 + 1;
+          } else {
+            pdf.setFontSize(11);
+            pdf.setFont('helvetica', 'normal');
+            const text = trimmed.replace(/\*\*/g, '');
+            const split = pdf.splitTextToSize(text, maxWidth);
+            pdf.text(split, margin, y);
+            y += split.length * 5 + 1;
+          }
+        }
+
+        pdf.save(generateFilename(activeCommand, '.pdf'));
+      } catch (err) {
+        console.error('PDF export failed:', err);
+        downloadFile(assistantContent, generateFilename(activeCommand, '.txt'), 'text/plain');
+      }
+      setOpen(false);
+    },
+  });
+
   // Plain text fallback
   downloadOptions.push({
     label: 'Download as Plain Text',
