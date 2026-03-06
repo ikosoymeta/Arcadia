@@ -418,8 +418,17 @@ function BridgeNotConnected({ onRetry }: { onRetry: () => void }) {
     }
   };
 
-  const copyCmd = () => {
-    navigator.clipboard.writeText('cd ~/Arcadia && node bridge/arcadia-bridge.js --host 0.0.0.0');
+  const BRIDGE_CDN = 'https://files.manuscdn.com/user_upload_by_module/session_file/310519663326120815/BpnQIHTwBWLxOLsq.js';
+  const [remotePlatform, setRemotePlatform] = useState<'mac' | 'windows'>('mac');
+  const remoteDownloadCmd = remotePlatform === 'mac'
+    ? `curl -sL "${BRIDGE_CDN}" -o ~/arcadia-bridge.js`
+    : `Invoke-WebRequest -Uri "${BRIDGE_CDN}" -OutFile "$HOME\\arcadia-bridge.js"`;
+  const remoteRunCmd = remotePlatform === 'mac'
+    ? 'node ~/arcadia-bridge.js --host 0.0.0.0'
+    : 'node $HOME\\arcadia-bridge.js --host 0.0.0.0';
+
+  const copyCmd = (cmd?: string) => {
+    navigator.clipboard.writeText(cmd || remoteRunCmd);
     setCopiedCmd(true);
     setTimeout(() => setCopiedCmd(false), 2000);
   };
@@ -483,19 +492,50 @@ function BridgeNotConnected({ onRetry }: { onRetry: () => void }) {
           <div style={{ padding: '16px', borderRadius: '12px', background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
               <span style={{ width: '24px', height: '24px', borderRadius: '50%', background: '#6366f120', color: '#818cf8', fontSize: '13px', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>1</span>
-              <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>Start the bridge on your remote machine</span>
+              <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>Download & start the bridge on your remote machine</span>
             </div>
-            <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', lineHeight: '1.5', margin: '0 0 8px' }}>
-              SSH into your remote machine and run this command:
+
+            {/* Platform tabs */}
+            <div style={{ display: 'flex', gap: '4px', marginBottom: '10px' }}>
+              {(['mac', 'windows'] as const).map(p => (
+                <button key={p} onClick={() => setRemotePlatform(p)} style={{ padding: '4px 12px', borderRadius: '6px', border: remotePlatform === p ? '1px solid #818cf850' : '1px solid var(--border)', background: remotePlatform === p ? '#818cf818' : 'transparent', color: remotePlatform === p ? '#818cf8' : 'var(--text-tertiary)', fontSize: '12px', fontWeight: 500, cursor: 'pointer' }}>
+                  {p === 'mac' ? '🍎 Mac / Linux' : '🪟 Windows'}
+                </button>
+              ))}
+            </div>
+
+            {/* Direct download button */}
+            <div style={{ marginBottom: '10px' }}>
+              <a href={BRIDGE_CDN} download="arcadia-bridge.js" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '8px 16px', borderRadius: '8px', background: '#6366f1', color: '#fff', fontSize: '13px', fontWeight: 600, textDecoration: 'none', cursor: 'pointer' }}>
+                ⬇ Download arcadia-bridge.js
+              </a>
+              <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginLeft: '8px' }}>Then transfer to your remote machine</span>
+            </div>
+
+            <p style={{ fontSize: '11px', color: 'var(--text-tertiary)', lineHeight: '1.5', margin: '0 0 6px' }}>
+              Or download via terminal on the remote machine:
+            </p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+              <code style={{ flex: 1, padding: '8px 10px', background: 'var(--bg-primary)', borderRadius: '8px', fontFamily: 'monospace', fontSize: '11px', color: '#a78bfa', userSelect: 'all', wordBreak: 'break-all', lineHeight: '1.4' }}>
+                {remoteDownloadCmd}
+              </code>
+              <button onClick={() => copyCmd(remoteDownloadCmd)} style={{ padding: '6px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-primary)', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '11px', fontWeight: 500, whiteSpace: 'nowrap' }}>Copy</button>
+            </div>
+
+            <p style={{ fontSize: '11px', color: 'var(--text-tertiary)', lineHeight: '1.5', margin: '0 0 6px' }}>
+              Then start the bridge:
             </p>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <code style={{ flex: 1, padding: '10px 12px', background: 'var(--bg-primary)', borderRadius: '8px', fontFamily: 'monospace', fontSize: '12px', color: '#a78bfa', userSelect: 'all' }}>
-                cd ~/Arcadia && node bridge/arcadia-bridge.js --host 0.0.0.0
+              <code style={{ flex: 1, padding: '8px 10px', background: 'var(--bg-primary)', borderRadius: '8px', fontFamily: 'monospace', fontSize: '11px', color: '#a78bfa', userSelect: 'all' }}>
+                {remoteRunCmd}
               </code>
-              <button onClick={copyCmd} style={{ padding: '8px 14px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-primary)', color: copiedCmd ? '#22c55e' : 'var(--text-secondary)', cursor: 'pointer', fontSize: '12px', fontWeight: 500, whiteSpace: 'nowrap' }}>
+              <button onClick={() => copyCmd(remoteRunCmd)} style={{ padding: '6px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-primary)', color: copiedCmd ? '#22c55e' : 'var(--text-secondary)', cursor: 'pointer', fontSize: '11px', fontWeight: 500, whiteSpace: 'nowrap' }}>
                 {copiedCmd ? '✓ Copied' : 'Copy'}
               </button>
             </div>
+            <p style={{ fontSize: '10px', color: 'var(--text-tertiary)', margin: '8px 0 0' }}>
+              💡 Single file (~84KB), zero dependencies. No npm install or repo clone needed.
+            </p>
           </div>
 
           {/* Step 2 */}

@@ -94,14 +94,18 @@ export function SettingsPanel() {
     setBridgeTestResult(null);
   };
 
+  const BRIDGE_CDN_URL = 'https://files.manuscdn.com/user_upload_by_module/session_file/310519663326120815/BpnQIHTwBWLxOLsq.js';
+  const BRIDGE_GH_URL = 'https://raw.githubusercontent.com/ikosoymeta/Arcadia/main/bridge/arcadia-bridge.js';
   const bridgeCommands = {
     mac: {
-      download: `curl -sL https://raw.githubusercontent.com/ikosoymeta/Arcadia/main/bridge/arcadia-bridge.js -o ~/arcadia-bridge.js`,
+      download: `curl -sL "${BRIDGE_CDN_URL}" -o ~/arcadia-bridge.js`,
+      downloadAlt: `curl -sL "${BRIDGE_GH_URL}" -o ~/arcadia-bridge.js`,
       run: `node ~/arcadia-bridge.js --host 0.0.0.0`,
     },
     windows: {
-      download: `curl -sL https://raw.githubusercontent.com/ikosoymeta/Arcadia/main/bridge/arcadia-bridge.js -o %USERPROFILE%\\arcadia-bridge.js`,
-      run: `node %USERPROFILE%\\arcadia-bridge.js --host 0.0.0.0`,
+      download: `Invoke-WebRequest -Uri "${BRIDGE_CDN_URL}" -OutFile "$HOME\\arcadia-bridge.js"`,
+      downloadAlt: `curl.exe -sL "${BRIDGE_GH_URL}" -o %USERPROFILE%\\arcadia-bridge.js`,
+      run: `node $HOME\\arcadia-bridge.js --host 0.0.0.0`,
     },
   };
 
@@ -596,12 +600,35 @@ export function SettingsPanel() {
                 {/* Step 1a: Download */}
                 <div style={{ marginBottom: '8px' }}>
                   <div style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 600, marginBottom: '4px' }}>① Download the bridge (one-time):</div>
+                  {/* Direct download button */}
+                  <div style={{ marginBottom: '6px' }}>
+                    <a
+                      href={BRIDGE_CDN_URL}
+                      download="arcadia-bridge.js"
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '7px 14px', borderRadius: '8px', background: '#6366f1', color: '#fff', fontSize: '12px', fontWeight: 600, textDecoration: 'none', cursor: 'pointer' }}
+                    >
+                      ⬇ Download arcadia-bridge.js
+                    </a>
+                    <span style={{ fontSize: '10px', color: 'var(--text-tertiary)', marginLeft: '8px' }}>Then save it to your remote machine</span>
+                  </div>
+                  {/* Or use terminal command */}
+                  <div style={{ fontSize: '10px', color: 'var(--text-tertiary)', marginBottom: '4px' }}>Or copy this command to download via terminal:</div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <code style={{ flex: 1, display: 'block', padding: '7px 10px', background: 'var(--bg-secondary)', borderRadius: '6px', fontFamily: 'monospace', fontSize: '11px', color: '#a78bfa', userSelect: 'all', wordBreak: 'break-all', lineHeight: '1.4' }}>
                       {bridgeCommands[bridgePlatform].download}
                     </code>
                     <button onClick={() => copyBridgeCommand(bridgeCommands[bridgePlatform].download)} style={{ padding: '5px 10px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '11px', fontWeight: 500, whiteSpace: 'nowrap' }}>Copy</button>
                   </div>
+                  {/* Alternative command */}
+                  <details style={{ marginTop: '4px' }}>
+                    <summary style={{ fontSize: '10px', color: 'var(--text-tertiary)', cursor: 'pointer' }}>Alternative command (if the above doesn't work)</summary>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px' }}>
+                      <code style={{ flex: 1, display: 'block', padding: '7px 10px', background: 'var(--bg-secondary)', borderRadius: '6px', fontFamily: 'monospace', fontSize: '11px', color: '#a78bfa', userSelect: 'all', wordBreak: 'break-all', lineHeight: '1.4' }}>
+                        {bridgeCommands[bridgePlatform].downloadAlt}
+                      </code>
+                      <button onClick={() => copyBridgeCommand(bridgeCommands[bridgePlatform].downloadAlt)} style={{ padding: '5px 10px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '11px', fontWeight: 500, whiteSpace: 'nowrap' }}>Copy</button>
+                    </div>
+                  </details>
                 </div>
 
                 {/* Step 1b: Run */}
@@ -618,7 +645,7 @@ export function SettingsPanel() {
                 </div>
 
                 <p style={{ fontSize: '10px', color: 'var(--text-tertiary)', margin: '8px 0 0', lineHeight: '1.5' }}>
-                  💡 The bridge is a single file with zero dependencies — just Node.js built-ins. It works on Mac, Linux, and Windows.
+                  💡 The bridge is a single file (~84KB) with zero dependencies — just Node.js built-ins. No npm install needed. Works on Mac, Linux, and Windows.
                 </p>
               </div>
 
