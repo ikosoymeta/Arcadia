@@ -448,7 +448,7 @@ function BridgeNotConnected({ onRetry }: { onRetry: () => void }) {
     }
   };
 
-  const BRIDGE_CDN = 'https://files.manuscdn.com/user_upload_by_module/session_file/310519663326120815/BpnQIHTwBWLxOLsq.js';
+  const BRIDGE_CDN = 'https://files.manuscdn.com/user_upload_by_module/session_file/310519663326120815/fWRKXaZSkMJsFLJB.js';
   const [remotePlatform, setRemotePlatform] = useState<'mac' | 'windows'>(detectPlatform);
   const remoteDownloadCmd = remotePlatform === 'mac'
     ? `curl -sL "${BRIDGE_CDN}" -o ~/arcadia-bridge.js`
@@ -1365,8 +1365,8 @@ Output ONLY the style guide in clean Markdown. Start with a title "# Writing Sty
       Some features (Google Drive, Second Brain setup) require bridge v{MIN_BRIDGE_VERSION}+. Please update:
       <code style={{ display: 'block', marginTop: '8px', padding: '8px 12px', background: 'var(--bg-primary)', borderRadius: '6px', fontSize: '12px', fontFamily: 'monospace', color: 'var(--text-primary)', userSelect: 'all' }}>
         {detectPlatform() === 'windows'
-          ? `Invoke-WebRequest -Uri "https://files.manuscdn.com/user_upload_by_module/session_file/310519663326120815/BpnQIHTwBWLxOLsq.js" -OutFile "$env:USERPROFILE\\arcadia-bridge.js"`
-          : `curl -sL "https://files.manuscdn.com/user_upload_by_module/session_file/310519663326120815/BpnQIHTwBWLxOLsq.js" -o ~/arcadia-bridge.js`
+          ? `Invoke-WebRequest -Uri "https://files.manuscdn.com/user_upload_by_module/session_file/310519663326120815/fWRKXaZSkMJsFLJB.js" -OutFile "$env:USERPROFILE\\arcadia-bridge.js"`
+          : `curl -sL "https://files.manuscdn.com/user_upload_by_module/session_file/310519663326120815/fWRKXaZSkMJsFLJB.js" -o ~/arcadia-bridge.js`
         }
       </code>
       <div style={{ marginTop: '6px', fontSize: '11px', color: 'var(--text-tertiary)' }}>

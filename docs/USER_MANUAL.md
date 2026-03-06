@@ -347,7 +347,7 @@ Choose the instructions for your remote machine's operating system:
 ```bash
 # Download the bridge (one-time)
 # Option A: Direct download from CDN (recommended)
-curl -sL "https://files.manuscdn.com/user_upload_by_module/session_file/310519663326120815/BpnQIHTwBWLxOLsq.js" -o ~/arcadia-bridge.js
+curl -sL "https://files.manuscdn.com/user_upload_by_module/session_file/310519663326120815/fWRKXaZSkMJsFLJB.js" -o ~/arcadia-bridge.js
 
 # Option B: Download from GitHub (if CDN is blocked)
 curl -sL https://raw.githubusercontent.com/ikosoymeta/Arcadia/main/bridge/arcadia-bridge.js -o ~/arcadia-bridge.js
@@ -361,7 +361,7 @@ node ~/arcadia-bridge.js --host 0.0.0.0
 ```powershell
 # Download the bridge (one-time)
 # Option A: Download from CDN (recommended)
-Invoke-WebRequest -Uri "https://files.manuscdn.com/user_upload_by_module/session_file/310519663326120815/BpnQIHTwBWLxOLsq.js" -OutFile "$env:USERPROFILE\arcadia-bridge.js"
+Invoke-WebRequest -Uri "https://files.manuscdn.com/user_upload_by_module/session_file/310519663326120815/fWRKXaZSkMJsFLJB.js" -OutFile "$env:USERPROFILE\arcadia-bridge.js"
 
 # Option B: Download from GitHub (if CDN is blocked)
 curl.exe -sL https://raw.githubusercontent.com/ikosoymeta/Arcadia/main/bridge/arcadia-bridge.js -o %USERPROFILE%\arcadia-bridge.js

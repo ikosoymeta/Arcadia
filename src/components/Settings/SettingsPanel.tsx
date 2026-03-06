@@ -95,7 +95,7 @@ export function SettingsPanel() {
     setBridgeTestResult(null);
   };
 
-  const BRIDGE_CDN_URL = 'https://files.manuscdn.com/user_upload_by_module/session_file/310519663326120815/BpnQIHTwBWLxOLsq.js';
+  const BRIDGE_CDN_URL = 'https://files.manuscdn.com/user_upload_by_module/session_file/310519663326120815/fWRKXaZSkMJsFLJB.js';
   const BRIDGE_GH_URL = 'https://raw.githubusercontent.com/ikosoymeta/Arcadia/main/bridge/arcadia-bridge.js';
   const bridgeCommands = {
     mac: {
