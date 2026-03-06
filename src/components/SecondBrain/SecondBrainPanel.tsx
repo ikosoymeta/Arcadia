@@ -533,7 +533,7 @@ function BridgeNotConnected({ onRetry }: { onRetry: () => void }) {
             <p style={{ fontSize: '13px', color: 'var(--text-tertiary)', lineHeight: '1.5', margin: '0 0 12px' }}>
               For advanced setups where Second Brain runs on a different machine.
             </p>
-            <button onClick={() => setMode('remote')} style={{ padding: '10px 24px', borderRadius: '8px', border: 'none', background: 'var(--bg-primary)', color: 'var(--text-primary)', fontSize: '14px', fontWeight: 600, cursor: 'pointer', border: '1px solid var(--border)' }}>
+            <button onClick={() => setMode('remote')} style={{ padding: '10px 24px', borderRadius: '8px', background: 'var(--bg-primary)', color: 'var(--text-primary)', fontSize: '14px', fontWeight: 600, cursor: 'pointer', border: '1px solid var(--border)' }}>
               Connect to Remote Machine
             </button>
           </div>
