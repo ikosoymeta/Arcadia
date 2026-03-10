@@ -344,9 +344,10 @@
 
 .suggestions {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(150px, 200px));
+  justify-content: center;
   gap: 12px;
-  max-width: 100%;
+  max-width: 700px;
   width: 100%;
 }
 
