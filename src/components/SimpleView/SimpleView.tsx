@@ -12,6 +12,21 @@ import { PresentationDialog } from './PresentationDialog';
 
 // ─── Quick suggestion prompts ─────────────────────────────────────────────────
 
+// Use the fastest model for prebuilt prompts — Sonnet 4.6 for best speed/quality balance
+const FAST_PRELOAD_MODEL = 'claude-sonnet-4-6';
+
+// System prompt for prebuilt suggestions — encourages step-by-step thinking and specificity
+const PREBUILT_SYSTEM_PROMPT = `You are a highly capable AI assistant. Follow these principles:
+
+1. **Think step-by-step**: For complex requests, break your reasoning into clear, numbered steps before giving the final answer.
+2. **Be specific, not vague**: Provide concrete examples, specific numbers, real frameworks, and actionable details. Avoid generic advice.
+3. **Structure your response**: Use headers, bullet points, and clear sections so the output is immediately usable.
+4. **Be concise but complete**: Don't pad with filler. Every sentence should add value.
+5. **Deliver actionable results**: The user should be able to act on your response immediately without needing to ask follow-up questions for clarification.`;
+
+// Check if a prompt matches a prebuilt suggestion
+const SUGGESTION_PROMPTS = new Set<string>();
+
 const SUGGESTIONS = [
   { icon: '📋', label: 'Meeting notes', prompt: 'Help me turn rough meeting notes into a clean summary. I\'ll paste my notes and you organize them into: Key Decisions, Action Items (with owners and due dates), and Open Questions. Keep it concise and ready to share.' },
   { icon: '📧', label: 'Draft an email', prompt: 'Help me write a professional email. Ask me who it\'s to, the purpose, and key points I want to cover. Keep it clear, concise, and action-oriented.' },
@@ -24,6 +39,9 @@ const SUGGESTIONS = [
   { icon: '🧩', label: 'Clarify an idea', prompt: 'I will share a rough idea or unstructured thoughts. Your task is to: Clarify the core idea, organize it logically, identify missing pieces, and suggest improvements. Ask me to share my idea, then restructure it into something clear and actionable.' },
   { icon: '✨', label: 'Improve writing', prompt: 'Improve the text I share to make it: clearer, more persuasive, more concise, and more professional. Keep the original meaning but significantly improve the quality of the writing. Ask me to paste the text I want improved.' },
 ];
+
+// Populate the set for O(1) lookups
+SUGGESTIONS.forEach(s => SUGGESTION_PROMPTS.add(s.prompt));
 
 // ─── Follow-up suggestions based on response type ─────────────────────────────
 
@@ -698,9 +716,12 @@ export function SimpleView() {
       }
       setPreloadStatus(prev => new Map(prev).set(prompt, 'loading'));
       try {
+        // Use fast model for preloads — Sonnet 4.6 for speed/quality balance
+        const fastConnection = { ...activeConnection, model: FAST_PRELOAD_MODEL };
         const result = await sendMessage({
-          connection: activeConnection,
-          messages: [{ id: 'preload', role: 'user', content: prompt, timestamp: Date.now(), model: activeConnection.model }] as Message[],
+          connection: fastConnection,
+          messages: [{ id: 'preload', role: 'user', content: prompt, timestamp: Date.now(), model: FAST_PRELOAD_MODEL }] as Message[],
+          systemPrompt: PREBUILT_SYSTEM_PROMPT,
           enableThinking: false,
           signal: controller.signal,
         });
@@ -732,10 +753,14 @@ export function SimpleView() {
     if (!text && images.length === 0) return;
     if (!activeConnection) { setError('No connection configured. Go to Settings to add your API key.'); return; }
 
+    // Determine if this is a prebuilt suggestion for fast model routing
+    const isSuggestionPrompt = SUGGESTION_PROMPTS.has(text);
+    const effectiveModel = isSuggestionPrompt ? FAST_PRELOAD_MODEL : activeConnection.model;
+
     // Ensure conversation exists
     let convId = conversation?.id;
     if (!convId) {
-      convId = createConversation(activeConnection.model);
+      convId = createConversation(effectiveModel);
     }
 
     // If this conversation is already streaming, abort and save partial response
@@ -760,18 +785,20 @@ export function SimpleView() {
     setInput('');
     setImages([]);
     setFollowUps([]);
+    // Reset textarea height after clearing input
+    if (textareaRef.current) textareaRef.current.style.height = 'auto';
 
     // ─── Check preload cache for instant response ─────────────────────────
     const cached = preloadCacheRef.current.get(text);
     if (cached && images.length === 0 && Date.now() - cached.timestamp < 10 * 60 * 1000) {
-      const userMsg: Message = { id: crypto.randomUUID(), role: 'user', content: text, timestamp: Date.now(), model: activeConnection.model };
+      const userMsg: Message = { id: crypto.randomUUID(), role: 'user', content: text, timestamp: Date.now(), model: effectiveModel };
       addMessage(convId, userMsg);
       trackMessage(userMsg, convId);
       const assistantMsg: Message = {
         id: crypto.randomUUID(), role: 'assistant', content: cached.result.content, timestamp: Date.now(),
         inputTokens: cached.result.inputTokens, outputTokens: cached.result.outputTokens,
         artifacts: cached.result.artifacts, thinkingText: cached.result.thinkingText,
-        model: activeConnection.model,
+        model: effectiveModel,
       };
       addMessage(convId, assistantMsg);
       trackMessage(assistantMsg, convId);
@@ -782,13 +809,13 @@ export function SimpleView() {
       return;
     }
 
-    // Build user message
+    // Build user message — use fast model for prebuilt suggestions
     const userMsg: Message = {
       id: crypto.randomUUID(),
       role: 'user',
       content: text,
       timestamp: Date.now(),
-      model: activeConnection.model,
+      model: effectiveModel,
     };
 
     // Attach images if any
@@ -835,11 +862,14 @@ export function SimpleView() {
 
     try {
       let firstToken = false;
+      // Use fast model + system prompt for prebuilt suggestion prompts
+      const effectiveConnection = isSuggestionPrompt ? { ...activeConnection, model: FAST_PRELOAD_MODEL } : activeConnection;
+      const effectiveSystemPrompt = isSuggestionPrompt ? PREBUILT_SYSTEM_PROMPT : conversation?.systemPrompt;
       const result = await sendMessage({
-        connection: activeConnection,
+        connection: effectiveConnection,
         messages: allMessages,
-        systemPrompt: conversation?.systemPrompt,
-        enableThinking: conversation?.enableThinking ?? activeConnection.enableThinking,
+        systemPrompt: effectiveSystemPrompt,
+        enableThinking: isSuggestionPrompt ? false : (conversation?.enableThinking ?? activeConnection.enableThinking),
         thinkingBudget: conversation?.thinkingBudget ?? activeConnection.thinkingBudget,
         onToken: (chunk) => {
           if (!firstToken) {
@@ -872,7 +902,7 @@ export function SimpleView() {
         artifacts: result.artifacts,
         thinkingText: result.thinkingText,
         toolCalls: result.toolCalls?.map(tc => ({ ...tc, type: 'tool_use' as const })) as ToolUseBlock[] | undefined,
-        model: activeConnection.model,
+        model: effectiveModel,
         ttft: result.ttft,
         totalTime: result.totalTime,
       };
@@ -1186,11 +1216,19 @@ export function SimpleView() {
             ref={textareaRef}
             className={styles.textarea}
             value={input}
-            onChange={e => setInput(e.target.value)}
+            onChange={e => {
+              setInput(e.target.value);
+              // Auto-expand textarea up to 5 lines
+              const ta = e.target;
+              ta.style.height = 'auto';
+              const lineHeight = 21; // ~14px * 1.5 line-height
+              const maxHeight = lineHeight * 5; // 5 lines max
+              ta.style.height = Math.min(ta.scrollHeight, maxHeight) + 'px';
+            }}
             onKeyDown={handleKeyDown}
             placeholder="Ask Claude anything... (Shift+Enter for new line)"
             rows={1}
-            style={{ resize: 'none' }}
+            style={{ resize: 'none', userSelect: 'text', WebkitUserSelect: 'text' }}
           />
           {isStreaming && (
             <button className={styles.stopBtn} onClick={handleStop} title="Stop generation">⏹</button>
