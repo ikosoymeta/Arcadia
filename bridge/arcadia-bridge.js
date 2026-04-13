@@ -216,9 +216,15 @@ let warmedUp = false;
 let warmupTime = 0;
 const POOL_SIZE = 2;  // Number of standby processes to maintain
 const STANDBY_MAX_AGE_MS = 300000; // Recycle after 5 minutes to avoid stale auth
+const POOL_MAX_CONSECUTIVE_FAILURES = 5; // Stop respawning after this many consecutive crashes
+const POOL_BACKOFF_BASE_MS = 2000; // Base delay between respawns
+const POOL_BACKOFF_MAX_MS = 60000; // Max delay between respawns
 
 // Pool: array of { proc, ready, spawnTime, stderrBuffer }
 const pool = [];
+let poolConsecutiveFailures = 0;
+let poolDisabled = false;
+let poolBackoffMs = POOL_BACKOFF_BASE_MS;
 
 // Build CLI args for standby processes (optimized for speed)
 function getClaudeArgs(model) {
@@ -261,10 +267,36 @@ function spawnPoolProcess(slot) {
   proc.on('exit', (code) => {
     activeChildren.delete(proc);
     if (pool[slot] && pool[slot].proc === proc) {
+      const wasReady = pool[slot].ready;
+      const aliveMs = Date.now() - pool[slot].spawnTime;
       pool[slot] = null;
       if (code !== 0 && code !== null && !hasErrored) {
-        console.log(`[${new Date().toISOString()}] ⚠ Pool[${slot}]: Exited with code ${code}, will respawn...`);
-        setTimeout(() => fillPool(), 2000);
+        // Track consecutive failures (only count if process died quickly after becoming "ready")
+        if (aliveMs < 10000) {
+          poolConsecutiveFailures++;
+        } else {
+          poolConsecutiveFailures = 0; // Reset if it ran for a while
+        }
+        
+        if (poolConsecutiveFailures >= POOL_MAX_CONSECUTIVE_FAILURES) {
+          if (!poolDisabled) {
+            poolDisabled = true;
+            console.log(`[${new Date().toISOString()}] ⛔ Pool DISABLED: ${poolConsecutiveFailures} consecutive crashes detected.`);
+            console.log(`[${new Date().toISOString()}]    Claude Code standby processes are not stable in this environment.`);
+            console.log(`[${new Date().toISOString()}]    The bridge will spawn fresh processes on-demand for each request.`);
+            console.log(`[${new Date().toISOString()}]    This is normal — the bridge works fine without the pool.`);
+          }
+          return; // Don't respawn
+        }
+        
+        // Exponential backoff on respawn
+        poolBackoffMs = Math.min(poolBackoffMs * 1.5, POOL_BACKOFF_MAX_MS);
+        console.log(`[${new Date().toISOString()}] ⚠ Pool[${slot}]: Exited with code ${code} after ${(aliveMs/1000).toFixed(1)}s (failure ${poolConsecutiveFailures}/${POOL_MAX_CONSECUTIVE_FAILURES}, retry in ${(poolBackoffMs/1000).toFixed(0)}s)...`);
+        setTimeout(() => fillPool(), poolBackoffMs);
+      } else {
+        // Normal exit — reset failure counter
+        poolConsecutiveFailures = 0;
+        poolBackoffMs = POOL_BACKOFF_BASE_MS;
       }
     }
   });
@@ -301,6 +333,7 @@ function spawnPoolProcess(slot) {
 }
 
 function fillPool() {
+  if (poolDisabled) return; // Don't fill pool if disabled due to crash loop
   for (let i = 0; i < POOL_SIZE; i++) {
     if (!pool[i] || !pool[i].proc) {
       spawnPoolProcess(i);
@@ -444,6 +477,8 @@ function handleHealthCheck(res, req) {
     warmed_up: warmedUp,
     warmup_time_ms: warmupTime,
     pool_size: POOL_SIZE,
+    pool_disabled: poolDisabled,
+    pool_consecutive_failures: poolConsecutiveFailures,
     pool_status: pool.map((entry, i) => entry ? {
       slot: i,
       ready: entry.ready,
