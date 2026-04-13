@@ -1873,9 +1873,163 @@ function handleSecondBrainSetup(req, res, body) {
     return;
   }
 
+  // ─── Install a single skill by name ─────────────────────────────
+  if (action === 'install-skill') {
+    const skillName = (payload.skillName || '').trim();
+    if (!skillName || /[;&|`$]/.test(skillName)) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Invalid skill name' }));
+      return;
+    }
+    const cmd = `claude-templates skill ${skillName} install`;
+    console.log(`[${new Date().toISOString()}] 🧠 Installing skill: ${skillName}`);
+    const proc = spawn(cmd, [], { cwd: home, env: { ...process.env }, stdio: ['ignore', 'pipe', 'pipe'], shell: true });
+    let stdout = ''; let stderr = '';
+    proc.stdout.on('data', d => { stdout += d.toString(); });
+    proc.stderr.on('data', d => { stderr += d.toString(); });
+    const timeout = setTimeout(() => proc.kill('SIGTERM'), 120000);
+    proc.on('close', code => {
+      clearTimeout(timeout);
+      console.log(`[${new Date().toISOString()}] 🧠 Skill ${skillName} install: code=${code}`);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: code === 0, action: 'install-skill', skillName, stdout: stdout.slice(-3000), stderr: stderr.slice(-3000), exitCode: code }));
+    });
+    proc.on('error', err => { clearTimeout(timeout); res.writeHead(500, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: err.message })); });
+    return;
+  }
+
+  // ─── Uninstall a skill ─────────────────────────────────────────────
+  if (action === 'uninstall-skill') {
+    const skillName = (payload.skillName || '').trim();
+    if (!skillName || /[;&|`$]/.test(skillName)) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Invalid skill name' }));
+      return;
+    }
+    console.log(`[${new Date().toISOString()}] 🧠 Uninstalling skill: ${skillName}`);
+    const skillsDirs = [`${home}/.claude/skills`, `${home}/.claude-code/skills`, `${home}/.config/claude/skills`];
+    let removed = false;
+    for (const dir of skillsDirs) {
+      const skillPath = `${dir}/${skillName}`;
+      try {
+        if (fs.existsSync(skillPath)) {
+          fs.rmSync(skillPath, { recursive: true, force: true });
+          removed = true;
+          console.log(`[${new Date().toISOString()}] 🧠 Removed: ${skillPath}`);
+        }
+      } catch (e) { console.log(`[${new Date().toISOString()}] ⚠ Remove error: ${e.message}`); }
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: removed, action: 'uninstall-skill', skillName }));
+    return;
+  }
+
+  // ─── List installed skills with details ────────────────────────────
+  if (action === 'list-skills-detailed') {
+    console.log(`[${new Date().toISOString()}] 🧠 Listing installed skills (detailed)...`);
+    const skillsDirs = [`${home}/.claude/skills`, `${home}/.claude-code/skills`, `${home}/.config/claude/skills`];
+    const results = [];
+    for (const dir of skillsDirs) {
+      try {
+        if (!fs.existsSync(dir)) continue;
+        const entries = fs.readdirSync(dir).filter(d => {
+          try { return fs.statSync(`${dir}/${d}`).isDirectory(); } catch { return false; }
+        });
+        for (const name of entries) {
+          const skillMd = `${dir}/${name}/SKILL.md`;
+          let content = '';
+          let description = '';
+          try {
+            if (fs.existsSync(skillMd)) {
+              content = fs.readFileSync(skillMd, 'utf-8');
+              // Extract description from frontmatter or first paragraph
+              const descMatch = content.match(/^description:\s*(.+)$/m);
+              if (descMatch) description = descMatch[1].trim();
+              else {
+                const lines = content.split('\n').filter(l => l.trim() && !l.startsWith('#') && !l.startsWith('---'));
+                if (lines.length > 0) description = lines[0].trim().slice(0, 200);
+              }
+            }
+          } catch { /* ignore read errors */ }
+          results.push({ name, dir, description, hasContent: !!content });
+        }
+      } catch { /* ignore dir errors */ }
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: true, action: 'list-skills-detailed', skills: results }));
+    return;
+  }
+
+  // ─── Read skill content ────────────────────────────────────────────
+  if (action === 'read-skill-content') {
+    const skillName = (payload.skillName || '').trim();
+    if (!skillName || /[;&|`$\/]/.test(skillName)) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Invalid skill name' }));
+      return;
+    }
+    const skillsDirs = [`${home}/.claude/skills`, `${home}/.claude-code/skills`, `${home}/.config/claude/skills`];
+    for (const dir of skillsDirs) {
+      const skillMd = `${dir}/${skillName}/SKILL.md`;
+      try {
+        if (fs.existsSync(skillMd)) {
+          const content = fs.readFileSync(skillMd, 'utf-8');
+          // Also list reference files
+          const refsDir = `${dir}/${skillName}/references`;
+          let references = [];
+          try {
+            if (fs.existsSync(refsDir)) {
+              references = fs.readdirSync(refsDir).filter(f => f.endsWith('.md'));
+            }
+          } catch { /* ignore */ }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true, action: 'read-skill-content', skillName, content, references }));
+          return;
+        }
+      } catch { /* try next dir */ }
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: false, error: `Skill '${skillName}' not found` }));
+    return;
+  }
+
+  // ─── Install custom .skill file (ZIP with SKILL.md) ───────────────
+  if (action === 'install-custom-skill') {
+    const skillName = (payload.skillName || '').trim().replace(/[^a-zA-Z0-9_-]/g, '');
+    const fileContent = payload.fileContent; // base64 encoded ZIP
+    if (!skillName || !fileContent) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Missing skillName or fileContent' }));
+      return;
+    }
+    console.log(`[${new Date().toISOString()}] 🧠 Installing custom skill: ${skillName}`);
+    try {
+      const skillsDir = `${home}/.claude/skills`;
+      if (!fs.existsSync(skillsDir)) fs.mkdirSync(skillsDir, { recursive: true });
+      const targetDir = `${skillsDir}/${skillName}`;
+      if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+      // Write the zip file
+      const zipPath = `/tmp/arcadia-skill-${skillName}.zip`;
+      fs.writeFileSync(zipPath, Buffer.from(fileContent, 'base64'));
+      // Unzip
+      const unzipCmd = `unzip -o ${zipPath} -d ${targetDir} 2>&1`;
+      const result = execSync(unzipCmd, { encoding: 'utf-8', timeout: 30000 });
+      // Clean up zip
+      try { fs.unlinkSync(zipPath); } catch { /* ignore */ }
+      console.log(`[${new Date().toISOString()}] 🧠 Custom skill installed: ${targetDir}`);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, action: 'install-custom-skill', skillName, path: targetDir, output: result.slice(-1000) }));
+    } catch (err) {
+      console.log(`[${new Date().toISOString()}] ⚠ Custom skill install error: ${err.message}`);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: err.message }));
+    }
+    return;
+  }
+
   res.writeHead(400, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ 
-    error: 'Unknown action. Use: install-skills, install-plugins, or run-command',
+    error: 'Unknown action. Use: install-skills, install-skill, uninstall-skill, list-skills-detailed, read-skill-content, install-custom-skill, install-plugins, or run-command',
   }));
 }
 
