@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * ArcadIA Bridge v3.5.0 — Local proxy connecting ArcadIA web app to Claude Code
+ * ArcadIA Bridge v3.6.0 — Local proxy connecting ArcadIA web app to Claude Code
  * 
  * Runs on localhost:8087 and forwards requests from the ArcadIA web app
  * to Claude Code CLI, which handles Meta internal authentication.
@@ -48,7 +48,7 @@ const HOST = (() => {
   if (idx !== -1 && process.argv[idx + 1]) return process.argv[idx + 1];
   return '127.0.0.1';
 })();
-const VERSION = '3.5.0';
+const VERSION = '3.6.0';
 const IS_WIN = process.platform === 'win32';
 const TIMEOUT_MS = 180000; // 3 minute timeout for regular messages
 const SLASH_CMD_TIMEOUT_MS = 600000; // 10 minute timeout for slash commands
@@ -460,6 +460,7 @@ function handleHealthCheck(res, req) {
       secondbrain_setup: true,
       gdrive_api: true,
       version_endpoint: true,
+      mcp_monitor: true,
     },
     stats: {
       total_requests: totalRequests,
@@ -2421,6 +2422,119 @@ function handleGDriveCreate(req, res, body) {
   }
 }
 
+// ─── MCP Server Health Monitor ──────────────────────────────────────────
+// Checks Claude Code's MCP server connections and can auto-restart them
+function handleMcpStatus(req, res) {
+  setCorsHeaders(res, req);
+  const home = process.env.HOME || os.homedir();
+  const results = { servers: [], autoRestart: false };
+  const fs = require('fs');
+
+  // Check Claude Code's MCP server config
+  const configPaths = [
+    `${home}/.claude/mcp_servers.json`,
+    `${home}/.claude.json`,
+  ];
+
+  let mcpConfig = null;
+  for (const p of configPaths) {
+    try {
+      if (fs.existsSync(p)) {
+        const raw = fs.readFileSync(p, 'utf-8');
+        const parsed = JSON.parse(raw);
+        mcpConfig = parsed.mcpServers || parsed.mcp_servers || parsed;
+        break;
+      }
+    } catch { /* skip */ }
+  }
+
+  if (mcpConfig && typeof mcpConfig === 'object') {
+    for (const [name, config] of Object.entries(mcpConfig)) {
+      const serverInfo = {
+        name,
+        command: (config && config.command) || 'unknown',
+        status: 'unknown',
+        type: name.toLowerCase().includes('fbsource') ? 'fbsource' :
+              name.toLowerCase().includes('github') ? 'github' :
+              name.toLowerCase().includes('google') ? 'google' : 'other',
+      };
+
+      // Try to detect if the server process is running
+      try {
+        if (config && config.command) {
+          const checkCmd = IS_WIN
+            ? `tasklist /FI "IMAGENAME eq ${config.command}" 2>nul`
+            : `pgrep -f "${config.command}" 2>/dev/null || true`;
+          const result = execSync(checkCmd, { encoding: 'utf-8', timeout: 3000 }).trim();
+          serverInfo.status = result ? 'running' : 'stopped';
+        }
+      } catch {
+        serverInfo.status = 'unknown';
+      }
+
+      results.servers.push(serverInfo);
+    }
+  }
+
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(results));
+}
+
+// Restart a specific MCP server via Claude Code
+function handleMcpRestart(req, res, body) {
+  setCorsHeaders(res, req);
+  let parsed;
+  try { parsed = JSON.parse(body); } catch {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Invalid JSON' }));
+    return;
+  }
+
+  const serverName = parsed.server;
+  if (!serverName || typeof serverName !== 'string') {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Missing server name' }));
+    return;
+  }
+
+  // Use claude mcp restart command
+  const cmd = `claude mcp restart ${serverName} 2>&1`;
+  console.log(`[${new Date().toISOString()}] MCP: Restarting server '${serverName}'...`);
+
+  const proc = spawn(cmd, [], {
+    cwd: process.env.HOME || os.homedir(),
+    env: { ...process.env },
+    stdio: ['ignore', 'pipe', 'pipe'],
+    shell: true,
+    timeout: 30000,
+  });
+
+  let stdout = ''; let stderr = '';
+  proc.stdout.on('data', d => { stdout += d.toString(); });
+  proc.stderr.on('data', d => { stderr += d.toString(); });
+
+  const timeout = setTimeout(() => { try { proc.kill('SIGTERM'); } catch {} }, 30000);
+
+  proc.on('close', code => {
+    clearTimeout(timeout);
+    console.log(`[${new Date().toISOString()}] MCP restart '${serverName}': code=${code}`);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      success: code === 0,
+      server: serverName,
+      stdout: stdout.slice(-2000),
+      stderr: stderr.slice(-2000),
+      exitCode: code,
+    }));
+  });
+
+  proc.on('error', err => {
+    clearTimeout(timeout);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: false, server: serverName, error: err.message }));
+  });
+}
+
 function handleVersionCheck(req, res) {
   setCorsHeaders(res, req);
   res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -2432,8 +2546,9 @@ function handleVersionCheck(req, res) {
       gdrive_api: true,
       auto_fix: true,
       process_pool: true,
+      mcp_monitor: true,
     },
-    min_frontend_version: '3.5.0',
+    min_frontend_version: '3.6.0',
     platform: process.platform,
   }));
 }
@@ -2496,6 +2611,18 @@ const server = http.createServer((req, res) => {
     let body = '';
     req.on('data', chunk => { body += chunk; });
     req.on('end', () => handleSecondBrainSetup(req, res, body));
+    return;
+  }
+
+  if (req.method === 'GET' && req.url === '/v1/mcp/status') {
+    handleMcpStatus(req, res);
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/v1/mcp/restart') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => handleMcpRestart(req, res, body));
     return;
   }
 
