@@ -296,25 +296,40 @@ if ($healthy) {
     exit 1
 }
 
-# ─── Set up auto-start via Startup folder shortcut ───────────────────────────
+# ─── Set up auto-start via Task Scheduler ────────────────────────────────────
 
-$startupFolder = [System.IO.Path]::Combine($env:APPDATA, "Microsoft\Windows\Start Menu\Programs\Startup")
-$shortcutPath = "$startupFolder\ArcadIA Bridge.lnk"
+$TaskName = "ArcadIA Bridge"
 
 try {
-    $shell = New-Object -ComObject WScript.Shell
-    $shortcut = $shell.CreateShortcut($shortcutPath)
-    $shortcut.TargetPath = $nodePath
-    $shortcut.Arguments = "`"$BRIDGE_FILE`""
-    $shortcut.WorkingDirectory = $BRIDGE_DIR
-    $shortcut.WindowStyle = 7  # Minimized
-    $shortcut.Description = "ArcadIA Bridge - Local proxy for Claude Code"
-    $shortcut.Save()
+    # Remove existing task if present
+    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
     
-    Info "Auto-start shortcut created in Startup folder"
+    $action = New-ScheduledTaskAction -Execute $nodePath -Argument "`"$BRIDGE_FILE`"" -WorkingDirectory $BRIDGE_DIR
+    $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+    Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Description "ArcadIA Bridge - connects ArcadIA web app to Claude Code" -Force | Out-Null
+    Info "Task Scheduler entry created — bridge auto-starts on login"
 } catch {
-    Warn "Could not create auto-start shortcut: $_"
-    Info "You can start the bridge manually: node `"$BRIDGE_FILE`""
+    Warn "Could not create Task Scheduler entry: $_"
+    Info "Falling back to Startup folder shortcut..."
+    
+    # Fallback: Startup folder shortcut
+    try {
+        $startupFolder = [System.IO.Path]::Combine($env:APPDATA, "Microsoft\Windows\Start Menu\Programs\Startup")
+        $shortcutPath = "$startupFolder\ArcadIA Bridge.lnk"
+        $shell = New-Object -ComObject WScript.Shell
+        $shortcut = $shell.CreateShortcut($shortcutPath)
+        $shortcut.TargetPath = $nodePath
+        $shortcut.Arguments = "`"$BRIDGE_FILE`""
+        $shortcut.WorkingDirectory = $BRIDGE_DIR
+        $shortcut.WindowStyle = 7
+        $shortcut.Description = "ArcadIA Bridge - Local proxy for Claude Code"
+        $shortcut.Save()
+        Info "Auto-start shortcut created in Startup folder"
+    } catch {
+        Warn "Could not create auto-start shortcut: $_"
+        Info "You can start the bridge manually: node `"$BRIDGE_FILE`""
+    }
 }
 
 # ─── Success Banner ──────────────────────────────────────────────────────────
@@ -340,14 +355,14 @@ Write-Host "  ║" -ForegroundColor Green -NoNewline
 Write-Host "   Log:     ~\.arcadia-bridge\bridge.log             " -ForegroundColor DarkGray -NoNewline
 Write-Host "║" -ForegroundColor Green
 Write-Host "  ║" -ForegroundColor Green -NoNewline
-Write-Host "   Auto:    Starts on every login                    " -ForegroundColor DarkGray -NoNewline
+Write-Host "   Auto:    Starts on login (Task Scheduler)          " -ForegroundColor DarkGray -NoNewline
 Write-Host "║" -ForegroundColor Green
 Write-Host "  ║                                                      ║" -ForegroundColor Green
 Write-Host "  ║" -ForegroundColor Green -NoNewline
 Write-Host "   Open ArcadIA:                                      " -NoNewline
 Write-Host "║" -ForegroundColor Green
 Write-Host "  ║" -ForegroundColor Green -NoNewline
-Write-Host "   https://ikosoymeta.github.io/Arcadia/              " -ForegroundColor Cyan -NoNewline
+Write-Host "   https://arcadia.manus.space                         " -ForegroundColor Cyan -NoNewline
 Write-Host "║" -ForegroundColor Green
 Write-Host "  ║                                                      ║" -ForegroundColor Green
 Write-Host "  ╚══════════════════════════════════════════════════════╝" -ForegroundColor Green
