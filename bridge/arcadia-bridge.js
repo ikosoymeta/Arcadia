@@ -48,7 +48,7 @@ const HOST = (() => {
   if (idx !== -1 && process.argv[idx + 1]) return process.argv[idx + 1];
   return '127.0.0.1';
 })();
-const VERSION = '3.6.0';
+const VERSION = '3.7.0';
 const IS_WIN = process.platform === 'win32';
 const TIMEOUT_MS = 180000; // 3 minute timeout for regular messages
 const SLASH_CMD_TIMEOUT_MS = 600000; // 10 minute timeout for slash commands
@@ -2547,10 +2547,449 @@ function handleVersionCheck(req, res) {
       auto_fix: true,
       process_pool: true,
       mcp_monitor: true,
+      oauth: true,
     },
-    min_frontend_version: '3.6.0',
+    min_frontend_version: '3.7.0',
     platform: process.platform,
   }));
+}
+
+// ─── OAuth Token Storage ──────────────────────────────────────────────────
+// Stores OAuth tokens per-user per-provider in ~/.arcadia/oauth-tokens.json
+const OAUTH_TOKENS_FILE = require('path').join(os.homedir(), '.arcadia', 'oauth-tokens.json');
+
+function loadOAuthTokens() {
+  const fs = require('fs');
+  try {
+    if (fs.existsSync(OAUTH_TOKENS_FILE)) {
+      return JSON.parse(fs.readFileSync(OAUTH_TOKENS_FILE, 'utf-8'));
+    }
+  } catch { /* ignore */ }
+  return {};
+}
+
+function saveOAuthTokens(tokens) {
+  const fs = require('fs');
+  const path = require('path');
+  const dir = path.dirname(OAUTH_TOKENS_FILE);
+  try {
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(OAUTH_TOKENS_FILE, JSON.stringify(tokens, null, 2), { mode: 0o600 });
+  } catch (e) {
+    console.error(`[OAuth] Failed to save tokens: ${e.message}`);
+  }
+}
+
+// Pending OAuth flows (in-memory, keyed by state parameter)
+const pendingOAuthFlows = new Map();
+
+// ─── OAuth Endpoints ──────────────────────────────────────────────────────
+
+/**
+ * POST /v1/oauth/initiate
+ * Starts an OAuth flow for a Google service.
+ * Body: { provider: 'gdrive'|'gmail'|'gchat'|'gsheets', scopes: [...], userId: '...' }
+ * Returns: { authUrl: '...' } — the URL to open in a popup
+ */
+function handleOAuthInitiate(req, res, body) {
+  setCorsHeaders(res, req);
+  let parsed;
+  try { parsed = JSON.parse(body); } catch {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Invalid JSON' }));
+    return;
+  }
+
+  const { provider, scopes, userId } = parsed;
+  if (!provider || !userId) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Missing provider or userId' }));
+    return;
+  }
+
+  console.log(`[${new Date().toISOString()}] OAuth: Initiating ${provider} flow for user ${userId}`);
+
+  // Strategy 1: Try gcloud auth for Google Workspace SSO (Meta internal)
+  // This leverages the existing corporate SSO session
+  const tryGcloudAuth = () => {
+    return new Promise((resolve) => {
+      try {
+        // Check if gcloud is available
+        const gcloudPath = execSync('which gcloud 2>/dev/null || echo ""', { encoding: 'utf-8', shell: true }).trim();
+        if (!gcloudPath) {
+          resolve(null);
+          return;
+        }
+
+        // Try to get existing access token from gcloud
+        const token = execSync('gcloud auth print-access-token 2>/dev/null || echo ""', {
+          encoding: 'utf-8', shell: true, timeout: 10000
+        }).trim();
+
+        if (token && token.length > 20) {
+          // Validate the token has the right scopes by checking user info
+          const https = require('https');
+          const url = `https://www.googleapis.com/oauth2/v3/userinfo`;
+          https.get(url, { headers: { Authorization: `Bearer ${token}` } }, (resp) => {
+            let data = '';
+            resp.on('data', chunk => { data += chunk; });
+            resp.on('end', () => {
+              try {
+                const userInfo = JSON.parse(data);
+                if (userInfo.email) {
+                  resolve({
+                    access_token: token,
+                    token_type: 'Bearer',
+                    scope: (scopes || []).join(' '),
+                    profile: {
+                      email: userInfo.email,
+                      name: userInfo.name || userInfo.email.split('@')[0],
+                    }
+                  });
+                  return;
+                }
+              } catch {}
+              resolve(null);
+            });
+          }).on('error', () => resolve(null));
+        } else {
+          resolve(null);
+        }
+      } catch {
+        resolve(null);
+      }
+    });
+  };
+
+  // Strategy 2: Use a local OAuth callback server
+  // This creates a temporary HTTP server to handle the OAuth callback
+  const startOAuthCallbackServer = () => {
+    return new Promise((resolve) => {
+      const state = crypto.randomBytes(16).toString('hex');
+      const callbackPort = 9876 + Math.floor(Math.random() * 100);
+      const redirectUri = `http://localhost:${callbackPort}/oauth/callback`;
+
+      // Store the pending flow
+      pendingOAuthFlows.set(state, {
+        provider,
+        userId,
+        scopes,
+        redirectUri,
+        callbackPort,
+        createdAt: Date.now(),
+        status: 'pending',
+        token: null,
+      });
+
+      // Build the Google OAuth URL
+      // Note: In a Meta corporate environment, Google Workspace SSO handles the consent
+      const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+        `response_type=token` +
+        `&client_id=arcadia-bridge` +
+        `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+        `&scope=${encodeURIComponent((scopes || []).join(' '))}` +
+        `&state=${state}` +
+        `&prompt=consent` +
+        `&access_type=offline` +
+        `&login_hint=${encodeURIComponent(userId)}`;
+
+      // Create a temporary server to catch the OAuth callback
+      const callbackServer = http.createServer((cbReq, cbRes) => {
+        const cbUrl = new URL(cbReq.url, `http://localhost:${callbackPort}`);
+        
+        if (cbUrl.pathname === '/oauth/callback') {
+          // Serve a page that extracts the token from the URL fragment
+          cbRes.writeHead(200, { 'Content-Type': 'text/html' });
+          cbRes.end(`<!DOCTYPE html>
+<html><head><title>ArcadIA - Authorization Complete</title>
+<style>body{font-family:-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#1a1a2e;color:#e0e0e0;}
+.card{text-align:center;padding:40px;border-radius:16px;background:#16213e;box-shadow:0 8px 32px rgba(0,0,0,0.3);max-width:400px;}
+h1{color:#7c5cfc;margin-bottom:12px;font-size:24px;}
+p{color:#a0a0b0;line-height:1.6;}</style></head>
+<body><div class="card">
+<h1>✓ Authorization Successful</h1>
+<p>You can close this window and return to ArcadIA.</p>
+<p style="font-size:13px;color:#666;">This window will close automatically...</p>
+</div>
+<script>
+// Extract token from URL fragment (implicit flow) or query params
+const hash = window.location.hash.substring(1);
+const params = new URLSearchParams(hash || window.location.search);
+const token = params.get('access_token');
+const state = params.get('state');
+if (token && state) {
+  fetch('/oauth/complete', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({access_token: token, state: state, token_type: params.get('token_type'), expires_in: params.get('expires_in'), scope: params.get('scope')})
+  }).then(() => { setTimeout(() => window.close(), 1500); });
+} else {
+  document.querySelector('h1').textContent = '⚠ Authorization Issue';
+  document.querySelector('p').textContent = 'No token received. Please try again from ArcadIA.';
+}
+</script></body></html>`);
+        } else if (cbUrl.pathname === '/oauth/complete' && cbReq.method === 'POST') {
+          let cbBody = '';
+          cbReq.on('data', chunk => { cbBody += chunk; });
+          cbReq.on('end', () => {
+            try {
+              const tokenData = JSON.parse(cbBody);
+              const flow = pendingOAuthFlows.get(tokenData.state);
+              if (flow) {
+                flow.status = 'completed';
+                flow.token = tokenData;
+                pendingOAuthFlows.set(tokenData.state, flow);
+                console.log(`[${new Date().toISOString()}] OAuth: ${provider} token received for user ${userId}`);
+                
+                // Save token to persistent storage
+                const tokens = loadOAuthTokens();
+                if (!tokens[userId]) tokens[userId] = {};
+                tokens[userId][provider] = {
+                  access_token: tokenData.access_token,
+                  token_type: tokenData.token_type || 'Bearer',
+                  expires_in: parseInt(tokenData.expires_in) || 3600,
+                  expires_at: Math.floor(Date.now() / 1000) + (parseInt(tokenData.expires_in) || 3600),
+                  scope: tokenData.scope || (scopes || []).join(' '),
+                  authorized_at: Math.floor(Date.now() / 1000),
+                };
+                saveOAuthTokens(tokens);
+              }
+            } catch (e) {
+              console.error(`[OAuth] Failed to process callback: ${e.message}`);
+            }
+            cbRes.writeHead(200, { 'Content-Type': 'application/json' });
+            cbRes.end(JSON.stringify({ ok: true }));
+            
+            // Close the callback server after a short delay
+            setTimeout(() => {
+              try { callbackServer.close(); } catch {}
+            }, 3000);
+          });
+        } else {
+          cbRes.writeHead(404);
+          cbRes.end('Not found');
+        }
+      });
+
+      callbackServer.listen(callbackPort, '127.0.0.1', () => {
+        console.log(`[${new Date().toISOString()}] OAuth: Callback server listening on port ${callbackPort}`);
+        resolve({ authUrl, state, callbackPort });
+      });
+
+      callbackServer.on('error', (err) => {
+        console.error(`[OAuth] Callback server error: ${err.message}`);
+        resolve(null);
+      });
+
+      // Auto-close after 5 minutes
+      setTimeout(() => {
+        try { callbackServer.close(); } catch {}
+        pendingOAuthFlows.delete(state);
+      }, 300000);
+    });
+  };
+
+  // Try gcloud first, then fall back to callback server
+  tryGcloudAuth().then(async (gcloudResult) => {
+    if (gcloudResult) {
+      // gcloud auth worked — save token and return immediately
+      const tokens = loadOAuthTokens();
+      if (!tokens[userId]) tokens[userId] = {};
+      tokens[userId][provider] = {
+        access_token: gcloudResult.access_token,
+        token_type: gcloudResult.token_type,
+        scope: gcloudResult.scope,
+        expires_at: Math.floor(Date.now() / 1000) + 3600,
+        authorized_at: Math.floor(Date.now() / 1000),
+        profile: gcloudResult.profile,
+        via: 'gcloud',
+      };
+      saveOAuthTokens(tokens);
+
+      console.log(`[${new Date().toISOString()}] OAuth: ${provider} authorized via gcloud SSO for ${gcloudResult.profile.email}`);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        authorized: true,
+        method: 'gcloud_sso',
+        token: tokens[userId][provider],
+        profile: gcloudResult.profile,
+      }));
+    } else {
+      // Fall back to OAuth callback server
+      const callbackResult = await startOAuthCallbackServer();
+      if (callbackResult) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          authUrl: callbackResult.authUrl,
+          state: callbackResult.state,
+          method: 'oauth_callback',
+        }));
+      } else {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Failed to start OAuth flow. Try running: gcloud auth login' }));
+      }
+    }
+  }).catch((err) => {
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: err.message || 'OAuth initiation failed' }));
+  });
+}
+
+/**
+ * POST /v1/oauth/status
+ * Check the status of an OAuth flow or existing authorization.
+ * Body: { provider: '...', userId: '...' }
+ * Returns: { authorized: boolean, token?: {...}, profile?: {...} }
+ */
+function handleOAuthStatus(req, res, body) {
+  setCorsHeaders(res, req);
+  let parsed;
+  try { parsed = JSON.parse(body); } catch {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Invalid JSON' }));
+    return;
+  }
+
+  const { provider, userId, state } = parsed;
+
+  // If state is provided, check the pending flow
+  if (state) {
+    const flow = pendingOAuthFlows.get(state);
+    if (flow && flow.status === 'completed' && flow.token) {
+      // Load the saved token
+      const tokens = loadOAuthTokens();
+      const userTokens = tokens[userId] || {};
+      const providerToken = userTokens[provider];
+      
+      // Clean up the pending flow
+      pendingOAuthFlows.delete(state);
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        authorized: true,
+        token: providerToken || flow.token,
+        profile: providerToken?.profile,
+      }));
+      return;
+    } else if (flow) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ authorized: false, status: flow.status }));
+      return;
+    }
+  }
+
+  // Check persistent storage
+  const tokens = loadOAuthTokens();
+  const userTokens = tokens[userId] || {};
+  const providerToken = userTokens[provider];
+
+  if (providerToken) {
+    // Check if token is expired
+    const isExpired = providerToken.expires_at && providerToken.expires_at < Math.floor(Date.now() / 1000);
+    
+    if (isExpired && providerToken.via === 'gcloud') {
+      // Try to refresh via gcloud
+      try {
+        const newToken = execSync('gcloud auth print-access-token 2>/dev/null || echo ""', {
+          encoding: 'utf-8', shell: true, timeout: 10000
+        }).trim();
+        if (newToken && newToken.length > 20) {
+          providerToken.access_token = newToken;
+          providerToken.expires_at = Math.floor(Date.now() / 1000) + 3600;
+          tokens[userId][provider] = providerToken;
+          saveOAuthTokens(tokens);
+        }
+      } catch { /* ignore */ }
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      authorized: !isExpired || providerToken.via === 'gcloud',
+      token: providerToken,
+      profile: providerToken.profile,
+      expired: isExpired,
+    }));
+  } else {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ authorized: false }));
+  }
+}
+
+/**
+ * POST /v1/oauth/revoke
+ * Revoke OAuth authorization for a provider.
+ * Body: { provider: '...', userId: '...' }
+ */
+function handleOAuthRevoke(req, res, body) {
+  setCorsHeaders(res, req);
+  let parsed;
+  try { parsed = JSON.parse(body); } catch {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Invalid JSON' }));
+    return;
+  }
+
+  const { provider, userId } = parsed;
+  const tokens = loadOAuthTokens();
+  if (tokens[userId] && tokens[userId][provider]) {
+    delete tokens[userId][provider];
+    saveOAuthTokens(tokens);
+    console.log(`[${new Date().toISOString()}] OAuth: Revoked ${provider} for user ${userId}`);
+  }
+
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ success: true }));
+}
+
+/**
+ * POST /v1/oauth/validate
+ * Validate a Google token by checking user info.
+ * Body: { provider: '...', token: '...' }
+ */
+function handleOAuthValidate(req, res, body) {
+  setCorsHeaders(res, req);
+  let parsed;
+  try { parsed = JSON.parse(body); } catch {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Invalid JSON' }));
+    return;
+  }
+
+  const { token } = parsed;
+  if (!token) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ valid: false, error: 'Missing token' }));
+    return;
+  }
+
+  const https = require('https');
+  https.get('https://www.googleapis.com/oauth2/v3/userinfo', {
+    headers: { Authorization: `Bearer ${token}` }
+  }, (resp) => {
+    let data = '';
+    resp.on('data', chunk => { data += chunk; });
+    resp.on('end', () => {
+      try {
+        const userInfo = JSON.parse(data);
+        if (userInfo.email) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            valid: true,
+            profile: { email: userInfo.email, name: userInfo.name || userInfo.email.split('@')[0] },
+          }));
+        } else {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ valid: false, error: 'Token invalid or expired' }));
+        }
+      } catch {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ valid: false, error: 'Failed to parse response' }));
+      }
+    });
+  }).on('error', (err) => {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ valid: false, error: err.message }));
+  });
 }
 
 // ─── HTTP Server ───────────────────────────────────────────────────────────
@@ -2651,6 +3090,35 @@ const server = http.createServer((req, res) => {
     let body = '';
     req.on('data', chunk => { body += chunk; });
     req.on('end', () => handleGDriveCreate(req, res, body));
+    return;
+  }
+
+  // ─── OAuth Endpoints ──────────────────────────────────────────────────
+  if (req.method === 'POST' && req.url === '/v1/oauth/initiate') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => handleOAuthInitiate(req, res, body));
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/v1/oauth/status') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => handleOAuthStatus(req, res, body));
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/v1/oauth/revoke') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => handleOAuthRevoke(req, res, body));
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/v1/oauth/validate') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => handleOAuthValidate(req, res, body));
     return;
   }
 
