@@ -187,10 +187,6 @@ function SuggestionCarousel({
         <div className={styles.carouselPagination}>
           {currentPage + 1} / {totalPages}
         </div>
-        <div className={styles.carouselNav}>
-          <button className={styles.carouselArrowBtn} onClick={prevPage} aria-label="Previous">‹</button>
-          <button className={styles.carouselArrowBtn} onClick={nextPage} aria-label="Next">›</button>
-        </div>
       </div>
 
       {/* Carousel viewport — clips overflow, shows one page at a time */}
@@ -241,6 +237,17 @@ function SuggestionCarousel({
             </div>
           ))}
         </div>
+        {/* Side arrows */}
+        <button
+          className={`${styles.carouselSideArrow} ${styles.carouselSideArrowLeft}`}
+          onClick={prevPage}
+          aria-label="Previous"
+        >‹</button>
+        <button
+          className={`${styles.carouselSideArrow} ${styles.carouselSideArrowRight}`}
+          onClick={nextPage}
+          aria-label="Next"
+        >›</button>
       </div>
 
       {/* Page dots */}
