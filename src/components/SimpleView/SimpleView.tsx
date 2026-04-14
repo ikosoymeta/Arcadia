@@ -28,16 +28,18 @@ const PREBUILT_SYSTEM_PROMPT = `You are a highly capable AI assistant. Follow th
 const SUGGESTION_PROMPTS = new Set<string>();
 
 const SUGGESTIONS = [
-  { icon: '📋', label: 'Meeting notes', prompt: 'Help me turn rough meeting notes into a clean summary. I\'ll paste my notes and you organize them into: Key Decisions, Action Items (with owners and due dates), and Open Questions. Keep it concise and ready to share.' },
-  { icon: '📧', label: 'Draft an email', prompt: 'Help me write a professional email. Ask me who it\'s to, the purpose, and key points I want to cover. Keep it clear, concise, and action-oriented.' },
-  { icon: '📊', label: 'Summarize data', prompt: 'Help me make sense of data. I\'ll paste numbers, a table, or describe metrics, and you summarize the key takeaways, trends, and what actions I should consider. Present insights in plain language.' },
-  { icon: '🎯', label: 'Project status update', prompt: 'Help me write a project status update. Ask me about the project name, what was accomplished this week, blockers, next steps, and any risks. Format it as a clean status report ready to share with stakeholders.' },
-  { icon: '📝', label: 'HPM Self-Review', prompt: 'Help me draft my HPM self-review for this half. Ask me about my role, key projects, and accomplishments. Then write a draft with sections for Impact, Execution, and Collaboration.' },
-  { icon: '💡', label: 'Brainstorm ideas', prompt: 'Help me brainstorm. I\'ll describe a challenge or opportunity, and you generate a range of creative solutions and approaches. Organize them by effort level (quick wins vs. bigger bets) so I can prioritize.' },
-  { icon: '📅', label: 'Organize my day', prompt: 'Act as an executive productivity coach. Help me organize my day. Ask me about my goals for today, tasks, meetings, and deadlines. Then: 1) Identify my top 3 priorities, 2) Suggest a structured schedule, 3) Highlight tasks that can be automated or delegated, 4) Recommend the highest-impact activities for today.' },
-  { icon: '🔍', label: 'Research a topic', prompt: 'Act as a professional research analyst. Ask me what topic I want to research. Then provide: 1) Key insights, 2) Current trends, 3) Important statistics, 4) Major companies or players involved, 5) Opportunities or risks in this space. Be thorough and cite sources where possible.' },
-  { icon: '🧩', label: 'Clarify an idea', prompt: 'I will share a rough idea or unstructured thoughts. Your task is to: Clarify the core idea, organize it logically, identify missing pieces, and suggest improvements. Ask me to share my idea, then restructure it into something clear and actionable.' },
-  { icon: '✨', label: 'Improve writing', prompt: 'Improve the text I share to make it: clearer, more persuasive, more concise, and more professional. Keep the original meaning but significantly improve the quality of the writing. Ask me to paste the text I want improved.' },
+  { icon: '📋', label: 'Meeting notes', desc: 'Turn rough notes into clean summaries with decisions, action items & open questions', category: 'Productivity', prompt: 'Help me turn rough meeting notes into a clean summary. I\'ll paste my notes and you organize them into: Key Decisions, Action Items (with owners and due dates), and Open Questions. Keep it concise and ready to share.' },
+  { icon: '📧', label: 'Draft an email', desc: 'Write professional emails that are clear, concise, and action-oriented', category: 'Writing', prompt: 'Help me write a professional email. Ask me who it\'s to, the purpose, and key points I want to cover. Keep it clear, concise, and action-oriented.' },
+  { icon: '📊', label: 'Summarize data', desc: 'Extract key takeaways, trends, and actionable insights from your data', category: 'Analysis', prompt: 'Help me make sense of data. I\'ll paste numbers, a table, or describe metrics, and you summarize the key takeaways, trends, and what actions I should consider. Present insights in plain language.' },
+  { icon: '🎯', label: 'Project status update', desc: 'Create stakeholder-ready status reports with progress, blockers & next steps', category: 'Productivity', prompt: 'Help me write a project status update. Ask me about the project name, what was accomplished this week, blockers, next steps, and any risks. Format it as a clean status report ready to share with stakeholders.' },
+  { icon: '📝', label: 'HPM Self-Review', desc: 'Draft your half performance review covering Impact, Execution & Collaboration', category: 'Career', prompt: 'Help me draft my HPM self-review for this half. Ask me about my role, key projects, and accomplishments. Then write a draft with sections for Impact, Execution, and Collaboration.' },
+  { icon: '💡', label: 'Brainstorm ideas', desc: 'Generate creative solutions organized by effort level — quick wins to big bets', category: 'Strategy', prompt: 'Help me brainstorm. I\'ll describe a challenge or opportunity, and you generate a range of creative solutions and approaches. Organize them by effort level (quick wins vs. bigger bets) so I can prioritize.' },
+  { icon: '📅', label: 'Organize my day', desc: 'Get a structured schedule with top priorities and delegation suggestions', category: 'Productivity', prompt: 'Act as an executive productivity coach. Help me organize my day. Ask me about my goals for today, tasks, meetings, and deadlines. Then: 1) Identify my top 3 priorities, 2) Suggest a structured schedule, 3) Highlight tasks that can be automated or delegated, 4) Recommend the highest-impact activities for today.' },
+  { icon: '🔍', label: 'Research a topic', desc: 'Get key insights, trends, statistics, and competitive landscape analysis', category: 'Research', prompt: 'Act as a professional research analyst. Ask me what topic I want to research. Then provide: 1) Key insights, 2) Current trends, 3) Important statistics, 4) Major companies or players involved, 5) Opportunities or risks in this space. Be thorough and cite sources where possible.' },
+  { icon: '🧩', label: 'Clarify an idea', desc: 'Restructure rough thoughts into clear, organized, actionable concepts', category: 'Strategy', prompt: 'I will share a rough idea or unstructured thoughts. Your task is to: Clarify the core idea, organize it logically, identify missing pieces, and suggest improvements. Ask me to share my idea, then restructure it into something clear and actionable.' },
+  { icon: '✨', label: 'Improve writing', desc: 'Make your text clearer, more persuasive, concise, and professional', category: 'Writing', prompt: 'Improve the text I share to make it: clearer, more persuasive, more concise, and more professional. Keep the original meaning but significantly improve the quality of the writing. Ask me to paste the text I want improved.' },
+  { icon: '🎬', label: 'Create presentation', desc: 'Generate a polished slide deck from your topic or outline', category: 'Creative', prompt: '__PRESENTATION__' },
+  { icon: '🤖', label: 'AI Landing Page', desc: 'Build a professional AI-powered landing page for your project', category: 'Creative', prompt: '__LANDING__' },
 ];
 
 // Populate the set for O(1) lookups
@@ -78,6 +80,205 @@ function getFollowUpSuggestions(content: string): string[] {
     return ['Add speaker notes', 'Make it more visual', 'Reduce to 5 slides', 'Add a summary slide'];
   }
   return ['Make it shorter', 'Give me an example', 'Explain in simpler terms', 'What should I do next?'];
+}
+
+// ─── Suggestion Carousel (Graph Explorer style) ─────────────────────────────
+
+const CATEGORY_COLORS: Record<string, string> = {
+  Productivity: '#6366f1',
+  Writing: '#8b5cf6',
+  Analysis: '#3b82f6',
+  Career: '#f59e0b',
+  Strategy: '#10b981',
+  Research: '#06b6d4',
+  Creative: '#ec4899',
+};
+
+function SuggestionCarousel({
+  suggestions,
+  preloadStatus,
+  onSend,
+  onPresentation,
+}: {
+  suggestions: typeof SUGGESTIONS;
+  preloadStatus: Map<string, string>;
+  onSend: (prompt: string) => void;
+  onPresentation: () => void;
+}) {
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [isHovered, setIsHovered] = useState(false);
+  const [direction, setDirection] = useState<'left' | 'right' | null>(null);
+  const touchStartX = useRef(0);
+  const autoRotateRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const total = suggestions.length;
+
+  // Auto-rotate every 4s when not hovered
+  useEffect(() => {
+    if (isHovered) {
+      if (autoRotateRef.current) clearInterval(autoRotateRef.current);
+      return;
+    }
+    autoRotateRef.current = setInterval(() => {
+      setDirection('right');
+      setActiveIndex(prev => (prev + 1) % total);
+    }, 4000);
+    return () => { if (autoRotateRef.current) clearInterval(autoRotateRef.current); };
+  }, [isHovered, total]);
+
+  const goTo = useCallback((idx: number, dir: 'left' | 'right') => {
+    setDirection(dir);
+    setActiveIndex(((idx % total) + total) % total);
+  }, [total]);
+
+  const prev = useCallback(() => goTo(activeIndex - 1, 'left'), [activeIndex, goTo]);
+  const next = useCallback(() => goTo(activeIndex + 1, 'right'), [activeIndex, goTo]);
+
+  // Keyboard navigation
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowLeft') prev();
+      if (e.key === 'ArrowRight') next();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [prev, next]);
+
+  const handleClick = (s: typeof SUGGESTIONS[0]) => {
+    if (s.prompt === '__PRESENTATION__') {
+      onPresentation();
+    } else if (s.prompt === '__LANDING__') {
+      window.open('https://ailanding.manus.space/', '_blank');
+    } else {
+      onSend(s.prompt);
+    }
+  };
+
+  // Get visible indices: [prev, prev, active, next, next]
+  const getOffset = (idx: number) => {
+    const diff = ((idx - activeIndex) % total + total) % total;
+    if (diff === 0) return 0;
+    if (diff === 1) return 1;
+    if (diff === total - 1) return -1;
+    if (diff === 2) return 2;
+    if (diff === total - 2) return -2;
+    return diff <= total / 2 ? diff : diff - total;
+  };
+
+  const visibleIndices = useMemo(() => {
+    const indices: number[] = [];
+    for (let i = -2; i <= 2; i++) {
+      indices.push(((activeIndex + i) % total + total) % total);
+    }
+    return indices;
+  }, [activeIndex, total]);
+
+  return (
+    <div
+      className={styles.carouselContainer}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+      onTouchStart={e => { touchStartX.current = e.touches[0].clientX; }}
+      onTouchEnd={e => {
+        const dx = e.changedTouches[0].clientX - touchStartX.current;
+        if (Math.abs(dx) > 50) dx > 0 ? prev() : next();
+      }}
+    >
+      {/* Header */}
+      <div className={styles.carouselHeader}>
+        <div className={styles.carouselTitle}>QUICK ACTIONS</div>
+        <div className={styles.carouselPagination}>
+          {activeIndex + 1} / {total}
+        </div>
+        <div className={styles.carouselNav}>
+          <button className={styles.carouselArrowBtn} onClick={prev} aria-label="Previous">‹</button>
+          <button className={styles.carouselArrowBtn} onClick={next} aria-label="Next">›</button>
+        </div>
+      </div>
+
+      {/* Carousel track */}
+      <div className={styles.carouselTrack}>
+        {/* Left arrow overlay */}
+        <button className={`${styles.carouselSideArrow} ${styles.carouselSideArrowLeft}`} onClick={prev} aria-label="Previous">
+          ‹
+        </button>
+
+        {visibleIndices.map(idx => {
+          const s = suggestions[idx];
+          const offset = getOffset(idx);
+          const isCenter = offset === 0;
+          const status = preloadStatus.get(s.prompt);
+          const catColor = CATEGORY_COLORS[s.category] || '#6366f1';
+
+          // Calculate transform based on offset — tighter spacing so side cards peek in
+          const translateX = offset * 190; // px between cards
+          const scale = isCenter ? 1 : Math.abs(offset) === 1 ? 0.85 : 0.7;
+          const opacity = isCenter ? 1 : Math.abs(offset) === 1 ? 0.65 : 0.25;
+          const zIndex = isCenter ? 10 : Math.abs(offset) === 1 ? 5 : 1;
+          const blur = isCenter ? 0 : Math.abs(offset) === 1 ? 1 : 3;
+
+          return (
+            <div
+              key={`${idx}-${s.label}`}
+              className={`${styles.carouselCard} ${isCenter ? styles.carouselCardActive : ''}`}
+              style={{
+                transform: `translateX(${translateX}px) scale(${scale})`,
+                opacity,
+                zIndex,
+                pointerEvents: Math.abs(offset) <= 1 ? 'auto' : 'none',
+                filter: blur > 0 ? `blur(${blur}px)` : 'none',
+                cursor: isCenter ? 'pointer' : Math.abs(offset) === 1 ? 'pointer' : 'default',
+              }}
+              onClick={() => {
+                if (isCenter) handleClick(s);
+                else if (Math.abs(offset) === 1) goTo(idx, offset > 0 ? 'right' : 'left');
+              }}
+            >
+              {/* Category badge */}
+              <div className={styles.carouselCardBadge} style={{ background: `${catColor}20`, color: catColor, borderColor: `${catColor}40` }}>
+                {s.category}
+              </div>
+
+              {/* Icon */}
+              <div className={styles.carouselCardIcon}>{s.icon}</div>
+
+              {/* Title */}
+              <div className={styles.carouselCardTitle}>{s.label}</div>
+
+              {/* Description (only visible on center card) */}
+              <div className={styles.carouselCardDesc} style={{ opacity: isCenter ? 1 : 0, height: isCenter ? 'auto' : 0, overflow: 'hidden' }}>{s.desc}</div>
+
+              {/* Preload indicator */}
+              {status === 'ready' && (
+                <div className={styles.carouselCardReady}>⚡ Ready</div>
+              )}
+              {status === 'loading' && (
+                <div className={styles.carouselCardLoading}>
+                  <span className={styles.preloadSpinner} /> Loading...
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {/* Right arrow overlay */}
+        <button className={`${styles.carouselSideArrow} ${styles.carouselSideArrowRight}`} onClick={next} aria-label="Next">
+          ›
+        </button>
+      </div>
+
+      {/* Dot indicators */}
+      <div className={styles.carouselDots}>
+        {suggestions.map((_, i) => (
+          <button
+            key={i}
+            className={`${styles.carouselDot} ${i === activeIndex ? styles.carouselDotActive : ''}`}
+            onClick={() => goTo(i, i > activeIndex ? 'right' : 'left')}
+            aria-label={`Go to suggestion ${i + 1}`}
+          />
+        ))}
+      </div>
+    </div>
+  );
 }
 
 // ─── Bridge Setup Prompt ─────────────────────────────────────────────────────
@@ -1064,30 +1265,12 @@ export function SimpleView() {
                 {isMetaProxy ? '🏢 Connected via Meta corporate account' : `✓ Connected — ${activeConnection.model.replace('claude-', '').replace(/-\d{8}$/, '')}`}
               </div>
             )}
-            <div className={styles.suggestions}>
-              {SUGGESTIONS.map(s => {
-                const status = preloadStatus.get(s.prompt);
-                return (
-                  <button
-                    key={s.label}
-                    className={`${styles.suggestionBtn} ${status === 'ready' ? styles.suggestionReady : ''}`}
-                    onClick={() => handleSend(s.prompt)}
-                  >
-                    <span className={styles.suggestionIcon}>{s.icon}</span>
-                    <span>{s.label}</span>
-                    {status === 'ready' && <span className={styles.preloadDot} title="Response preloaded — instant reply">⚡</span>}
-                    {status === 'loading' && <span className={styles.preloadSpinner} title="Preloading response..." />}
-                  </button>
-                );
-              })}
-              <button
-                className={`${styles.suggestionBtn} ${styles.presentationBtn}`}
-                onClick={() => setShowPresentationDialog(true)}
-              >
-                <span className={styles.suggestionIcon}>🎬</span>
-                <span>Create presentation</span>
-              </button>
-            </div>
+            <SuggestionCarousel
+              suggestions={SUGGESTIONS}
+              preloadStatus={preloadStatus}
+              onSend={handleSend}
+              onPresentation={() => setShowPresentationDialog(true)}
+            />
           </div>
         ) : (
           <div className={styles.messageList}>
