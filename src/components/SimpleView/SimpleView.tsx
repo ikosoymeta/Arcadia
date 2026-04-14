@@ -195,11 +195,6 @@ function SuggestionCarousel({
 
       {/* Carousel viewport — clips overflow, shows one page at a time */}
       <div className={styles.carouselViewport}>
-        {/* Left arrow overlay */}
-        <button className={`${styles.carouselSideArrow} ${styles.carouselSideArrowLeft}`} onClick={prevPage} aria-label="Previous">
-          ‹
-        </button>
-
         {/* Sliding strip — all pages laid out horizontally, translateX to current page */}
         <div
           className={styles.carouselStrip}
@@ -246,11 +241,6 @@ function SuggestionCarousel({
             </div>
           ))}
         </div>
-
-        {/* Right arrow overlay */}
-        <button className={`${styles.carouselSideArrow} ${styles.carouselSideArrowRight}`} onClick={nextPage} aria-label="Next">
-          ›
-        </button>
       </div>
 
       {/* Page dots */}
