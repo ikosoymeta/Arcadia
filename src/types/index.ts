@@ -259,6 +259,7 @@ export interface Skill {
   sourceConversationId?: string;
   usageCount: number;
   isPublic: boolean;
+  icon?: string;
 }
 
 export interface TeamPod {

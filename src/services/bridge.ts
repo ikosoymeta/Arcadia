@@ -12,12 +12,24 @@
 const LOCAL_BRIDGE = 'http://127.0.0.1:8087';
 const STORAGE_KEY = 'arcadia-remote-bridge';
 
+/** Default Meta devserver for bridge — pre-populated for one-click setup */
+export const DEFAULT_DEVSERVER = {
+  hostname: 'devvm423.maz0.facebook.com',
+  url: 'http://devvm423.maz0.facebook.com:8087',
+  label: 'devvm423 (AI Assistant pool)',
+  setupCmd: 'curl -sL https://raw.githubusercontent.com/ikosoymeta/Arcadia/main/bridge/setup-devserver.sh | bash',
+  specs: '30 cores · 80 GB RAM · CentOS 9',
+};
+
 export interface RemoteBridgeConfig {
   enabled: boolean;
   url: string;
 }
 
-/** Get the current remote bridge config from localStorage */
+/** Get the current remote bridge config from localStorage.
+ *  Default: disabled (uses localhost:8087). Devserver is an optional advanced option.
+ *  Existing users who already configured a remote bridge are not affected.
+ */
 export function getRemoteBridgeConfig(): RemoteBridgeConfig {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -29,6 +41,9 @@ export function getRemoteBridgeConfig(): RemoteBridgeConfig {
       };
     }
   } catch { /* ignore parse errors */ }
+  
+  // First-time users: default to localhost (no remote bridge)
+  // Users can enable a remote bridge in Settings if needed
   return { enabled: false, url: '' };
 }
 
@@ -84,6 +99,11 @@ export async function testBridgeConnection(url?: string): Promise<{ ok: boolean;
     }
     return { ok: false, latency, error: e.message || 'Connection failed' };
   }
+}
+
+/** Quick-connect to the default devserver */
+export function connectToDevserver(): void {
+  setRemoteBridgeConfig({ enabled: true, url: DEFAULT_DEVSERVER.url });
 }
 
 /** Normalize a user-entered URL: add http:// if missing, remove trailing slash */
