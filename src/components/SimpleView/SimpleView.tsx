@@ -112,7 +112,11 @@ function SuggestionCarousel({
   const autoRotateRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const total = suggestions.length;
 
-  // Auto-rotate every 4s when not hovered
+  const cardsPerPage = 3;
+  const totalPages = Math.ceil(total / cardsPerPage);
+  const currentPage = Math.floor(activeIndex / cardsPerPage);
+
+  // Auto-rotate every 5s when not hovered (page-based)
   useEffect(() => {
     if (isHovered) {
       if (autoRotateRef.current) clearInterval(autoRotateRef.current);
@@ -120,28 +124,16 @@ function SuggestionCarousel({
     }
     autoRotateRef.current = setInterval(() => {
       setDirection('right');
-      setActiveIndex(prev => (prev + 1) % total);
-    }, 4000);
+      setActiveIndex(prev => {
+        const page = Math.floor(prev / cardsPerPage);
+        const nextP = (page + 1) % totalPages;
+        return nextP * cardsPerPage;
+      });
+    }, 5000);
     return () => { if (autoRotateRef.current) clearInterval(autoRotateRef.current); };
-  }, [isHovered, total]);
+  }, [isHovered, totalPages]);
 
-  const goTo = useCallback((idx: number, dir: 'left' | 'right') => {
-    setDirection(dir);
-    setActiveIndex(((idx % total) + total) % total);
-  }, [total]);
 
-  const prev = useCallback(() => goTo(activeIndex - 1, 'left'), [activeIndex, goTo]);
-  const next = useCallback(() => goTo(activeIndex + 1, 'right'), [activeIndex, goTo]);
-
-  // Keyboard navigation
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowLeft') prev();
-      if (e.key === 'ArrowRight') next();
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [prev, next]);
 
   const handleClick = (s: typeof SUGGESTIONS[0]) => {
     if (s.prompt === '__PRESENTATION__') {
@@ -153,24 +145,37 @@ function SuggestionCarousel({
     }
   };
 
-  // Get visible indices: [prev, prev, active, next, next]
-  const getOffset = (idx: number) => {
-    const diff = ((idx - activeIndex) % total + total) % total;
-    if (diff === 0) return 0;
-    if (diff === 1) return 1;
-    if (diff === total - 1) return -1;
-    if (diff === 2) return 2;
-    if (diff === total - 2) return -2;
-    return diff <= total / 2 ? diff : diff - total;
-  };
-
-  const visibleIndices = useMemo(() => {
-    const indices: number[] = [];
-    for (let i = -2; i <= 2; i++) {
-      indices.push(((activeIndex + i) % total + total) % total);
+  // Get the 3 cards for the current page
+  const visibleCards = useMemo(() => {
+    const start = currentPage * cardsPerPage;
+    const cards: number[] = [];
+    for (let i = 0; i < cardsPerPage; i++) {
+      cards.push((start + i) % total);
     }
-    return indices;
-  }, [activeIndex, total]);
+    return cards;
+  }, [currentPage, total]);
+
+  const prevPage = useCallback(() => {
+    setDirection('left');
+    const newPage = (currentPage - 1 + totalPages) % totalPages;
+    setActiveIndex(newPage * cardsPerPage);
+  }, [currentPage, totalPages]);
+
+  const nextPage = useCallback(() => {
+    setDirection('right');
+    const newPage = (currentPage + 1) % totalPages;
+    setActiveIndex(newPage * cardsPerPage);
+  }, [currentPage, totalPages]);
+
+  // Override prev/next for page-based navigation
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowLeft') prevPage();
+      if (e.key === 'ArrowRight') nextPage();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [prevPage, nextPage]);
 
   return (
     <div
@@ -180,100 +185,85 @@ function SuggestionCarousel({
       onTouchStart={e => { touchStartX.current = e.touches[0].clientX; }}
       onTouchEnd={e => {
         const dx = e.changedTouches[0].clientX - touchStartX.current;
-        if (Math.abs(dx) > 50) dx > 0 ? prev() : next();
+        if (Math.abs(dx) > 50) dx > 0 ? prevPage() : nextPage();
       }}
     >
       {/* Header */}
       <div className={styles.carouselHeader}>
         <div className={styles.carouselTitle}>QUICK ACTIONS</div>
         <div className={styles.carouselPagination}>
-          {activeIndex + 1} / {total}
+          {currentPage + 1} / {totalPages}
         </div>
         <div className={styles.carouselNav}>
-          <button className={styles.carouselArrowBtn} onClick={prev} aria-label="Previous">‹</button>
-          <button className={styles.carouselArrowBtn} onClick={next} aria-label="Next">›</button>
+          <button className={styles.carouselArrowBtn} onClick={prevPage} aria-label="Previous">‹</button>
+          <button className={styles.carouselArrowBtn} onClick={nextPage} aria-label="Next">›</button>
         </div>
       </div>
 
-      {/* Carousel track */}
+      {/* Carousel track — 3 cards in a row */}
       <div className={styles.carouselTrack}>
         {/* Left arrow overlay */}
-        <button className={`${styles.carouselSideArrow} ${styles.carouselSideArrowLeft}`} onClick={prev} aria-label="Previous">
+        <button className={`${styles.carouselSideArrow} ${styles.carouselSideArrowLeft}`} onClick={prevPage} aria-label="Previous">
           ‹
         </button>
 
-        {visibleIndices.map(idx => {
-          const s = suggestions[idx];
-          const offset = getOffset(idx);
-          const isCenter = offset === 0;
-          const status = preloadStatus.get(s.prompt);
-          const catColor = CATEGORY_COLORS[s.category] || '#6366f1';
+        <div className={styles.carouselGrid}>
+          {visibleCards.map((idx, pos) => {
+            const s = suggestions[idx];
+            const status = preloadStatus.get(s.prompt);
+            const catColor = CATEGORY_COLORS[s.category] || '#6366f1';
 
-          // Calculate transform based on offset — tighter spacing so side cards peek in
-          const translateX = offset * 190; // px between cards
-          const scale = isCenter ? 1 : Math.abs(offset) === 1 ? 0.85 : 0.7;
-          const opacity = isCenter ? 1 : Math.abs(offset) === 1 ? 0.65 : 0.25;
-          const zIndex = isCenter ? 10 : Math.abs(offset) === 1 ? 5 : 1;
-          const blur = isCenter ? 0 : Math.abs(offset) === 1 ? 1 : 3;
-
-          return (
-            <div
-              key={`${idx}-${s.label}`}
-              className={`${styles.carouselCard} ${isCenter ? styles.carouselCardActive : ''}`}
-              style={{
-                transform: `translateX(${translateX}px) scale(${scale})`,
-                opacity,
-                zIndex,
-                pointerEvents: Math.abs(offset) <= 1 ? 'auto' : 'none',
-                filter: blur > 0 ? `blur(${blur}px)` : 'none',
-                cursor: isCenter ? 'pointer' : Math.abs(offset) === 1 ? 'pointer' : 'default',
-              }}
-              onClick={() => {
-                if (isCenter) handleClick(s);
-                else if (Math.abs(offset) === 1) goTo(idx, offset > 0 ? 'right' : 'left');
-              }}
-            >
-              {/* Category badge */}
-              <div className={styles.carouselCardBadge} style={{ background: `${catColor}20`, color: catColor, borderColor: `${catColor}40` }}>
-                {s.category}
-              </div>
-
-              {/* Icon */}
-              <div className={styles.carouselCardIcon}>{s.icon}</div>
-
-              {/* Title */}
-              <div className={styles.carouselCardTitle}>{s.label}</div>
-
-              {/* Description (only visible on center card) */}
-              <div className={styles.carouselCardDesc} style={{ opacity: isCenter ? 1 : 0, height: isCenter ? 'auto' : 0, overflow: 'hidden' }}>{s.desc}</div>
-
-              {/* Preload indicator */}
-              {status === 'ready' && (
-                <div className={styles.carouselCardReady}>⚡ Ready</div>
-              )}
-              {status === 'loading' && (
-                <div className={styles.carouselCardLoading}>
-                  <span className={styles.preloadSpinner} /> Loading...
+            return (
+              <div
+                key={`${currentPage}-${pos}`}
+                className={styles.carouselCard}
+                onClick={() => handleClick(s)}
+              >
+                {/* Category badge */}
+                <div className={styles.carouselCardBadge} style={{ background: `${catColor}20`, color: catColor, borderColor: `${catColor}40` }}>
+                  {s.category}
                 </div>
-              )}
-            </div>
-          );
-        })}
+
+                {/* Icon */}
+                <div className={styles.carouselCardIcon}>{s.icon}</div>
+
+                {/* Title */}
+                <div className={styles.carouselCardTitle}>{s.label}</div>
+
+                {/* Description */}
+                <div className={styles.carouselCardDesc}>{s.desc}</div>
+
+                {/* Preload indicator */}
+                {status === 'ready' && (
+                  <div className={styles.carouselCardReady}>⚡ Ready</div>
+                )}
+                {status === 'loading' && (
+                  <div className={styles.carouselCardLoading}>
+                    <span className={styles.preloadSpinner} /> Loading...
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
 
         {/* Right arrow overlay */}
-        <button className={`${styles.carouselSideArrow} ${styles.carouselSideArrowRight}`} onClick={next} aria-label="Next">
+        <button className={`${styles.carouselSideArrow} ${styles.carouselSideArrowRight}`} onClick={nextPage} aria-label="Next">
           ›
         </button>
       </div>
 
-      {/* Dot indicators */}
+      {/* Page dots */}
       <div className={styles.carouselDots}>
-        {suggestions.map((_, i) => (
+        {Array.from({ length: totalPages }, (_, i) => (
           <button
             key={i}
-            className={`${styles.carouselDot} ${i === activeIndex ? styles.carouselDotActive : ''}`}
-            onClick={() => goTo(i, i > activeIndex ? 'right' : 'left')}
-            aria-label={`Go to suggestion ${i + 1}`}
+            className={`${styles.carouselDot} ${i === currentPage ? styles.carouselDotActive : ''}`}
+            onClick={() => {
+              setDirection(i > currentPage ? 'right' : 'left');
+              setActiveIndex(i * cardsPerPage);
+            }}
+            aria-label={`Go to page ${i + 1}`}
           />
         ))}
       </div>

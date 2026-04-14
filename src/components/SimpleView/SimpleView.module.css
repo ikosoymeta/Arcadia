@@ -346,11 +346,10 @@
 
 .carouselContainer {
   width: 100%;
-  max-width: 800px;
+  max-width: 100%;
   margin: 0 auto;
   position: relative;
   user-select: none;
-  overflow: hidden;
 }
 
 .carouselHeader {
@@ -405,14 +404,25 @@
 /* Track */
 .carouselTrack {
   position: relative;
-  height: 220px;
   display: flex;
   align-items: center;
   justify-content: center;
-  overflow: visible;
-  perspective: 1200px;
-  margin: 0 -20px;
-  padding: 0 20px;
+  min-height: 180px;
+}
+
+/* 3-card grid */
+.carouselGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  width: 100%;
+  padding: 0 40px;
+  animation: carouselSlideIn 0.35s ease;
+}
+
+@keyframes carouselSlideIn {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: translateX(0); }
 }
 
 /* Side arrows overlaying the track */
@@ -460,38 +470,27 @@
 
 /* Cards */
 .carouselCard {
-  position: absolute;
-  width: 220px;
-  height: 190px;
-  border-radius: 16px;
+  border-radius: 14px;
   border: 1px solid var(--border);
   background: var(--bg-secondary);
-  padding: 20px 18px;
+  padding: 20px 16px;
   display: flex;
   flex-direction: column;
   align-items: center;
   text-align: center;
   gap: 8px;
   cursor: pointer;
-  transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  transition: all 0.25s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 }
 
-.carouselCardActive {
+.carouselCard:hover {
   border-color: rgba(99, 102, 241, 0.5);
   background: linear-gradient(145deg, var(--bg-secondary) 0%, rgba(99, 102, 241, 0.04) 100%);
   box-shadow:
-    0 8px 32px rgba(99, 102, 241, 0.18),
-    0 2px 12px rgba(0, 0, 0, 0.15),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
-}
-
-.carouselCardActive:hover {
-  transform: translateX(0) scale(1.03) !important;
-  box-shadow:
-    0 12px 40px rgba(99, 102, 241, 0.2),
-    0 4px 16px rgba(0, 0, 0, 0.2),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    0 8px 24px rgba(99, 102, 241, 0.15),
+    0 2px 8px rgba(0, 0, 0, 0.12);
+  transform: translateY(-2px);
 }
 
 .carouselCardBadge {
@@ -505,28 +504,25 @@
 }
 
 .carouselCardIcon {
-  font-size: 32px;
+  font-size: 30px;
   line-height: 1;
 }
 
 .carouselCardTitle {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 700;
   color: var(--text-primary);
   line-height: 1.2;
 }
 
 .carouselCardDesc {
-  font-size: 12px;
-  color: var(--text-secondary);
-  line-height: 1.5;
-  max-width: 180px;
-  animation: fadeInDesc 0.3s ease;
-}
-
-@keyframes fadeInDesc {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
+  font-size: 11px;
+  color: var(--text-tertiary);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .carouselCardReady {
@@ -596,19 +592,9 @@
 
 /* Mobile responsive */
 @media (max-width: 600px) {
-  .carouselTrack {
-    height: 200px;
-  }
-  .carouselCard {
-    width: 180px;
-    height: 170px;
-    padding: 16px 14px;
-  }
-  .carouselCardIcon {
-    font-size: 26px;
-  }
-  .carouselCardTitle {
-    font-size: 13px;
+  .carouselGrid {
+    grid-template-columns: 1fr;
+    padding: 0 12px;
   }
   .carouselSideArrow {
     display: none;
