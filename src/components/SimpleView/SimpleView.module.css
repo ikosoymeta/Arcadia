@@ -401,28 +401,28 @@
   color: var(--accent);
 }
 
-/* Track */
-.carouselTrack {
+/* Viewport — clips overflow, shows one page at a time */
+.carouselViewport {
   position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 180px;
+  overflow: hidden;
+  width: 100%;
 }
 
-/* 3-card grid */
-.carouselGrid {
+/* Strip — all pages laid out horizontally, slides via translateX */
+.carouselStrip {
+  display: flex;
+  transition: transform 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  will-change: transform;
+}
+
+/* Each page is a 3-card grid that takes exactly 100% viewport width */
+.carouselPage {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 14px;
-  width: 100%;
-  padding: 0 40px;
-  animation: carouselSlideIn 0.35s ease;
-}
-
-@keyframes carouselSlideIn {
-  from { opacity: 0; transform: translateX(20px); }
-  to { opacity: 1; transform: translateX(0); }
+  min-width: 100%;
+  padding: 8px 40px;
+  box-sizing: border-box;
 }
 
 /* Side arrows overlaying the track */
@@ -592,9 +592,9 @@
 
 /* Mobile responsive */
 @media (max-width: 600px) {
-  .carouselGrid {
+  .carouselPage {
     grid-template-columns: 1fr;
-    padding: 0 12px;
+    padding: 4px 12px;
   }
   .carouselSideArrow {
     display: none;
