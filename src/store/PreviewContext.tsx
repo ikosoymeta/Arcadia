@@ -19,6 +19,8 @@ export function PreviewProvider({ children }: { children: React.ReactNode }) {
   const addArtifact = useCallback((artifact: Artifact) => {
     setArtifactsState(prev => [...prev, artifact]);
     setActiveArtifactIdState(artifact.id);
+    // Auto-expand preview panel when artifacts are added
+    document.dispatchEvent(new CustomEvent('arcadia:preview-expand'));
   }, []);
 
   const setArtifacts = useCallback((arts: Artifact[]) => {

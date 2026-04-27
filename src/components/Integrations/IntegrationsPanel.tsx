@@ -1,6 +1,18 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { ToolDefinition } from '../../types';
 import { getBridgeUrl } from '../../services/bridge';
+import {
+  type OAuthProvider,
+  isAuthorized,
+  getUserId,
+  getUserAuth,
+  saveUserAuth,
+  revokeAuth,
+  getAuthorizedProviders,
+  initiateGoogleOAuth,
+  validateGitHubToken as validateGHToken,
+  OAUTH_CONFIGS,
+} from '../../services/oauth';
 
 // ─── Tool Definitions for Claude API ─────────────────────────────────────────
 
@@ -161,6 +173,197 @@ export const CODE_TOOLS: ToolDefinition[] = [
   },
 ];
 
+export const FBSOURCE_TOOLS: ToolDefinition[] = [
+  {
+    name: 'fbsource_search_code',
+    description: 'Search for code across Meta\'s internal fbsource repository.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Code search query (e.g. function name, class, pattern)' },
+        path_filter: { type: 'string', description: 'Optional path filter (e.g. "fbcode/ads/")' },
+        language: { type: 'string', description: 'Optional language filter (e.g. python, hack, cpp)' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'fbsource_read_file',
+    description: 'Read a file from Meta\'s internal fbsource repository.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'File path in fbsource (e.g. "fbcode/ads/model/config.py")' },
+        revision: { type: 'string', description: 'Optional revision/commit hash (default: latest)' },
+      },
+      required: ['path'],
+    },
+  },
+  {
+    name: 'fbsource_list_diffs',
+    description: 'List recent diffs (code changes) by a user or in a directory.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        author: { type: 'string', description: 'Author username (e.g. "ikosoy")' },
+        path: { type: 'string', description: 'Optional path filter' },
+        limit: { type: 'number', description: 'Max number of diffs to return (default 10)' },
+      },
+    },
+  },
+  {
+    name: 'fbsource_read_diff',
+    description: 'Read the details and changes of a specific diff (Phabricator revision).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        diff_id: { type: 'string', description: 'Diff ID (e.g. "D12345678")' },
+      },
+      required: ['diff_id'],
+    },
+  },
+];
+
+export const GMAIL_TOOLS: ToolDefinition[] = [
+  {
+    name: 'gmail_search',
+    description: 'Search emails in Gmail using natural language or Gmail search operators.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Search query (e.g. "from:manager subject:review")' },
+        limit: { type: 'number', description: 'Max number of emails to return (default 10)' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'gmail_read',
+    description: 'Read the full content of a specific email by ID.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        email_id: { type: 'string', description: 'Email ID or thread ID' },
+      },
+      required: ['email_id'],
+    },
+  },
+  {
+    name: 'gmail_draft',
+    description: 'Create a draft email with the specified content.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        to: { type: 'string', description: 'Recipient email address(es), comma-separated' },
+        subject: { type: 'string', description: 'Email subject' },
+        body: { type: 'string', description: 'Email body (plain text or HTML)' },
+        cc: { type: 'string', description: 'Optional CC recipients' },
+      },
+      required: ['to', 'subject', 'body'],
+    },
+  },
+  {
+    name: 'gmail_summarize',
+    description: 'Summarize unread emails or emails matching a query.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Optional search query to filter emails' },
+        period: { type: 'string', description: 'Time period: today, this_week, this_month (default: today)' },
+      },
+    },
+  },
+];
+
+export const GCHAT_TOOLS: ToolDefinition[] = [
+  {
+    name: 'gchat_send_message',
+    description: 'Send a message to a Google Chat space or direct message.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        space: { type: 'string', description: 'Space name or DM recipient' },
+        message: { type: 'string', description: 'Message content (supports Google Chat formatting)' },
+        thread: { type: 'string', description: 'Optional thread ID to reply in a thread' },
+      },
+      required: ['space', 'message'],
+    },
+  },
+  {
+    name: 'gchat_list_spaces',
+    description: 'List Google Chat spaces the user is a member of.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', description: 'Max number of spaces to return (default 20)' },
+      },
+    },
+  },
+  {
+    name: 'gchat_read_messages',
+    description: 'Read recent messages from a Google Chat space.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        space: { type: 'string', description: 'Space name or ID' },
+        limit: { type: 'number', description: 'Max number of messages to return (default 20)' },
+      },
+      required: ['space'],
+    },
+  },
+];
+
+export const GSHEETS_TOOLS: ToolDefinition[] = [
+  {
+    name: 'gsheets_read',
+    description: 'Read data from a Google Sheets spreadsheet.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        spreadsheet_id: { type: 'string', description: 'Spreadsheet ID or URL' },
+        range: { type: 'string', description: 'Cell range (e.g. "Sheet1!A1:D10")' },
+      },
+      required: ['spreadsheet_id'],
+    },
+  },
+  {
+    name: 'gsheets_write',
+    description: 'Write data to a Google Sheets spreadsheet.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        spreadsheet_id: { type: 'string', description: 'Spreadsheet ID or URL' },
+        range: { type: 'string', description: 'Cell range to write to (e.g. "Sheet1!A1")' },
+        values: { type: 'string', description: 'JSON array of row arrays to write' },
+      },
+      required: ['spreadsheet_id', 'range', 'values'],
+    },
+  },
+  {
+    name: 'gsheets_create',
+    description: 'Create a new Google Sheets spreadsheet.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Spreadsheet title' },
+        sheets: { type: 'string', description: 'Comma-separated sheet names (default: "Sheet1")' },
+      },
+      required: ['title'],
+    },
+  },
+  {
+    name: 'gsheets_list',
+    description: 'List sheets in a spreadsheet or list recent spreadsheets.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        spreadsheet_id: { type: 'string', description: 'Optional spreadsheet ID to list sheets within' },
+        query: { type: 'string', description: 'Optional search query for finding spreadsheets' },
+      },
+    },
+  },
+];
+
 export const MEMORY_TOOLS: ToolDefinition[] = [
   {
     name: 'memory_save',
@@ -216,6 +419,10 @@ export function getEnabledTools(config: IntegrationConfig): ToolDefinition[] {
     web: WEB_TOOLS,
     code: CODE_TOOLS,
     memory: MEMORY_TOOLS,
+    fbsource: FBSOURCE_TOOLS,
+    gmail: GMAIL_TOOLS,
+    gchat: GCHAT_TOOLS,
+    gsheets: GSHEETS_TOOLS,
   };
   const tools: ToolDefinition[] = [];
   for (const group of config.enabledTools ?? []) {
@@ -367,28 +574,234 @@ export function IntegrationsPanel() {
   const [checkingGithub, setCheckingGithub] = useState(false);
   const [gdriveChecking, setGdriveChecking] = useState(false);
   const [gdriveStatus, setGdriveStatus] = useState<{ connected: boolean; driveRoot?: string; workspacePath?: string } | null>(null);
+  const [mcpServers, setMcpServers] = useState<Array<{ name: string; status: string; type: string }>>([]);
+  const [mcpChecking, setMcpChecking] = useState(false);
+  const [reconnectingServer, setReconnectingServer] = useState<string | null>(null);
+  const [reconnectAttempts, setReconnectAttempts] = useState(0);
+  const [lastBridgeDisconnect, setLastBridgeDisconnect] = useState<number | null>(null);
+  const [bridgeReconnecting, setBridgeReconnecting] = useState(false);
+  const [authorizedProviders, setAuthorizedProviders] = useState<OAuthProvider[]>(() => getAuthorizedProviders());
+  const [oauthLoading, setOauthLoading] = useState<string | null>(null);
+  const [oauthError, setOauthError] = useState<string | null>(null);
+  const [oauthSuccess, setOauthSuccess] = useState<string | null>(null);
+  const [githubProfile, setGithubProfile] = useState<{ login: string; name: string; avatar_url: string } | null>(null);
 
   useEffect(() => {
     saveIntegrations(config);
   }, [config]);
 
-  // Check bridge connectivity on mount (use dynamic bridge URL)
+  // Check bridge connectivity with auto-reconnect and exponential backoff
   useEffect(() => {
+    let backoffMs = 5000;
+    let consecutiveFailures = 0;
+    const maxBackoff = 60000;
+
     const checkBridge = async () => {
       try {
         const ctrl = new AbortController();
         const timer = setTimeout(() => ctrl.abort(), 3000);
         const res = await fetch(`${getBridgeUrl()}/health`, { signal: ctrl.signal });
         clearTimeout(timer);
+        const wasDisconnected = !bridgeConnected;
         setBridgeConnected(res.ok);
+        if (res.ok) {
+          consecutiveFailures = 0;
+          backoffMs = 5000;
+          setBridgeReconnecting(false);
+          if (wasDisconnected && lastBridgeDisconnect) {
+            setLastBridgeDisconnect(null);
+          }
+        } else {
+          throw new Error('not ok');
+        }
       } catch {
+        consecutiveFailures++;
+        if (bridgeConnected) {
+          setLastBridgeDisconnect(Date.now());
+        }
         setBridgeConnected(false);
+        if (consecutiveFailures > 1) {
+          setBridgeReconnecting(true);
+          backoffMs = Math.min(backoffMs * 1.5, maxBackoff);
+        }
       }
     };
     checkBridge();
-    const interval = setInterval(checkBridge, 30000);
+    const interval = setInterval(checkBridge, 15000);
     return () => clearInterval(interval);
   }, []);
+
+  // Listen for OAuth changes
+  useEffect(() => {
+    const handleOAuthChange = () => {
+      setAuthorizedProviders(getAuthorizedProviders());
+    };
+    window.addEventListener('oauth-changed', handleOAuthChange);
+    return () => window.removeEventListener('oauth-changed', handleOAuthChange);
+  }, []);
+
+  // Auto-check bridge OAuth status for Google services when bridge connects
+  // This detects existing gcloud SSO tokens saved on the bridge
+  useEffect(() => {
+    if (!bridgeConnected) return;
+    const checkBridgeOAuth = async () => {
+      const providers: OAuthProvider[] = ['gdrive', 'gmail', 'gchat', 'gsheets'];
+      const bridgeUrl = getBridgeUrl();
+      for (const provider of providers) {
+        // Skip if already authorized locally
+        if (isAuthorized(provider)) continue;
+        try {
+          const res = await fetch(`${bridgeUrl}/v1/oauth/status`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ provider, userId: getUserId() }),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.authorized && data.token) {
+              saveUserAuth(provider, {
+                provider,
+                token: {
+                  accessToken: data.token.access_token,
+                  tokenType: data.token.token_type || 'Bearer',
+                  expiresAt: data.token.expires_at ? data.token.expires_at * 1000 : undefined,
+                  scope: data.token.scope,
+                },
+                profile: data.profile || data.token.profile,
+                authorizedAt: data.token.authorized_at ? data.token.authorized_at * 1000 : Date.now(),
+                scopes: OAUTH_CONFIGS[provider].scopes,
+              });
+            }
+          }
+        } catch { /* bridge may not support OAuth yet */ }
+      }
+    };
+    checkBridgeOAuth();
+  }, [bridgeConnected]);
+
+  // Handle GitHub OAuth — validate token and save with profile
+  const handleGitHubAuthorize = useCallback(async (token: string) => {
+    setOauthLoading('github');
+    setOauthError(null);
+    try {
+      const result = await validateGHToken(token);
+      if (result.valid && result.profile) {
+        setGithubProfile(result.profile as any);
+        saveUserAuth('github', {
+          provider: 'github',
+          token: { accessToken: token, tokenType: 'bearer' },
+          profile: { email: result.profile.email, name: result.profile.name || result.profile.login, avatar: result.profile.avatar_url },
+          authorizedAt: Date.now(),
+          scopes: ['repo', 'read:user'],
+        });
+        setConfig(prev => ({ ...prev, github: { token, username: result.profile!.login } }));
+        setGithubTokenValid(true);
+        setOauthSuccess('github');
+        setTimeout(() => setOauthSuccess(null), 3000);
+      } else {
+        setGithubTokenValid(false);
+        setOauthError('Invalid token. Please check and try again.');
+      }
+    } catch {
+      setOauthError('Failed to validate token.');
+    }
+    setOauthLoading(null);
+  }, []);
+
+  // Handle Google OAuth flow via bridge
+  const handleGoogleAuthorize = useCallback(async (provider: OAuthProvider) => {
+    setOauthLoading(provider);
+    setOauthError(null);
+    try {
+      const result = await initiateGoogleOAuth(provider);
+      if (result.success) {
+        setOauthSuccess(provider);
+        setTimeout(() => setOauthSuccess(null), 3000);
+      } else {
+        // Provide actionable error message
+        const bridgeUrl = getBridgeUrl();
+        const isLocal = bridgeUrl.includes('127.0.0.1') || bridgeUrl.includes('localhost');
+        const errorMsg = result.error || 'Authorization failed.';
+        if (errorMsg.includes('Failed to fetch') || errorMsg.includes('NetworkError') || errorMsg.includes('Connection failed')) {
+          if (isLocal) {
+            setOauthError(`Cannot reach bridge at ${bridgeUrl}. Make sure the ArcadIA Bridge is running on your machine (node ~/arcadia-bridge.js), or configure a remote bridge URL in Settings if your bridge runs on a devserver.`);
+          } else {
+            setOauthError(`Cannot reach bridge at ${bridgeUrl}. Make sure the bridge is running on that server and the port is accessible. Try: ssh to your devserver and run "node ~/arcadia-bridge.js"`);
+          }
+        } else {
+          setOauthError(errorMsg);
+        }
+      }
+    } catch (e: any) {
+      setOauthError(e.message || 'Authorization failed.');
+    }
+    setOauthLoading(null);
+  }, []);
+
+  // Revoke authorization for a provider
+  const handleRevoke = useCallback((provider: OAuthProvider) => {
+    revokeAuth(provider);
+    if (provider === 'github') {
+      setGithubProfile(null);
+      setGithubTokenValid(null);
+      setGithubToken('');
+      setConfig(prev => ({ ...prev, github: undefined }));
+    }
+  }, []);
+
+  // Load GitHub profile on mount if token exists
+  useEffect(() => {
+    const auth = getUserAuth('github');
+    if (auth?.token.accessToken) {
+      validateGHToken(auth.token.accessToken).then(result => {
+        if (result.valid && result.profile) {
+          setGithubProfile(result.profile as any);
+        }
+      });
+    }
+  }, []);
+
+  // Check MCP server status via bridge
+  const checkMcpStatus = useCallback(async () => {
+    if (!bridgeConnected) return;
+    setMcpChecking(true);
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 5000);
+      const res = await fetch(`${getBridgeUrl()}/v1/mcp/status`, { signal: ctrl.signal });
+      clearTimeout(timer);
+      if (res.ok) {
+        const data = await res.json();
+        setMcpServers(data.servers || []);
+      }
+    } catch { /* ignore */ }
+    setMcpChecking(false);
+  }, [bridgeConnected]);
+
+  // Auto-check MCP status when bridge connects
+  useEffect(() => {
+    if (bridgeConnected) checkMcpStatus();
+  }, [bridgeConnected, checkMcpStatus]);
+
+  // Restart an MCP server
+  const restartMcpServer = useCallback(async (serverName: string) => {
+    setReconnectingServer(serverName);
+    try {
+      const res = await fetch(`${getBridgeUrl()}/v1/mcp/restart`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ server: serverName }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          // Refresh MCP status after restart
+          setTimeout(() => checkMcpStatus(), 2000);
+        }
+      }
+    } catch { /* ignore */ }
+    setReconnectingServer(null);
+  }, [checkMcpStatus]);
 
   // Check Google Drive status via bridge
   const checkGDriveStatus = useCallback(async () => {
@@ -453,10 +866,20 @@ export function IntegrationsPanel() {
       case 'memory':
         // Memory is stored locally, always ready when enabled
         return 'ready';
+      case 'fbsource': {
+        const fbServer = mcpServers.find(s => s.type === 'fbsource');
+        if (fbServer?.status === 'running') return 'ready';
+        return bridgeConnected ? 'needs_setup' : 'needs_setup';
+      }
+      case 'gmail':
+      case 'gchat':
+        return bridgeConnected ? 'ready' : 'needs_setup';
+      case 'gsheets':
+        return bridgeConnected ? 'ready' : 'needs_setup';
       default:
         return 'ready';
     }
-  }, [config, bridgeConnected, githubTokenValid]);
+  }, [config, bridgeConnected, githubTokenValid, authorizedProviders]);
 
   const toggleTool = (group: string) => {
     setConfig(prev => {
@@ -472,13 +895,10 @@ export function IntegrationsPanel() {
 
   const handleSaveGitHub = async () => {
     if (!githubToken.trim()) return;
-    setConfig(prev => ({
-      ...prev,
-      github: { token: githubToken.trim(), username: 'github-user' },
-    }));
+    // Use the OAuth-aware flow that validates and saves profile
+    await handleGitHubAuthorize(githubToken.trim());
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
-    await validateGithubToken(githubToken.trim());
   };
 
   const toggleGuide = (id: string) => {
@@ -493,7 +913,7 @@ export function IntegrationsPanel() {
       icon: '🐙',
       name: 'GitHub',
       shortDesc: 'Browse repos, read code, create issues, and review pull requests.',
-      longDesc: 'Connect your GitHub account to let Claude browse your repositories, read files, create issues, list pull requests, and search code — all through natural conversation. You just need to provide a personal access token (a special password for apps).',
+      longDesc: 'Connect your GitHub account to let Claude browse your repositories, read files, create issues, list pull requests, and search code — all through natural conversation.',
       whatYouCanDo: [
         '"List my GitHub repos" — see all your projects',
         '"Show the README from my-app" — read any file',
@@ -509,105 +929,94 @@ export function IntegrationsPanel() {
       ],
       setup: (
         <div style={styles.setupBox}>
-          <div style={styles.setupTitle}>
-            <span>🔧</span> Setup Guide
-            <span style={styles.badge('#6366f120', '#6366f1')}>2 min setup</span>
-            {config.github?.token && githubTokenValid === true && <span style={styles.badge('#22c55e20', '#22c55e')}>Token verified</span>}
-            {config.github?.token && githubTokenValid === false && <span style={styles.badge('#ef444420', '#ef4444')}>Token invalid</span>}
+          {/* Manus Connector-style header */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+            <div style={styles.setupTitle}>
+              <span>🔗</span> Connect GitHub
+            </div>
+            {isAuthorized('github') ? (
+              <span style={styles.badge('#22c55e20', '#22c55e')}>✓ Connected</span>
+            ) : (
+              <span style={styles.badge('#f59e0b18', '#f59e0b')}>Not connected</span>
+            )}
           </div>
 
-          <div style={styles.infoBox('#6366f1')}>
-            <strong>What is a personal access token?</strong> It's like a special password that lets ArcadIA access your GitHub on your behalf. It stays on your computer and is never sent anywhere except directly to GitHub.
-          </div>
-
-          <div style={{ marginTop: '12px' }}>
-            <div style={styles.stepRow}>
-              <span style={styles.stepNumber('#6366f1')}>1</span>
-              <div style={styles.stepText}>
-                <strong>Open GitHub's token page</strong> — {' '}
-                <a
-                  href="https://github.com/settings/tokens/new?scopes=repo&description=ArcadIA%20Editor%20-%20Claude%20Integration"
-                  target="_blank"
-                  rel="noreferrer"
-                  style={styles.link('#6366f1')}
+          {/* Connected state — profile card with disconnect */}
+          {githubProfile && githubTokenValid === true ? (
+            <div style={{ padding: '14px 16px', borderRadius: '10px', background: '#22c55e08', border: '1px solid #22c55e20' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <img src={githubProfile.avatar_url} alt="" style={{ width: '40px', height: '40px', borderRadius: '50%', border: '2px solid #22c55e40' }} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>{githubProfile.name || githubProfile.login}</div>
+                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>@{githubProfile.login} · Authorized</div>
+                </div>
+                <button
+                  onClick={() => handleRevoke('github')}
+                  style={{ ...styles.btn('#ef444420'), color: '#ef4444', border: '1px solid #ef444440', background: 'transparent', fontSize: '12px', padding: '6px 14px' }}
                 >
-                  Click here to go there now
-                </a>
-                {' '}(opens in a new tab, you may need to log in)
+                  Disconnect
+                </button>
+              </div>
+              <div style={{ marginTop: '10px', fontSize: '11px', color: 'var(--text-tertiary)' }}>
+                🔒 Authorization saved for this user. Token stored locally in your browser.
               </div>
             </div>
-
-            <div style={styles.stepRow}>
-              <span style={styles.stepNumber('#6366f1')}>2</span>
-              <div style={styles.stepText}>
-                On that page, you'll see some settings. The important ones are already filled in for you:
-                <ul style={{ margin: '6px 0 0 0', paddingLeft: '16px', fontSize: '12px' }}>
-                  <li><strong>Note:</strong> "ArcadIA Editor" (already filled)</li>
-                  <li><strong>Expiration:</strong> Pick "90 days" (you can always make a new one later)</li>
-                  <li><strong>Scopes:</strong> Make sure <code style={{ background: 'var(--bg-tertiary)', padding: '1px 4px', borderRadius: '3px' }}>repo</code> is checked (it should be)</li>
-                </ul>
+          ) : (
+            /* Not connected — one-click connect flow */
+            <>
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'stretch' }}>
+                <button
+                  onClick={() => window.open('https://github.com/settings/tokens/new?scopes=repo,read:user,read:org&description=ArcadIA%20Editor', '_blank')}
+                  style={{ ...styles.btn('#6366f1'), flex: 'none', fontSize: '14px', padding: '12px 20px', borderRadius: '10px' }}
+                >
+                  🔗 Connect GitHub
+                </button>
+                <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', display: 'flex', alignItems: 'center', lineHeight: '1.4' }}>
+                  Opens GitHub's token page. Generate a token and paste it below.
+                </div>
               </div>
-            </div>
 
-            <div style={styles.stepRow}>
-              <span style={styles.stepNumber('#6366f1')}>3</span>
-              <div style={styles.stepText}>
-                Scroll down and click the green <strong>"Generate token"</strong> button. You'll see a long code starting with <code style={{ background: 'var(--bg-tertiary)', padding: '1px 4px', borderRadius: '3px' }}>ghp_</code> — <strong>copy it</strong> (you won't be able to see it again!)
+              {/* Token input */}
+              <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+                <div style={{ position: 'relative', flex: 1 }}>
+                  <input
+                    type={showGithubToken ? 'text' : 'password'}
+                    value={githubToken}
+                    onChange={e => setGithubToken(e.target.value)}
+                    placeholder="Paste your token here (ghp_...)"
+                    style={{
+                      ...styles.input,
+                      borderColor: githubTokenValid === true ? '#22c55e' : githubTokenValid === false ? '#ef4444' : 'var(--border)',
+                    }}
+                    onKeyDown={e => { if (e.key === 'Enter') handleSaveGitHub(); }}
+                  />
+                  <button
+                    onClick={() => setShowGithubToken(p => !p)}
+                    style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', opacity: 0.6 }}
+                    title={showGithubToken ? 'Hide token' : 'Show token'}
+                  >{showGithubToken ? '🙈' : '👁'}</button>
+                </div>
+                <button
+                  onClick={handleSaveGitHub}
+                  disabled={!githubToken.trim() || checkingGithub}
+                  style={{
+                    ...styles.btn(saved ? '#22c55e' : checkingGithub ? '#6366f188' : githubToken.trim() ? '#6366f1' : '#6366f166'),
+                    cursor: githubToken.trim() && !checkingGithub ? 'pointer' : 'not-allowed',
+                  }}
+                >{checkingGithub ? 'Verifying...' : saved ? '✓ Connected!' : 'Connect'}</button>
               </div>
-            </div>
 
-            <div style={styles.stepRow}>
-              <span style={styles.stepNumber('#6366f1')}>4</span>
-              <div style={styles.stepText}>
-                <strong>Paste it below</strong> and click Save. We'll verify it works right away:
-              </div>
-            </div>
-          </div>
+              {githubTokenValid === false && config.github?.token && (
+                <div style={{ marginTop: '8px', fontSize: '12px', color: '#ef4444' }}>
+                  ✗ Token invalid. Please check it or generate a new one.
+                </div>
+              )}
 
-          {/* Token input */}
-          <div style={{ display: 'flex', gap: '8px', marginTop: '4px', marginLeft: '32px' }}>
-            <div style={{ position: 'relative', flex: 1 }}>
-              <input
-                type={showGithubToken ? 'text' : 'password'}
-                value={githubToken}
-                onChange={e => setGithubToken(e.target.value)}
-                placeholder="ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-                style={{
-                  ...styles.input,
-                  borderColor: githubTokenValid === true ? '#22c55e' : githubTokenValid === false ? '#ef4444' : 'var(--border)',
-                }}
-                onKeyDown={e => { if (e.key === 'Enter') handleSaveGitHub(); }}
-              />
-              <button
-                onClick={() => setShowGithubToken(p => !p)}
-                style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', opacity: 0.6 }}
-                title={showGithubToken ? 'Hide token' : 'Show token'}
-              >{showGithubToken ? '🙈' : '👁'}</button>
-            </div>
-            <button
-              onClick={handleSaveGitHub}
-              disabled={!githubToken.trim() || checkingGithub}
-              style={{
-                ...styles.btn(saved ? '#22c55e' : checkingGithub ? '#6366f188' : githubToken.trim() ? '#6366f1' : '#6366f166'),
-                cursor: githubToken.trim() && !checkingGithub ? 'pointer' : 'not-allowed',
-              }}
-            >{checkingGithub ? 'Verifying...' : saved ? '✓ Saved!' : 'Save & Verify'}</button>
-          </div>
-
-          {githubTokenValid === false && config.github?.token && (
-            <div style={{ marginLeft: '32px', marginTop: '8px', fontSize: '12px', color: '#ef4444', display: 'flex', alignItems: 'center', gap: '6px' }}>
-              ✗ This token doesn't seem to work. Please check that you copied it correctly, or generate a new one.
-            </div>
+              {oauthError && oauthLoading === null && (
+                <div style={{ marginTop: '8px', fontSize: '12px', color: '#ef4444' }}>{oauthError}</div>
+              )}
+            </>
           )}
-          {githubTokenValid === true && (
-            <div style={{ marginLeft: '32px', marginTop: '8px', fontSize: '12px', color: '#22c55e', display: 'flex', alignItems: 'center', gap: '6px' }}>
-              ✓ Token verified! GitHub integration is ready to use.
-            </div>
-          )}
-
-          <div style={{ marginLeft: '32px', marginTop: '8px', fontSize: '11px', color: 'var(--text-tertiary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            🔒 Your token is stored only in this browser. It never leaves your machine except to authenticate with GitHub.
-          </div>
         </div>
       ),
     },
@@ -631,70 +1040,82 @@ export function IntegrationsPanel() {
       ],
       setup: (
         <div style={styles.setupBox}>
-          <div style={styles.setupTitle}>
-            <span>🔧</span> Setup Guide
-            <span style={styles.badge('#22c55e20', '#22c55e')}>Automatic</span>
-            {config.gdrive?.connected && <span style={styles.badge('#22c55e20', '#22c55e')}>Connected</span>}
-          </div>
-
-          <div style={styles.infoBox('#22c55e')}>
-            <strong>How does this work?</strong> The ArcadIA Bridge reads files directly from your locally-mounted Google Drive folder. No OAuth tokens or Google Cloud setup needed — if you have Google Drive for Desktop installed, it just works.
-          </div>
-
-          <div style={{ marginTop: '12px' }}>
-            <div style={styles.stepRow}>
-              <span style={styles.stepNumber('#22c55e')}>1</span>
-              <div style={styles.stepText}>
-                <strong>Install Google Drive for Desktop</strong> — download from{' '}
-                <a href="https://www.google.com/drive/download/" target="_blank" rel="noopener" style={{ color: '#22c55e', textDecoration: 'underline' }}>google.com/drive/download</a>
-                {' '}and sign in with your Google account.
-              </div>
+          {/* Manus Connector-style header */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+            <div style={styles.setupTitle}>
+              <span>🔗</span> Connect Google Drive
             </div>
-
-            <div style={styles.stepRow}>
-              <span style={styles.stepNumber('#22c55e')}>2</span>
-              <div style={styles.stepText}>
-                <strong>Start the ArcadIA Bridge</strong> — the bridge automatically detects your Google Drive mount point.
-              </div>
-            </div>
-
-            <div style={styles.stepRow}>
-              <span style={styles.stepNumber('#22c55e')}>3</span>
-              <div style={styles.stepText}>
-                <strong>Click "Check Connection"</strong> below to verify everything is working.
-              </div>
-            </div>
-          </div>
-
-          <div style={{ marginTop: '8px', marginLeft: '32px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-            <button
-              onClick={checkGDriveStatus}
-              disabled={gdriveChecking}
-              style={styles.btn(gdriveChecking ? '#22c55e88' : '#22c55e')}
-            >
-              {gdriveChecking ? 'Checking...' : '🔍 Check Connection'}
-            </button>
-            {gdriveStatus?.connected && (
-              <div style={{ fontSize: '12px', color: '#22c55e', fontWeight: 600 }}>
-                ✓ Google Drive detected{gdriveStatus.driveRoot ? ` at ${gdriveStatus.driveRoot}` : ''}
-              </div>
-            )}
-            {gdriveStatus && !gdriveStatus.connected && (
-              <div style={{ fontSize: '12px', color: '#ef4444', fontWeight: 600 }}>
-                ✗ Google Drive not found. Make sure it's installed and the bridge is running.
-              </div>
+            {gdriveStatus?.connected ? (
+              <span style={styles.badge('#22c55e20', '#22c55e')}>✓ Connected</span>
+            ) : (
+              <span style={styles.badge('#f59e0b18', '#f59e0b')}>Not connected</span>
             )}
           </div>
 
-          {gdriveStatus?.workspacePath && (
-            <div style={{ marginTop: '8px', marginLeft: '32px', fontSize: '12px', color: 'var(--text-secondary)' }}>
-              📂 Second Brain workspace: <code style={{ background: 'var(--bg-primary)', padding: '1px 4px', borderRadius: '3px', fontSize: '11px' }}>{gdriveStatus.workspacePath}</code>
+          {/* Connected state */}
+          {gdriveStatus?.connected ? (
+            <div style={{ padding: '14px 16px', borderRadius: '10px', background: '#22c55e08', border: '1px solid #22c55e20' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: '#22c55e18', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', border: '2px solid #22c55e40' }}>📁</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>Google Drive Connected</div>
+                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                    {gdriveStatus.driveRoot ? `Mount: ${gdriveStatus.driveRoot}` : 'Via ArcadIA Bridge'}
+                  </div>
+                </div>
+                <button
+                  onClick={checkGDriveStatus}
+                  disabled={gdriveChecking}
+                  style={{ ...styles.btn('#22c55e'), fontSize: '12px', padding: '6px 14px' }}
+                >
+                  {gdriveChecking ? 'Checking...' : '↻ Refresh'}
+                </button>
+              </div>
+              {gdriveStatus?.workspacePath && (
+                <div style={{ marginTop: '10px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                  📂 Second Brain workspace: <code style={{ background: 'var(--bg-primary)', padding: '1px 4px', borderRadius: '3px', fontSize: '11px' }}>{gdriveStatus.workspacePath}</code>
+                </div>
+              )}
+              <div style={{ marginTop: '8px', fontSize: '11px', color: 'var(--text-tertiary)' }}>
+                🔒 All file access happens locally through the bridge. No data sent to cloud APIs.
+              </div>
             </div>
+          ) : (
+            /* Not connected — one-click connect flow */
+            <>
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                <button
+                  onClick={async () => {
+                    if (bridgeConnected) {
+                      // Try direct bridge detection first
+                      checkGDriveStatus();
+                    } else {
+                      // Attempt OAuth flow via bridge anyway — bridge might be reachable but health check timing was off
+                      handleGoogleAuthorize('gdrive');
+                    }
+                  }}
+                  disabled={gdriveChecking || oauthLoading === 'gdrive'}
+                  style={{ ...styles.btn('#22c55e'), flex: 'none', fontSize: '14px', padding: '12px 20px', borderRadius: '10px' }}
+                >
+                  {gdriveChecking || oauthLoading === 'gdrive' ? '⟳ Connecting...' : '🔗 Connect Google Drive'}
+                </button>
+                <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', lineHeight: '1.4' }}>
+                  {bridgeConnected ? 'Requires Google Drive for Desktop + ArcadIA Bridge' : 'Authorizes via Google Workspace SSO through the bridge'}
+                </div>
+              </div>
+
+              {gdriveStatus && !gdriveStatus.connected && (
+                <div style={{ marginTop: '12px', padding: '12px 14px', borderRadius: '8px', background: '#f59e0b08', border: '1px solid #f59e0b20' }}>
+                  <div style={{ fontSize: '13px', fontWeight: 600, color: '#f59e0b', marginBottom: '8px' }}>⚠ Google Drive not detected</div>
+                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: '1.6' }}>
+                    <div style={{ marginBottom: '4px' }}>1. <a href="https://www.google.com/drive/download/" target="_blank" rel="noopener" style={{ color: '#22c55e', textDecoration: 'underline' }}>Install Google Drive for Desktop</a> and sign in</div>
+                    <div style={{ marginBottom: '4px' }}>2. Make sure the ArcadIA Bridge is running</div>
+                    <div>3. Click "Connect Google Drive" again</div>
+                  </div>
+                </div>
+              )}
+            </>
           )}
-
-          <div style={{ ...styles.infoBox('#22c55e'), marginTop: '12px' }}>
-            <strong>Privacy:</strong> All file access happens locally through the bridge on your machine. No data is sent to any cloud API. ArcadIA can only access files you explicitly ask about in conversations.
-          </div>
         </div>
       ),
     },
@@ -755,6 +1176,351 @@ export function IntegrationsPanel() {
       requirements: [],
       setup: null,
     },
+    {
+      id: 'fbsource',
+      icon: '🔷',
+      name: 'fbsource (Meta Source Control)',
+      shortDesc: 'Search code, read files, and review diffs in Meta\'s internal repository.',
+      longDesc: 'Connect to Meta\'s internal source control (fbsource) through Claude Code\'s MCP server. Search across the entire codebase, read files, list recent diffs, and review Phabricator revisions — all through natural conversation. Requires the fbsource MCP server to be configured in Claude Code.',
+      whatYouCanDo: [
+        '"Search fbsource for AdAccountService" — find code across the monorepo',
+        '"Read fbcode/ads/model/config.py" — view any file in fbsource',
+        '"Show my recent diffs" — list your Phabricator revisions',
+        '"Review diff D12345678" — read diff details and changes',
+      ],
+      tools: FBSOURCE_TOOLS,
+      color: '#3b82f6',
+      requiresSetup: true,
+      requirements: [
+        { label: 'ArcadIA Bridge running', met: bridgeConnected },
+        { label: 'fbsource MCP server configured', met: mcpServers.some(s => s.type === 'fbsource' && s.status === 'running') },
+      ],
+      setup: (
+        <div style={styles.setupBox}>
+          <div style={styles.setupTitle}>
+            <span>🔧</span> Setup Guide
+            <span style={styles.badge('#3b82f620', '#3b82f6')}>MCP Server</span>
+            {mcpServers.some(s => s.type === 'fbsource' && s.status === 'running') && (
+              <span style={styles.badge('#22c55e20', '#22c55e')}>Connected</span>
+            )}
+          </div>
+
+          <div style={styles.infoBox('#3b82f6')}>
+            <strong>How does this work?</strong> fbsource access is provided through Claude Code\'s MCP (Model Context Protocol) server system. The fbsource MCP server connects Claude to Meta\'s internal source control, enabling code search, file reading, and diff review.
+          </div>
+
+          <div style={{ marginTop: '12px' }}>
+            <div style={styles.stepRow}>
+              <span style={styles.stepNumber('#3b82f6')}>1</span>
+              <div style={styles.stepText}>
+                <strong>Ensure Claude Code is installed</strong> on your devserver or local machine with Meta authentication configured.
+              </div>
+            </div>
+
+            <div style={styles.stepRow}>
+              <span style={styles.stepNumber('#3b82f6')}>2</span>
+              <div style={styles.stepText}>
+                <strong>Add the fbsource MCP server</strong> to Claude Code:
+                <code style={{ display: 'block', marginTop: '6px', padding: '8px 12px', background: 'var(--bg-primary)', borderRadius: '6px', fontSize: '11px', fontFamily: 'monospace', color: 'var(--text-primary)', whiteSpace: 'pre-wrap' as const }}>
+                  claude mcp add fbsource
+                </code>
+              </div>
+            </div>
+
+            <div style={styles.stepRow}>
+              <span style={styles.stepNumber('#3b82f6')}>3</span>
+              <div style={styles.stepText}>
+                <strong>Start the ArcadIA Bridge</strong> — the bridge will automatically detect the fbsource MCP server.
+              </div>
+            </div>
+          </div>
+
+          {/* MCP Server Status */}
+          <div style={{ marginTop: '12px', marginLeft: '32px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <button
+                onClick={checkMcpStatus}
+                disabled={mcpChecking || !bridgeConnected}
+                style={styles.btn(mcpChecking ? '#3b82f688' : '#3b82f6')}
+              >
+                {mcpChecking ? 'Checking...' : '🔍 Check MCP Status'}
+              </button>
+              {mcpServers.some(s => s.type === 'fbsource') && (
+                <button
+                  onClick={() => {
+                    const fb = mcpServers.find(s => s.type === 'fbsource');
+                    if (fb) restartMcpServer(fb.name);
+                  }}
+                  disabled={reconnectingServer !== null}
+                  style={{ ...styles.btn('#f59e0b'), fontSize: '12px', padding: '8px 12px' }}
+                >
+                  {reconnectingServer ? '⟳ Restarting...' : '⟳ Restart Server'}
+                </button>
+              )}
+            </div>
+            {mcpServers.some(s => s.type === 'fbsource') && (
+              <div style={{ marginTop: '8px', fontSize: '12px', color: mcpServers.find(s => s.type === 'fbsource')?.status === 'running' ? '#22c55e' : '#ef4444', fontWeight: 600 }}>
+                {mcpServers.find(s => s.type === 'fbsource')?.status === 'running'
+                  ? '✓ fbsource MCP server is running'
+                  : '✗ fbsource MCP server is not running — click Restart to reconnect'}
+              </div>
+            )}
+          </div>
+
+          <div style={{ ...styles.infoBox('#3b82f6'), marginTop: '12px' }}>
+            <strong>Auto-reconnect:</strong> If the fbsource server connection drops (the "Server connections interrupted" dialog), ArcadIA will automatically detect this and offer a one-click restart. The bridge monitors MCP server health every 30 seconds.
+          </div>
+        </div>
+      ),
+    },
+    {
+      id: 'gmail',
+      icon: '📧',
+      name: 'Gmail',
+      shortDesc: 'Search, read, and draft emails through natural conversation.',
+      longDesc: 'Access your Gmail through Claude Code\'s capabilities. Search emails, read message content, create drafts, and get daily email summaries — all by chatting naturally. Email access goes through the bridge on your machine, keeping your data private.',
+      whatYouCanDo: [
+        '"Show my unread emails from today" — quick inbox summary',
+        '"Find emails from John about the Q1 report" — search by sender/subject',
+        '"Draft a reply to the last email from my manager" — compose emails',
+        '"Summarize this week\'s important emails" — weekly digest',
+      ],
+      tools: GMAIL_TOOLS,
+      color: '#ea4335',
+      requiresSetup: true,
+      requirements: [
+        { label: 'ArcadIA Bridge running', met: bridgeConnected },
+        { label: 'Google Workspace account', met: true },
+      ],
+      setup: (
+        <div style={styles.setupBox}>
+          {/* Manus Connector-style header */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+            <div style={styles.setupTitle}>
+              <span>🔗</span> Connect Gmail
+            </div>
+            {isAuthorized('gmail') ? (
+              <span style={styles.badge('#22c55e20', '#22c55e')}>✓ Connected</span>
+            ) : (
+              <span style={styles.badge('#f59e0b18', '#f59e0b')}>Not connected</span>
+            )}
+          </div>
+
+          {/* Connected state */}
+          {isAuthorized('gmail') ? (
+            <div style={{ padding: '14px 16px', borderRadius: '10px', background: '#22c55e08', border: '1px solid #22c55e20' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: '#ea433518', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', border: '2px solid #ea433540' }}>📧</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>Gmail Connected</div>
+                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Via Google Workspace SSO · Authorized</div>
+                </div>
+                <button
+                  onClick={() => handleRevoke('gmail')}
+                  style={{ ...styles.btn('#ef444420'), color: '#ef4444', border: '1px solid #ef444440', background: 'transparent', fontSize: '12px', padding: '6px 14px' }}
+                >
+                  Disconnect
+                </button>
+              </div>
+              <div style={{ marginTop: '8px', fontSize: '11px', color: 'var(--text-tertiary)' }}>
+                🔒 Authorization saved for this user. Email access happens locally through the bridge.
+              </div>
+            </div>
+          ) : (
+            /* Not connected — one-click connect flow */
+            <>
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                <button
+                  onClick={() => handleGoogleAuthorize('gmail')}
+                  disabled={oauthLoading === 'gmail'}
+                  style={{ ...styles.btn(oauthLoading === 'gmail' ? '#ea433588' : '#ea4335'), flex: 'none', fontSize: '14px', padding: '12px 20px', borderRadius: '10px' }}
+                >
+                  {oauthLoading === 'gmail' ? '⟳ Connecting...' : '🔗 Connect Gmail'}
+                </button>
+                <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', lineHeight: '1.4' }}>
+                  Authorizes via Google Workspace SSO through the bridge
+                </div>
+              </div>
+
+              {!bridgeConnected && (
+                <div style={{ marginTop: '10px', padding: '10px 12px', borderRadius: '8px', background: '#f59e0b08', border: '1px solid #f59e0b20', fontSize: '12px', color: '#f59e0b', lineHeight: '1.5' }}>
+                  ⚠ Bridge not detected. Make sure the ArcadIA Bridge is running, or <button onClick={() => { const settingsBtn = document.querySelector('[data-nav="settings"]') as HTMLElement; if (settingsBtn) settingsBtn.click(); }} style={{ color: '#3b82f6', textDecoration: 'underline', background: 'none', border: 'none', cursor: 'pointer', padding: 0, font: 'inherit' }}>configure a remote bridge</button> in Settings. The Connect button will still attempt authorization.
+                </div>
+              )}
+
+              {oauthError && oauthLoading === null && (
+                <div style={{ marginTop: '10px', fontSize: '12px', color: '#ef4444' }}>{oauthError}</div>
+              )}
+            </>
+          )}
+        </div>
+      ),
+    },
+    {
+      id: 'gchat',
+      icon: '💬',
+      name: 'Google Chat',
+      shortDesc: 'Send messages and read conversations in Google Chat spaces.',
+      longDesc: 'Interact with Google Chat through Claude Code. Send messages to spaces, read recent conversations, and manage your Chat presence — all through natural conversation with Claude. Works through the bridge with your Google Workspace authentication.',
+      whatYouCanDo: [
+        '"Send a message to the LDAR team space" — post to Chat spaces',
+        '"What\'s the latest in the engineering channel?" — read recent messages',
+        '"List my Google Chat spaces" — see all your spaces',
+      ],
+      tools: GCHAT_TOOLS,
+      color: '#00ac47',
+      requiresSetup: true,
+      requirements: [
+        { label: 'ArcadIA Bridge running', met: bridgeConnected },
+        { label: 'Google Workspace account', met: true },
+      ],
+      setup: (
+        <div style={styles.setupBox}>
+          {/* Manus Connector-style header */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+            <div style={styles.setupTitle}>
+              <span>🔗</span> Connect Google Chat
+            </div>
+            {isAuthorized('gchat') ? (
+              <span style={styles.badge('#22c55e20', '#22c55e')}>✓ Connected</span>
+            ) : (
+              <span style={styles.badge('#f59e0b18', '#f59e0b')}>Not connected</span>
+            )}
+          </div>
+
+          {/* Connected state */}
+          {isAuthorized('gchat') ? (
+            <div style={{ padding: '14px 16px', borderRadius: '10px', background: '#22c55e08', border: '1px solid #22c55e20' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: '#00ac4718', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', border: '2px solid #00ac4740' }}>💬</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>Google Chat Connected</div>
+                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Via Google Workspace SSO · Authorized</div>
+                </div>
+                <button
+                  onClick={() => handleRevoke('gchat')}
+                  style={{ ...styles.btn('#ef444420'), color: '#ef4444', border: '1px solid #ef444440', background: 'transparent', fontSize: '12px', padding: '6px 14px' }}
+                >
+                  Disconnect
+                </button>
+              </div>
+              <div style={{ marginTop: '8px', fontSize: '11px', color: 'var(--text-tertiary)' }}>
+                🔒 Authorization saved for this user. Chat access happens locally through the bridge.
+              </div>
+            </div>
+          ) : (
+            /* Not connected — one-click connect flow */
+            <>
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                <button
+                  onClick={() => handleGoogleAuthorize('gchat')}
+                  disabled={oauthLoading === 'gchat'}
+                  style={{ ...styles.btn(oauthLoading === 'gchat' ? '#00ac4788' : '#00ac47'), flex: 'none', fontSize: '14px', padding: '12px 20px', borderRadius: '10px' }}
+                >
+                  {oauthLoading === 'gchat' ? '⟳ Connecting...' : '🔗 Connect Google Chat'}
+                </button>
+                <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', lineHeight: '1.4' }}>
+                  Authorizes via Google Workspace SSO through the bridge
+                </div>
+              </div>
+
+              {!bridgeConnected && (
+                <div style={{ marginTop: '10px', padding: '10px 12px', borderRadius: '8px', background: '#f59e0b08', border: '1px solid #f59e0b20', fontSize: '12px', color: '#f59e0b', lineHeight: '1.5' }}>
+                  ⚠ Bridge not detected. Make sure the ArcadIA Bridge is running, or configure a remote bridge in Settings. The Connect button will still attempt authorization.
+                </div>
+              )}
+
+              {oauthError && oauthLoading === null && (
+                <div style={{ marginTop: '10px', fontSize: '12px', color: '#ef4444' }}>{oauthError}</div>
+              )}
+            </>
+          )}
+        </div>
+      ),
+    },
+    {
+      id: 'gsheets',
+      icon: '📊',
+      name: 'Google Sheets',
+      shortDesc: 'Read, write, and create spreadsheets through natural conversation.',
+      longDesc: 'Access Google Sheets through Claude Code. Read spreadsheet data, write to cells, create new spreadsheets, and analyze data — all by chatting naturally. Works through the bridge with your Google Workspace authentication.',
+      whatYouCanDo: [
+        '"Read the data from my Q1 Budget spreadsheet" — fetch spreadsheet data',
+        '"Create a new spreadsheet for project tracking" — create sheets',
+        '"Update cell B5 with the new total" — write to specific cells',
+        '"List my recent spreadsheets" — browse your sheets',
+      ],
+      tools: GSHEETS_TOOLS,
+      color: '#0f9d58',
+      requiresSetup: true,
+      requirements: [
+        { label: 'ArcadIA Bridge running', met: bridgeConnected },
+        { label: 'Google Workspace account', met: true },
+      ],
+      setup: (
+        <div style={styles.setupBox}>
+          {/* Manus Connector-style header */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+            <div style={styles.setupTitle}>
+              <span>🔗</span> Connect Google Sheets
+            </div>
+            {isAuthorized('gsheets') ? (
+              <span style={styles.badge('#22c55e20', '#22c55e')}>✓ Connected</span>
+            ) : (
+              <span style={styles.badge('#f59e0b18', '#f59e0b')}>Not connected</span>
+            )}
+          </div>
+
+          {/* Connected state */}
+          {isAuthorized('gsheets') ? (
+            <div style={{ padding: '14px 16px', borderRadius: '10px', background: '#22c55e08', border: '1px solid #22c55e20' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: '#0f9d5818', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', border: '2px solid #0f9d5840' }}>📊</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>Google Sheets Connected</div>
+                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Via Google Workspace SSO · Authorized</div>
+                </div>
+                <button
+                  onClick={() => handleRevoke('gsheets')}
+                  style={{ ...styles.btn('#ef444420'), color: '#ef4444', border: '1px solid #ef444440', background: 'transparent', fontSize: '12px', padding: '6px 14px' }}
+                >
+                  Disconnect
+                </button>
+              </div>
+              <div style={{ marginTop: '8px', fontSize: '11px', color: 'var(--text-tertiary)' }}>
+                🔒 Authorization saved for this user. Spreadsheet access happens locally through the bridge.
+              </div>
+            </div>
+          ) : (
+            /* Not connected — one-click connect flow */
+            <>
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                <button
+                  onClick={() => handleGoogleAuthorize('gsheets')}
+                  disabled={oauthLoading === 'gsheets'}
+                  style={{ ...styles.btn(oauthLoading === 'gsheets' ? '#0f9d5888' : '#0f9d58'), flex: 'none', fontSize: '14px', padding: '12px 20px', borderRadius: '10px' }}
+                >
+                  {oauthLoading === 'gsheets' ? '⟳ Connecting...' : '🔗 Connect Google Sheets'}
+                </button>
+                <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', lineHeight: '1.4' }}>
+                  Authorizes via Google Workspace SSO through the bridge
+                </div>
+              </div>
+
+              {!bridgeConnected && (
+                <div style={{ marginTop: '10px', padding: '10px 12px', borderRadius: '8px', background: '#f59e0b08', border: '1px solid #f59e0b20', fontSize: '12px', color: '#f59e0b', lineHeight: '1.5' }}>
+                  ⚠ Bridge not detected. Make sure the ArcadIA Bridge is running, or configure a remote bridge in Settings. The Connect button will still attempt authorization.
+                </div>
+              )}
+
+              {oauthError && oauthLoading === null && (
+                <div style={{ marginTop: '10px', fontSize: '12px', color: '#ef4444' }}>{oauthError}</div>
+              )}
+            </>
+          )}
+        </div>
+      ),
+    },
   ];
 
   // Count truly ready integrations
@@ -810,10 +1576,63 @@ export function IntegrationsPanel() {
           background: '#ef444410', border: '1px solid #ef444430',
           fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.6',
         }}>
-          <strong style={{ color: '#ef4444' }}>Bridge not detected.</strong> Some integrations (Web Search, Code Execution) require the ArcadIA Bridge to be running on your machine. Start it with:
+          <strong style={{ color: '#ef4444' }}>Bridge not detected.</strong>
+          {bridgeReconnecting && <span style={{ color: '#f59e0b', marginLeft: '8px' }}>⟳ Auto-reconnecting...</span>}
+          {' '}Some integrations require the ArcadIA Bridge to be running on your machine. Start it with:
           <code style={{ display: 'block', marginTop: '8px', padding: '8px 12px', background: 'var(--bg-primary)', borderRadius: '6px', fontSize: '12px', fontFamily: 'monospace', color: 'var(--text-primary)' }}>
             node ~/arcadia-bridge.js
           </code>
+          {lastBridgeDisconnect && (
+            <div style={{ marginTop: '8px', fontSize: '11px', color: 'var(--text-tertiary)' }}>
+              Last connected: {new Date(lastBridgeDisconnect).toLocaleTimeString()} · Auto-retry every 15s with backoff
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* MCP Server Health Monitor */}
+      {bridgeConnected && mcpServers.length > 0 && (
+        <div style={{
+          marginBottom: '16px', padding: '12px 16px', borderRadius: '10px',
+          background: 'var(--bg-secondary)', border: '1px solid var(--border)',
+          fontSize: '13px',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+            <div style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              🔌 MCP Server Connections
+            </div>
+            <button
+              onClick={checkMcpStatus}
+              disabled={mcpChecking}
+              style={{ background: 'none', border: '1px solid var(--border)', borderRadius: '6px', padding: '4px 10px', fontSize: '11px', color: 'var(--text-secondary)', cursor: 'pointer' }}
+            >
+              {mcpChecking ? 'Checking...' : '↻ Refresh'}
+            </button>
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+            {mcpServers.map(server => (
+              <div key={server.name} style={{
+                display: 'flex', alignItems: 'center', gap: '6px',
+                padding: '4px 10px', borderRadius: '6px',
+                background: server.status === 'running' ? '#22c55e10' : '#ef444410',
+                border: `1px solid ${server.status === 'running' ? '#22c55e30' : '#ef444430'}`,
+                fontSize: '12px',
+              }}>
+                <span style={{ color: server.status === 'running' ? '#22c55e' : '#ef4444', fontSize: '10px' }}>●</span>
+                <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{server.name}</span>
+                <span style={{ color: 'var(--text-tertiary)' }}>{server.status}</span>
+                {server.status !== 'running' && (
+                  <button
+                    onClick={() => restartMcpServer(server.name)}
+                    disabled={reconnectingServer === server.name}
+                    style={{ background: 'none', border: 'none', color: '#f59e0b', cursor: 'pointer', fontSize: '11px', fontWeight: 600, padding: '0 2px' }}
+                  >
+                    {reconnectingServer === server.name ? '...' : '↻ Restart'}
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -964,13 +1783,13 @@ export function IntegrationsPanel() {
         </div>
         <div style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.7' }}>
           <div style={{ marginBottom: '8px' }}>
-            <strong>1. Enable</strong> — Toggle on the integrations you want. Some need a quick setup (like pasting a token), others work right away.
+            <strong>1. Connect</strong> — Click the Connect button on any integration. For GitHub, paste a token. For Google services, authorize via your Workspace SSO. Authorization is saved per-user for future sessions.
           </div>
           <div style={{ marginBottom: '8px' }}>
             <strong>2. Chat naturally</strong> — Just ask Claude what you need in plain English. No special commands or syntax required.
           </div>
           <div>
-            <strong>3. Claude handles the rest</strong> — Claude figures out which tool to use, runs it, and gives you the results in its response. It's like having a smart assistant that can actually do things.
+            <strong>3. Claude handles the rest</strong> — Claude figures out which tool to use, runs it, and gives you the results in its response. Your authorization decisions are remembered across sessions.
           </div>
         </div>
       </div>

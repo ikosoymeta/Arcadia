@@ -331,6 +331,7 @@ export function Sidebar({ viewMode, onViewChange, collapsed, onToggleCollapse }:
     { mode: 'integrations', icon: '🔌', label: 'Integrations' },
     { mode: 'analytics', icon: '📈', label: 'Analytics' },
     { mode: 'benchmarks', icon: '📊', label: 'Bench' },
+    { mode: 'manual', icon: '📖', label: 'Manual' },
     { mode: 'help', icon: '?', label: 'Help' },
   ];
 
