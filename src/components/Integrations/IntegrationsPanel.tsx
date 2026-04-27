@@ -571,19 +571,19 @@ export function IntegrationsPanel() {
   const [expandedGuide, setExpandedGuide] = useState<string | null>(null);
   const [bridgeConnected, setBridgeConnected] = useState(false);
   const [githubTokenValid, setGithubTokenValid] = useState<boolean | null>(null);
-  const [checkingGithub, setCheckingGithub] = useState(false);
+  const [checkingGithub, _setCheckingGithub] = useState(false);
   const [gdriveChecking, setGdriveChecking] = useState(false);
   const [gdriveStatus, setGdriveStatus] = useState<{ connected: boolean; driveRoot?: string; workspacePath?: string } | null>(null);
   const [mcpServers, setMcpServers] = useState<Array<{ name: string; status: string; type: string }>>([]);
   const [mcpChecking, setMcpChecking] = useState(false);
   const [reconnectingServer, setReconnectingServer] = useState<string | null>(null);
-  const [reconnectAttempts, setReconnectAttempts] = useState(0);
+  const [_reconnectAttempts, _setReconnectAttempts] = useState(0);
   const [lastBridgeDisconnect, setLastBridgeDisconnect] = useState<number | null>(null);
   const [bridgeReconnecting, setBridgeReconnecting] = useState(false);
   const [authorizedProviders, setAuthorizedProviders] = useState<OAuthProvider[]>(() => getAuthorizedProviders());
   const [oauthLoading, setOauthLoading] = useState<string | null>(null);
   const [oauthError, setOauthError] = useState<string | null>(null);
-  const [oauthSuccess, setOauthSuccess] = useState<string | null>(null);
+  const [_oauthSuccess, setOauthSuccess] = useState<string | null>(null);
   const [githubProfile, setGithubProfile] = useState<{ login: string; name: string; avatar_url: string } | null>(null);
 
   useEffect(() => {
@@ -826,23 +826,6 @@ export function IntegrationsPanel() {
     setGdriveChecking(false);
   }, []);
 
-  // Validate GitHub token when it changes
-  const validateGithubToken = useCallback(async (token: string) => {
-    if (!token || !token.startsWith('ghp_')) {
-      setGithubTokenValid(null);
-      return;
-    }
-    setCheckingGithub(true);
-    try {
-      const res = await fetch('https://api.github.com/user', {
-        headers: { Authorization: `token ${token}` },
-      });
-      setGithubTokenValid(res.ok);
-    } catch {
-      setGithubTokenValid(false);
-    }
-    setCheckingGithub(false);
-  }, []);
 
   // Determine actual status for each integration
   const getIntegrationStatus = useCallback((id: string): IntegrationStatus => {

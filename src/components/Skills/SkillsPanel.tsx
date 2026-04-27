@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Skill } from '../../types';
 import { storage } from '../../services/storage';
 import ScheduleSkillDialog from './ScheduleSkillDialog';

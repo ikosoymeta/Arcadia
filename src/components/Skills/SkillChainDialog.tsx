@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getSchedules, saveSchedule, calculateNextRun } from '../../services/scheduler';
+import { saveSchedule, calculateNextRun } from '../../services/scheduler';
 import type { SkillSchedule } from './ScheduleSkillDialog';
 
 // ─── Types ──────────────────────────────────────────────────────────────────

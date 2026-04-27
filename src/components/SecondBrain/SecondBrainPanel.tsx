@@ -75,8 +75,8 @@ import { detectPlatform } from '../../services/detectOS';
 import { useConnection } from '../../store/ConnectionContext';
 import { sendMessage as sendClaudeMessage } from '../../services/claude';
 import { storage } from '../../services/storage';
-import type { Message, Skill } from '../../types';
-import ScheduleSkillDialog, { type SkillSchedule } from '../Skills/ScheduleSkillDialog';
+import type { Message } from '../../types';
+import ScheduleSkillDialog from '../Skills/ScheduleSkillDialog';
 
 // Dynamic bridge URL — reads from localStorage (remote) or defaults to localhost
 function BRIDGE() { return getBridgeUrl(); }
@@ -607,7 +607,7 @@ function BridgeNotConnected({ onRetry }: { onRetry: () => void }) {
   const [result, setResult] = useState<{ ok: boolean; latency: number; version?: string; error?: string } | null>(null);
   const [copiedStep, setCopiedStep] = useState<number | null>(null);
   const [devserverAutoConnecting, setDevserverAutoConnecting] = useState(false);
-  const [devserverSetupCopied, setDevserverSetupCopied] = useState(false);
+  const [_devserverSetupCopied, _setDevserverSetupCopied] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [localConnecting, setLocalConnecting] = useState(false);
 
@@ -1220,7 +1220,6 @@ export function SecondBrainPanel() {
   const [updateCopiedStep, setUpdateCopiedStep] = useState<number | null>(null);
   const [steps, setSteps] = useState<SetupStep[]>([]);
   const [currentStepIdx, setCurrentStepIdx] = useState(0);
-  const [copiedCommand, setCopiedCommand] = useState<string | null>(null);
   const [setupLog, setSetupLog] = useState<string[]>([]);
   const detectRan = useRef(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -1274,7 +1273,7 @@ export function SecondBrainPanel() {
   const [pendingSkillTest, setPendingSkillTest] = useState<{ command: string; prompt: string; name: string; icon: string } | null>(null);
   const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
   const [scheduleDialogSkill, setScheduleDialogSkill] = useState<{ id: string; name: string; prompt: string; icon?: string } | null>(null);
-  const [scheduleRefreshKey, setScheduleRefreshKey] = useState(0);
+  const [_scheduleRefreshKey, setScheduleRefreshKey] = useState(0);
 
   // ─── Session Startup Hook state ────────────────────────────────────────
   const [sessionHookEnabled, setSessionHookEnabled] = useState(() => localStorage.getItem('arcadia-session-hook') === 'true');
@@ -1324,7 +1323,7 @@ export function SecondBrainPanel() {
   // Execute pending skill test when we're on the dashboard
   useEffect(() => {
     if (pendingSkillTest && phase === 'dashboard') {
-      const { command, prompt, name, icon } = pendingSkillTest;
+      const { command, prompt } = pendingSkillTest;
       setPendingSkillTest(null);
       // Execute the skill as a custom command via Claude API
       executeCustomSkillCommand(command, prompt);
@@ -2102,20 +2101,7 @@ Output ONLY the style guide in clean Markdown. Start with a title "# Writing Sty
     cmd.label.toLowerCase().includes(slashFilter)
   );
 
-  // ─── Send follow-up (legacy, now uses unified send) ───────────────────
 
-  const sendFollowUp = useCallback(() => {
-    sendChatMessage();
-  }, [sendChatMessage]);
-
-  // ─── Copy command ───────────────────────────────────────────────────────
-
-  const copyCommand = useCallback((cmd: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    navigator.clipboard.writeText(cmd);
-    setCopiedCommand(cmd);
-    setTimeout(() => setCopiedCommand(null), 2000);
-  }, []);
 
   // ─── Run full automated install ─────────────────────────────────────────
 
